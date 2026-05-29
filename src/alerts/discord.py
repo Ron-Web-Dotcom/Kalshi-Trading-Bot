@@ -230,6 +230,70 @@ class DiscordAlerter:
         )
         await self._post(payload)
 
+    async def best_opportunity_found(
+        self, ticker: str, side: str, price_cents: float,
+        confidence: float, net_ev: Optional[float], exp_profit: Optional[float],
+        score: float, reasoning: str,
+        poly_yes: Optional[float] = None, poly_no: Optional[float] = None,
+        market_title: str = "", paper: bool = True,
+    ) -> None:
+        """Alert fired BEFORE placing the trade — 'here's the best opportunity we found today'."""
+        if not self.cfg.alert_on_trade:
+            return
+        mode_tag   = "📝 PAPER" if paper else "💰 LIVE"
+        score_pct  = f"{score * 100:.1f}"
+        ev_str     = f"{net_ev:.1f}¢" if net_ev is not None else "n/a"
+        profit_str = f"${exp_profit:.2f}" if exp_profit is not None else "n/a"
+
+        fields = [
+            {"name": "Side",         "value": f"**{side.upper()}**",  "inline": True},
+            {"name": "Price",        "value": f"{price_cents:.0f}¢",  "inline": True},
+            {"name": "Confidence",   "value": f"{confidence:.0f}%",   "inline": True},
+            {"name": "Net EV",       "value": ev_str,                  "inline": True},
+            {"name": "Exp. Profit",  "value": profit_str,              "inline": True},
+            {"name": "Opp. Score",   "value": f"{score_pct}/100",      "inline": True},
+        ]
+        if poly_yes is not None and poly_no is not None:
+            fields.append({
+                "name":  "Polymarket Cross-Check",
+                "value": f"YES {poly_yes:.0f}¢  |  NO {poly_no:.0f}¢",
+                "inline": False,
+            })
+        if reasoning:
+            fields.append({
+                "name":  "🤖 Why this trade",
+                "value": reasoning[:300],
+                "inline": False,
+            })
+
+        title_line = f"\n_{market_title[:80]}_" if market_title else ""
+        payload = self._embed(
+            title=f"🎯 {mode_tag} Best Opportunity Found — {ticker}",
+            description=(
+                f"**Placing bet: BUY {side.upper()} on `{ticker}`**{title_line}\n"
+                f"Scanned all markets — this is today's best edge."
+            ),
+            color=0x00BFFF,
+            fields=fields,
+        )
+        await self._post(payload)
+
+    async def no_opportunity(self, markets_scanned: int, paper: bool = True) -> None:
+        """Alert when the bot scans everything and finds nothing worth trading."""
+        if not self.cfg.alert_on_signal:
+            return
+        mode_tag = "📝 PAPER" if paper else "💰 LIVE"
+        payload  = self._embed(
+            title=f"💤 {mode_tag} No Opportunity Today",
+            description=(
+                f"Scanned {markets_scanned} markets across Kalshi + Polymarket.\n"
+                f"Nothing cleared the confidence + profit threshold.\n"
+                f"**Sitting out — cash is a valid position.**"
+            ),
+            color=0x808080,
+        )
+        await self._post(payload)
+
     async def ai_reeval_hold(self, ticker: str, side: str, pct_change: float,
                               reasoning: str, paper: bool = True) -> None:
         """Alert when AI re-evaluates a position and decides to HOLD (optional — only if ALERT_ON_SIGNAL)."""

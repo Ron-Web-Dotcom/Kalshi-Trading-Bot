@@ -75,9 +75,10 @@ class TradingConfig:
     avoid_overtrading_minutes: int = field(default_factory=lambda: _env_int("OVERTRADE_COOLDOWN_MINUTES", 5))
 
     # Cycle limits (configurable without code changes)
-    max_trades_per_cycle: int = field(default_factory=lambda: _env_int("MAX_TRADES_PER_CYCLE", 3))
-    max_markets_to_scan: int = field(default_factory=lambda: _env_int("MAX_MARKETS_TO_SCAN", 20))
-    min_market_volume: float = field(default_factory=lambda: _env_float("MIN_MARKET_VOLUME", 50.0))
+    max_trades_per_cycle: int = field(default_factory=lambda: _env_int("MAX_TRADES_PER_CYCLE", 1))
+    max_trades_per_day: int   = field(default_factory=lambda: _env_int("MAX_TRADES_PER_DAY", 1))
+    max_markets_to_scan: int  = field(default_factory=lambda: _env_int("MAX_MARKETS_TO_SCAN", 50))
+    min_market_volume: float  = field(default_factory=lambda: _env_float("MIN_MARKET_VOLUME", 100.0))
 
     # Kelly criterion
     kelly_fraction: float = field(default_factory=lambda: _env_float("KELLY_FRACTION", 0.25))

@@ -212,127 +212,136 @@ async def run_trading_job(db=None) -> TradingResults:
                             poly_price=sig["poly_price"],
                         )
 
-        # ── 5. AI decisions on top non-arb markets ────────────────────────────
+        # ── 5. Daily trade gate — sit out if already traded today ────────────────
+        from datetime import date as _date
+        today = _date.today().isoformat()
+        trades_today_row = await db.fetchone(
+            "SELECT COUNT(*) AS n FROM trade_logs WHERE paper_trade=1 AND executed_at >= ?",
+            (today + "T00:00:00",)
+        )
+        trades_today = (trades_today_row or {}).get("n", 0)
+        max_per_day  = settings.trading.max_trades_per_day
+
+        if trades_today >= max_per_day and trades_this_cycle == 0:
+            logger.info(
+                "Daily trade limit reached (%d/%d today) — sitting out this cycle",
+                trades_today, max_per_day,
+            )
+            return results
+
+        # ── 6. Best-opportunity hunt (scores ALL candidates, picks the ONE best) ─
+        from src.strategy.opportunity import OpportunityHunter
+
         arb_tickers = {s["ticker"] for s in all_signals}
-
-        # Smart pre-filter and scoring before AI scan
-        # Score = volume-weighted tradability; exclude near-certain and dead markets
-        def _score_candidate(m: Dict) -> float:
-            yes_ask = m.get("yes_ask", 0)
-            no_ask  = m.get("no_ask", 0)
-            volume  = m.get("volume", 0)
-            if yes_ask <= 5 or yes_ask >= 95:   # near-certain → skip
-                return -1.0
-            if no_ask <= 5 or no_ask >= 95:
-                return -1.0
-            if volume < min_vol:
-                return -1.0
-            # Markets near 50¢ have most uncertainty = most opportunity
-            distance_from_50 = abs(yes_ask - 50)
-            uncertainty_bonus = max(0, 25 - distance_from_50)   # 0–25
-            return volume * 0.001 + uncertainty_bonus
-
-        candidates = [
+        candidates  = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
-            and _score_candidate(m) > 0
-        ]
-        candidates.sort(key=_score_candidate, reverse=True)
-        candidates = candidates[:max_scan]
+            and 5 < m.get("yes_ask", 0) < 95
+            and m.get("volume", 0) >= min_vol
+        ][:max_scan]
 
         logger.info(
-            "── AI Decisions (%d scored candidates, cap=%d remaining) ─────",
-            len(candidates), max_trades - trades_this_cycle,
+            "── Best-Opportunity Hunt (%d candidates after pre-filter) ─────",
+            len(candidates),
         )
 
-        for market in candidates:
-            if trades_this_cycle >= max_trades:
-                logger.info("Trade cap (%d) reached — stopping AI scan", max_trades)
-                break
+        hunter = OpportunityHunter(db=db)
+        best   = await hunter.find_best(
+            markets     = candidates,
+            arb_signals = all_signals,
+            poly_comps  = ext_comps,
+            min_score   = 0.05,
+        )
 
-            ticker  = market.get("ticker", "")
-            yes_ask = market.get("yes_ask", 0)
-            no_ask  = market.get("no_ask", 0)
-            volume  = market.get("volume", 0)
-            title   = (market.get("title") or "")[:50]
-
-            logger.debug(
-                "AI eval: %-30s | YES=%g¢ NO=%g¢ | vol=%g | %s",
-                ticker, yes_ask, no_ask, volume, title,
-            )
-
-            decision = await make_decision_for_market(market, all_signals, db=db)
-            if not decision:
-                logger.info(
-                    "SKIP %s | AI → HOLD or conf < %.0f%%",
-                    ticker, settings.trading.min_ai_confidence,
+        if not best:
+            try:
+                await discord.no_opportunity(
+                    markets_scanned=len(candidates), paper=not live_mode
                 )
-                results.skipped += 1
-                continue
+            except Exception:
+                pass
 
-            # Use the side the AI chose; pick correct ask price for that side
-            side  = decision.get("side", "yes")
-            price = yes_ask if side == "yes" else no_ask
-            net_ev = decision.get("net_ev")
-            ev_str = f" | EV={net_ev:.1f}¢" if net_ev is not None else ""
+        if best and trades_this_cycle < max_trades:
+            market   = best["market"]
+            decision = best["decision"]
+            poly_comp= best.get("poly_comp")
+            side     = best["side"]
+            price    = best["price_cents"]
+            ticker   = market.get("ticker", "")
+            net_ev   = decision.get("net_ev")
 
-            # Final EV sanity check on actual price
-            if price <= 0 or price >= 100:
-                logger.info("SKIP %s | %s ask=%.0f¢ out of range", ticker, side.upper(), price)
-                results.skipped += 1
-                continue
-
-            # ── Profit gate: require minimum ROI AND minimum dollar profit ──────
-            # Estimate expected profit based on planned position size
-            planned_size_usd = scaler.current_size   # dollars to deploy
+            # Profit gate
+            planned_size_usd = scaler.current_size
             contracts_est    = (planned_size_usd / (price / 100)) if price > 0 else 0
             exp_profit_usd   = contracts_est * (net_ev / 100) if net_ev is not None else None
             roi_pct          = (exp_profit_usd / planned_size_usd * 100) if (exp_profit_usd and planned_size_usd) else None
-
             min_roi = settings.trading.min_profit_roi_pct
             min_abs = settings.trading.min_profit_abs_usd
 
-            if exp_profit_usd is not None and roi_pct is not None:
-                if exp_profit_usd < min_abs or roi_pct < min_roi:
-                    logger.info(
-                        "SKIP %s | Profit gate: expected $%.2f (%.1f%% ROI) < min $%.2f / %.1f%%",
-                        ticker, exp_profit_usd, roi_pct, min_abs, min_roi,
-                    )
-                    results.skipped += 1
-                    continue
-                ev_str += f" | exp_profit=${exp_profit_usd:.2f} ({roi_pct:.1f}% ROI)"
-
-            logger.info(
-                "AI signal: %s → BUY %s @ %.0f¢ | conf=%.0f%%%s | %s",
-                ticker, side.upper(), price, decision["confidence"], ev_str,
-                decision["reasoning"][:80],
-            )
-
-            allowed, reason = risk.check_trade(
-                ticker, scaler.current_size,
-                current_positions=[], portfolio_value=portfolio_val,
-            )
-            if not allowed:
-                logger.info("SKIP %s | Risk gate: %s", ticker, reason)
+            if exp_profit_usd is not None and (exp_profit_usd < min_abs or (roi_pct or 0) < min_roi):
+                logger.info(
+                    "Best opportunity SKIPPED — profit gate: $%.2f (%.1f%% ROI) < min $%.2f / %.1f%%",
+                    exp_profit_usd, roi_pct or 0, min_abs, min_roi,
+                )
                 results.skipped += 1
-                continue
+            else:
+                allowed, reason = risk.check_trade(
+                    ticker, scaler.current_size,
+                    current_positions=[], portfolio_value=portfolio_val,
+                )
+                if not allowed:
+                    logger.info("Best opportunity BLOCKED by risk gate: %s", reason)
+                    results.skipped += 1
+                else:
+                    poly_str = ""
+                    if poly_comp:
+                        poly_str = (
+                            f" | Poly_YES={poly_comp['poly_yes']:.0f}¢"
+                            f" Poly_NO={poly_comp['poly_no']:.0f}¢"
+                        )
+                    logger.info(
+                        "TAKING BEST OPPORTUNITY: %s BUY %s @ %.0f¢ | "
+                        "score=%.3f conf=%d%% EV=%.1f¢ exp_profit=$%.2f%s",
+                        ticker, side.upper(), price,
+                        best["score"], decision.get("confidence", 0),
+                        net_ev or 0, exp_profit_usd or 0, poly_str,
+                    )
 
-            rec = await trader.execute(
-                ticker=ticker,
-                action=decision["action"],
-                side=side,
-                price_cents=price,
-                ai_confidence=decision["confidence"],
-                ai_reasoning=decision["reasoning"],
-                signal_source=decision.get("model", "ai"),
-                net_ev=decision.get("net_ev"),
-                market_title=market.get("title", ""),
-            )
-            if rec:
-                trades_this_cycle += 1
-                results.total_positions += 1
-                results.total_capital_used += rec.get("total_cost", 0)
-                results.ai_trades += 1
+                    # Discord: notify we found the best opportunity before placing
+                    try:
+                        await discord.best_opportunity_found(
+                            ticker=ticker,
+                            side=side,
+                            price_cents=price,
+                            confidence=decision.get("confidence", 0),
+                            net_ev=net_ev,
+                            exp_profit=exp_profit_usd,
+                            score=best["score"],
+                            reasoning=decision.get("reasoning", ""),
+                            poly_yes=poly_comp["poly_yes"] if poly_comp else None,
+                            poly_no=poly_comp["poly_no"]  if poly_comp else None,
+                            market_title=market.get("title", ""),
+                            paper=not live_mode,
+                        )
+                    except Exception:
+                        pass
+
+                    rec = await trader.execute(
+                        ticker=ticker,
+                        action=decision["action"],
+                        side=side,
+                        price_cents=price,
+                        ai_confidence=decision["confidence"],
+                        ai_reasoning=decision["reasoning"],
+                        signal_source=decision.get("model", "ai"),
+                        net_ev=net_ev,
+                        market_title=market.get("title", ""),
+                    )
+                    if rec:
+                        trades_this_cycle += 1
+                        results.total_positions += 1
+                        results.total_capital_used += rec.get("total_cost", 0)
+                        results.ai_trades += 1
 
     except Exception as e:
         logger.error("Trade job crashed: %s", e, exc_info=True)

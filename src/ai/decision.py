@@ -57,11 +57,25 @@ class AIDecisionEngine:
                     f"diff={s.get('diff_pct', 0):.1f}% | net edge={s.get('edge_cents', 0):.1f}¢"
                 )
 
+        # Polymarket cross-reference (injected by opportunity hunter when available)
+        poly_yes   = market.get("poly_yes")
+        poly_no    = market.get("poly_no")
+        poly_block = ""
+        if poly_yes is not None and poly_no is not None:
+            poly_diff_yes = poly_yes - yes_ask
+            poly_diff_no  = poly_no  - no_ask
+            poly_block = (
+                f"\n=== POLYMARKET CROSS-REFERENCE ===\n"
+                f"Polymarket YES: {poly_yes:.0f}¢  |  Polymarket NO: {poly_no:.0f}¢\n"
+                f"Gap vs Kalshi: YES {poly_diff_yes:+.0f}¢  |  NO {poly_diff_no:+.0f}¢\n"
+                f"(Polymarket is an independent prediction market — significant gaps suggest mispricing on one platform)"
+            )
+
         # Pre-compute EV helpers so Claude reasons correctly
-        yes_ev_if_true = (100 - yes_ask) * 0.98   # profit if YES resolves; 2% fee
-        no_ev_if_true  = (100 - no_ask)  * 0.98   # profit if NO resolves
+        yes_ev_if_true = (100 - yes_ask) * 0.98
+        no_ev_if_true  = (100 - no_ask)  * 0.98
         spread         = yes_ask + no_ask - 100
-        liquidity      = ("LOW" if volume < 100 else "HIGH" if volume > 10000 else "MEDIUM")
+        liquidity      = "LOW" if volume < 100 else "HIGH" if volume > 10000 else "MEDIUM"
         context_block  = f"\n\n--- REAL-WORLD CONTEXT ---\n{context}\n--- END CONTEXT ---" if context else ""
 
         return f"""You are an expert quantitative prediction market trader. Your ONLY goal is to find bets where your estimated true probability beats the market price by enough to profit after fees.
@@ -71,41 +85,39 @@ Ticker:   {ticker}
 Question: {title}
 Closes:   {close_time}
 
-=== PRICES (in cents, market pays 100¢ on correct resolution) ===
-YES ask: {yes_ask:.0f}¢  → market implies {yes_ask:.0f}% chance YES resolves
-NO ask:  {no_ask:.0f}¢  → market implies {no_ask:.0f}% chance NO resolves
-Spread:  {spread:.0f}¢ (YES+NO sum; ideally 100¢, excess is market maker profit)
-Volume:  {volume:,}  |  Open interest: {open_interest:,}  |  Liquidity: {liquidity}
-
-=== EXPECTED VALUE (per contract, after 2% Kalshi fee) ===
-If you BUY YES @ {yes_ask:.0f}¢: you win {yes_ev_if_true:.1f}¢ if YES, lose {yes_ask:.0f}¢ if NO
-If you BUY NO  @ {no_ask:.0f}¢: you win {no_ev_if_true:.1f}¢ if NO,  lose {no_ask:.0f}¢ if YES
-For BUY YES to have +EV: your true P(YES) must exceed {yes_ask/98*100:.1f}%
-For BUY NO  to have +EV: your true P(NO)  must exceed {no_ask/98*100:.1f}%
+=== KALSHI PRICES (cents — market pays 100¢ on correct resolution) ===
+YES ask: {yes_ask:.0f}¢  → Kalshi implies {yes_ask:.0f}% YES probability
+NO ask:  {no_ask:.0f}¢  → Kalshi implies {no_ask:.0f}% NO probability
+Spread:  {spread:.0f}¢  |  Volume: {volume:,}  |  Liquidity: {liquidity}
+{poly_block}
+=== EXPECTED VALUE on Kalshi (per contract, after 2% fee) ===
+BUY YES @ {yes_ask:.0f}¢ → win {yes_ev_if_true:.1f}¢ if YES  |  lose {yes_ask:.0f}¢ if NO  |  break-even P(YES) = {yes_ask/98*100:.1f}%
+BUY NO  @ {no_ask:.0f}¢ → win {no_ev_if_true:.1f}¢ if NO   |  lose {no_ask:.0f}¢ if YES |  break-even P(NO)  = {no_ask/98*100:.1f}%
 {arb_text}{context_block}
 
 === YOUR TASK ===
-Step 1 — Use the real-world context above to estimate the TRUE probability of YES resolving.
-Step 2 — Compare to market price. Calculate net EV = (true_prob - market_price/100) * 98¢.
-Step 3 — Only BUY if |net_ev| > 4¢ AND volume >= 100 AND price is between 5¢ and 95¢.
-Step 4 — Choose the side (YES or NO) with positive EV.
+Step 1 — Use the real-world context AND the Polymarket cross-reference (if present) to estimate TRUE P(YES).
+         Polymarket having a significantly different price is a strong signal one platform is wrong.
+Step 2 — Compute net EV = (your_true_prob/100 - kalshi_price/100) × 98¢  for the better side.
+Step 3 — BUY only if: |net_ev| > 4¢  AND  volume ≥ 100  AND  price between 5–95¢  AND  context supports it.
+Step 4 — HOLD if context is thin or the edge is marginal. Cash is a valid position.
 
-Respond ONLY with this exact JSON (no markdown, no explanation outside it):
+Respond ONLY with this exact JSON (no markdown):
 {{
-  "true_prob_yes": <your estimated probability 0-100 that YES resolves>,
+  "true_prob_yes": <your estimated 0-100 probability that YES resolves>,
   "action": "BUY" | "HOLD",
   "side": "yes" | "no" | null,
-  "net_ev_cents": <expected profit per contract in cents, negative if unfavourable>,
-  "confidence": <integer 0-100 — how certain you are of your true_prob estimate>,
-  "reasoning": "<2-3 sentences: what facts from context drove your probability estimate and why>"
+  "net_ev_cents": <expected profit per contract after fee, negative = unfavourable>,
+  "confidence": <integer 0-100 — certainty in your true_prob estimate>,
+  "reasoning": "<2-3 sentences citing specific facts that drove your estimate>"
 }}
 
-Critical rules:
-- Base true_prob on FACTS from the context block, not gut feeling. If no context, be very conservative.
-- confidence reflects certainty in your probability estimate, not how much you like the trade
-- confidence >= {self.trading_cfg.min_ai_confidence:.0f} required to place a trade
-- If context is missing or insufficient to form a strong view → HOLD
-- HOLD is almost always safer than a poorly-supported BUY"""
+Rules:
+- true_prob must be driven by FACTS from context, not gut feel. No context = be very conservative.
+- Polymarket price divergence is a useful signal but not sufficient alone — check the real-world data.
+- confidence = certainty in your probability, not excitement about the trade
+- confidence ≥ {self.trading_cfg.min_ai_confidence:.0f} required to place a trade
+- HOLD is almost always safer than a weakly-supported BUY"""
 
     async def decide(self, market: Dict, signals: List[Dict] = []) -> AIDecision:
         ticker = market.get("ticker", "UNKNOWN")
