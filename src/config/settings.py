@@ -74,6 +74,7 @@ class TradingConfig:
 
     # AI thresholds
     min_ai_confidence: float = field(default_factory=lambda: _env_float("MIN_AI_CONFIDENCE", 70.0))
+    min_confidence_to_trade: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE_TO_TRADE", 0.45))
 
     # AI budget
     daily_ai_budget: float = field(default_factory=lambda: _env_float("DAILY_AI_BUDGET", 10.0))

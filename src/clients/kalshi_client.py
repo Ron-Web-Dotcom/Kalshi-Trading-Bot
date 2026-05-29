@@ -179,6 +179,21 @@ class KalshiClient:
     async def cancel_order(self, order_id: str) -> Dict:
         return await self._request("DELETE", f"/portfolio/orders/{order_id}")
 
+    # ── Aliases for backward-compat with cli.py ──────────────────────────────
+
+    async def get_orderbook(self, ticker: str, depth: int = 10) -> Dict:
+        return await self.get_market_orderbook(ticker, depth)
+
+    async def place_order(self, ticker: str, side: str, action: str,
+                          count: int, type_: str = "limit",
+                          yes_price: int = 0, no_price: int = 0,
+                          client_order_id: str = "") -> Dict:
+        price = yes_price if side == "yes" else no_price
+        return await self.create_order(
+            ticker=ticker, side=side, action=action,
+            count=count, price=price, order_type=type_
+        )
+
     async def close(self) -> None:
         if self._client and not self._client.is_closed:
             await self._client.aclose()

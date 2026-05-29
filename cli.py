@@ -80,12 +80,12 @@ def cmd_run(args: argparse.Namespace) -> None:
     from src.strategies.portfolio_enforcer import PortfolioEnforcer
 
     # Apply disciplined settings overrides
-    from src.config import settings as cfg
-    cfg.settings.trading.min_confidence_to_trade = 0.45  # LOOSENED from 0.65 (approved 2026-03-29)
-    cfg.settings.trading.max_position_size_pct = 3.0
-    cfg.settings.trading.kelly_fraction = 0.25
-    cfg.max_drawdown = 0.15
-    cfg.max_sector_exposure = 0.30
+    from src.config.settings import settings as cfg
+    cfg.trading.min_confidence_to_trade = 0.45
+    cfg.trading.max_position_size_pct = 3.0
+    cfg.trading.kelly_fraction = 0.25
+    cfg.trading.max_drawdown_pct = 15.0
+    cfg.trading.max_sector_exposure_pct = 30.0
 
     bot = BeastModeBot(live_mode=live_mode)
     try:
@@ -148,28 +148,23 @@ def _run_safe_compounder(
 
 
 def cmd_dashboard(args: argparse.Namespace) -> None:
-    """Launch the Streamlit monitoring dashboard."""
-    import subprocess
+    """Launch the real-time monitoring dashboard."""
+    from src.utils.logging_setup import setup_logging
+    setup_logging(log_level="INFO")
 
-    # Prefer the dedicated dashboard launch script if it exists.
-    dashboard_script = Path(__file__).parent / "scripts" / "launch_dashboard.py"
-    beast_dashboard = Path(__file__).parent / "scripts" / "beast_mode_dashboard.py"
-
-    if dashboard_script.exists():
-        subprocess.run([sys.executable, str(dashboard_script)], check=False)
-    elif beast_dashboard.exists():
-        # Fall back to running the dashboard module directly.
-        from src.utils.logging_setup import setup_logging
-        from beast_mode_bot import BeastModeBot
-
-        setup_logging(log_level="INFO")
-        bot = BeastModeBot(live_mode=False, dashboard_mode=True)
+    # Try beast_mode_dashboard first (rich terminal UI), then bot dashboard mode
+    try:
+        from beast_mode_dashboard import BeastModeDashboard
+        async def _run():
+            d = BeastModeDashboard()
+            await d.db_manager.initialize()
+            await d.show_live_dashboard()
         try:
-            asyncio.run(bot.run())
+            asyncio.run(_run())
         except KeyboardInterrupt:
             print("\nDashboard stopped by user.")
-    else:
-        print("Error: No dashboard script found.")
+    except Exception as exc:
+        print(f"Dashboard error: {exc}")
         sys.exit(1)
 
 

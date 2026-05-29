@@ -25,8 +25,28 @@ class CategoryScorer:
     def __init__(self, scores: Dict[str, float] = None):
         self.scores = scores or DEFAULT_SCORES
 
+    async def initialize(self) -> None:
+        pass  # No async setup needed
+
     def score(self, category: str) -> float:
         return self.scores.get(category, 50.0)
 
     def all_scores(self) -> Dict[str, float]:
         return dict(self.scores)
+
+    async def get_all_scores(self) -> Dict[str, float]:
+        return self.all_scores()
+
+    def format_scores_table(self, scores: Dict[str, float]) -> str:
+        lines = [
+            "=" * 48,
+            "  CATEGORY SCORES",
+            "=" * 48,
+            f"  {'Category':<22} {'Score':>6}  {'Alloc %':>8}",
+            f"  {'-'*22} {'-'*6}  {'-'*8}",
+        ]
+        for cat, score in sorted(scores.items(), key=lambda x: -x[1]):
+            alloc = f"{score * 0.3:.1f}%"
+            lines.append(f"  {cat:<22} {score:>6.0f}  {alloc:>8}")
+        lines.append("=" * 48)
+        return "\n".join(lines)

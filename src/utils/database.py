@@ -140,6 +140,27 @@ class DatabaseManager:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
 
+    # ── Convenience query helpers used by dashboard / cli ────────────────────
+
+    async def get_open_positions(self) -> list:
+        return await self.fetchall("SELECT * FROM positions WHERE status='open'")
+
+    async def get_eligible_markets(self, volume_min: float = 0,
+                                    max_days_to_expiry: int = 365) -> list:
+        return await self.fetchall(
+            "SELECT * FROM markets WHERE status='open' AND volume >= ?",
+            (volume_min,)
+        )
+
+    async def get_daily_ai_cost(self) -> float:
+        from datetime import date
+        today = date.today().isoformat()
+        row = await self.fetchone(
+            "SELECT SUM(cost_usd) as total FROM ai_decisions WHERE decided_at LIKE ?",
+            (today + "%",)
+        )
+        return row.get("total") or 0.0 if row else 0.0
+
     async def insert(self, table: str, data: Dict[str, Any]) -> int:
         cols = ", ".join(data.keys())
         placeholders = ", ".join("?" * len(data))
