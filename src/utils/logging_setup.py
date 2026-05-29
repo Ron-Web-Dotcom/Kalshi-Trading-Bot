@@ -1,4 +1,4 @@
-"""Logging setup — structured console + file logging."""
+"""Structured logging — color-coded console + rotating daily file."""
 
 import logging
 import os
@@ -8,32 +8,66 @@ from typing import Optional
 
 _loggers: dict = {}
 
+# ANSI colors for console (disabled on Windows if not supported)
+_RESET  = "\033[0m"
+_BOLD   = "\033[1m"
+_COLORS = {
+    "DEBUG":    "\033[36m",   # cyan
+    "INFO":     "\033[32m",   # green
+    "WARNING":  "\033[33m",   # yellow
+    "ERROR":    "\033[31m",   # red
+    "CRITICAL": "\033[35m",   # magenta
+}
+
+
+class _ColorFormatter(logging.Formatter):
+    """Console formatter with color-coded level labels."""
+
+    _use_color: bool = sys.stdout.isatty() or os.environ.get("FORCE_COLOR") == "1"
+
+    def format(self, record: logging.LogRecord) -> str:
+        levelname = record.levelname
+        if self._use_color:
+            color = _COLORS.get(levelname, "")
+            record.levelname = f"{color}{_BOLD}{levelname:<8}{_RESET}"
+        else:
+            record.levelname = f"{levelname:<8}"
+        return super().format(record)
+
 
 def setup_logging(log_level: str = "INFO") -> None:
+    """Configure root logger with clean console + file handlers."""
     from src.config.settings import settings
 
-    level = getattr(logging, log_level.upper(), logging.INFO)
-    fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    level   = getattr(logging, log_level.upper(), logging.INFO)
     datefmt = "%Y-%m-%d %H:%M:%S"
 
     handlers: list[logging.Handler] = []
 
+    # ── Console ──────────────────────────────────────────────────────────────
     if settings.logging.enable_console_logging:
-        ch = logging.StreamHandler(sys.stdout)
+        fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+        ch  = logging.StreamHandler(sys.stdout)
         ch.setLevel(level)
-        ch.setFormatter(logging.Formatter(fmt, datefmt))
+        ch.setFormatter(_ColorFormatter(fmt, datefmt))
         handlers.append(ch)
 
+    # ── File (plain, no ANSI) ─────────────────────────────────────────────────
     if settings.logging.enable_file_logging:
         os.makedirs(settings.logging.log_dir, exist_ok=True)
         log_file = os.path.join(
             settings.logging.log_dir,
-            f"bot_{datetime.now().strftime('%Y%m%d')}.log"
+            f"bot_{datetime.now().strftime('%Y%m%d')}.log",
         )
-        fh = logging.FileHandler(log_file)
+        fmt = "%(asctime)s [%(levelname)-8s] %(name)s: %(message)s"
+        fh  = logging.FileHandler(log_file, encoding="utf-8")
         fh.setLevel(level)
         fh.setFormatter(logging.Formatter(fmt, datefmt))
         handlers.append(fh)
+
+    # Silence noisy third-party loggers
+    for noisy in ("httpx", "httpcore", "anthropic", "asyncio"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
     logging.basicConfig(level=level, handlers=handlers, force=True)
 
