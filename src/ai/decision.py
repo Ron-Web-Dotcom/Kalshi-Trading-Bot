@@ -37,7 +37,7 @@ class AIDecisionEngine:
             self._client = anthropic.Anthropic(api_key=self.cfg.anthropic_api_key)
         return self._client
 
-    def _build_prompt(self, market: Dict, signals: List[Dict]) -> str:
+    def _build_prompt(self, market: Dict, signals: List[Dict], context: str = "") -> str:
         ticker = market.get("ticker", "")
         title = market.get("title", "")
         yes_ask = market.get("yes_ask", 0)
@@ -58,6 +58,7 @@ class AIDecisionEngine:
         implied_no = no_ask
         spread = yes_ask + no_ask - 100
         liquidity_note = "LOW LIQUIDITY" if volume < 100 else ("HIGH LIQUIDITY" if volume > 10000 else "MEDIUM LIQUIDITY")
+        context_block = f"\n\nReal-world context:\n{context}" if context else ""
 
         return f"""You are a quantitative prediction market analyst. Analyze this Kalshi market and decide whether to trade.
 
@@ -69,7 +70,7 @@ Market spread cost: {spread:.0f}¢ (YES+NO ask = {yes_ask+no_ask:.0f}¢; you pay
 Volume: {volume:,}  |  Open interest: {open_interest:,}  |  Liquidity: {liquidity_note}
 Closes: {close_time}
 Kalshi taker fee: ~2% of notional (already factored into minimum edge requirement)
-{signal_text}
+{signal_text}{context_block}
 
 Evaluate: Does a genuine edge exist AFTER accounting for the spread and 2% fee?
 
@@ -96,7 +97,13 @@ Rules:
             logger.warning("No ANTHROPIC_API_KEY set — using rule-based fallback")
             return self._rule_based_decision(market, signals)
 
-        prompt = self._build_prompt(market, signals)
+        try:
+            from src.data.context_builder import build_market_context
+            context = await build_market_context(market)
+        except Exception:
+            context = ""
+
+        prompt = self._build_prompt(market, signals, context)
         try:
             client = self._get_client()
             # Use sync client in async context via run_in_executor
