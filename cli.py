@@ -299,21 +299,21 @@ def cmd_history(args: argparse.Namespace) -> None:
                 print(f"  Avg per trade: ${(pnl/total):.2f}")
             print()
 
-            # Category breakdown
+            # Source breakdown (signal_source = strategy equivalent)
             cursor = await db.execute("""
                 SELECT
-                    strategy as category,
+                    signal_source as category,
                     COUNT(*) as trades,
                     SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins,
-                    SUM(pnl) as total_pnl
+                    SUM(COALESCE(pnl, 0)) as total_pnl
                 FROM trade_logs
-                GROUP BY strategy
+                GROUP BY signal_source
                 ORDER BY total_pnl DESC
             """)
             cats = await cursor.fetchall()
 
             if cats:
-                print(f"  {'Category':<22} {'Trades':>7} {'WR':>6} {'P&L':>10}")
+                print(f"  {'Source':<22} {'Trades':>7} {'WR':>6} {'P&L':>10}")
                 print(f"  {'-'*22} {'-'*7} {'-'*6} {'-'*10}")
                 for row in cats:
                     cat = row["category"] or "unknown"
@@ -324,36 +324,27 @@ def cmd_history(args: argparse.Namespace) -> None:
                     print(f"  {cat:<22} {t:>7} {wr:>6} ${p:>9.2f}")
                 print()
 
-            # Recent trades
+            # Recent trades (uses actual schema column names)
             cursor = await db.execute(f"""
-                SELECT market_id, side, entry_price, exit_price, quantity, pnl,
-                       entry_timestamp, strategy
+                SELECT ticker, action, side, price, contracts,
+                       COALESCE(pnl, 0) as pnl, executed_at, signal_source
                 FROM trade_logs
-                ORDER BY entry_timestamp DESC
+                ORDER BY executed_at DESC
                 LIMIT {limit}
             """)
             trades = await cursor.fetchall()
 
             if trades:
                 print(f"  Recent {limit} trades:")
-                print(f"  {'Market':<28} {'Side':>4} {'Entry':>6} {'Exit':>6} {'Qty':>4} {'P&L':>8} {'Category'}")
-                print(f"  {'-'*28} {'-'*4} {'-'*6} {'-'*6} {'-'*4} {'-'*8} {'-'*12}")
+                print(f"  {'Market':<28} {'Act':>4} {'Side':>4} {'Price':>6} {'Qty':>4} {'P&L':>8}  Source")
+                print(f"  {'-'*28} {'-'*4} {'-'*4} {'-'*6} {'-'*4} {'-'*8}  {'-'*12}")
                 for t in trades:
-                    ts = (t["entry_timestamp"] or "")[:10]
-                    cat = t["strategy"] or ""
+                    source = (t["signal_source"] or "")[:12]
+                    pnl = t["pnl"] or 0.0
                     print(
-                        f"  {t['market_id'][:28]:<28} {t['side']:>4} "
-                        f"{t['entry_price']:>6.2f} {t['exit_price']:>6.2f} "
-                        f"{t['quantity']:>4} ${t['pnl']:>7.2f}  {cat}"
+                        f"  {t['ticker'][:28]:<28} {t['action']:>4} {t['side']:>4} "
+                        f"{t['price']:>6.0f}¢ {t['contracts']:>4} ${pnl:>7.2f}  {source}"
                     )
-
-            # Blocked trades summary
-            cursor2 = await db.execute("""
-                SELECT COUNT(*) FROM blocked_trades
-            """)
-            r2 = await cursor2.fetchone()
-            if r2 and r2[0]:
-                print(f"\n  ⛔ {r2[0]} trades blocked by portfolio enforcer (use 'python cli.py health' for details)")
 
             print("=" * 70)
 

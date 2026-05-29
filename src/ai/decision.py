@@ -156,13 +156,16 @@ Rules:
         yes_ask = market.get("yes_ask", 50)
         volume = market.get("volume", 0)
 
-        # Check for arbitrage signal
+        # Check for arbitrage signal — scale confidence with edge size
         for s in signals:
-            if s.get("ticker") == ticker and s.get("diff_pct", 0) >= 5:
+            diff = s.get("diff_pct", 0)
+            if s.get("ticker") == ticker and diff >= 5:
+                # 5% diff → 72%, 10% diff → 80%, 20%+ diff → 90% cap
+                confidence = min(70.0 + diff, 90.0)
                 return AIDecision(
                     action="BUY",
-                    confidence=65.0,
-                    reasoning=f"Arbitrage signal: {s.get('diff_pct', 0):.1f}% price difference detected",
+                    confidence=confidence,
+                    reasoning=f"Arbitrage signal: {diff:.1f}% price difference detected",
                     model="rule_based",
                     ticker=ticker,
                 )
