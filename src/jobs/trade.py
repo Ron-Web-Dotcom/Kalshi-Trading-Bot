@@ -282,6 +282,26 @@ async def run_trading_job(db=None) -> TradingResults:
                 results.skipped += 1
                 continue
 
+            # ── Profit gate: require minimum ROI AND minimum dollar profit ──────
+            # Estimate expected profit based on planned position size
+            planned_size_usd = scaler.current_size   # dollars to deploy
+            contracts_est    = (planned_size_usd / (price / 100)) if price > 0 else 0
+            exp_profit_usd   = contracts_est * (net_ev / 100) if net_ev is not None else None
+            roi_pct          = (exp_profit_usd / planned_size_usd * 100) if (exp_profit_usd and planned_size_usd) else None
+
+            min_roi = settings.trading.min_profit_roi_pct
+            min_abs = settings.trading.min_profit_abs_usd
+
+            if exp_profit_usd is not None and roi_pct is not None:
+                if exp_profit_usd < min_abs or roi_pct < min_roi:
+                    logger.info(
+                        "SKIP %s | Profit gate: expected $%.2f (%.1f%% ROI) < min $%.2f / %.1f%%",
+                        ticker, exp_profit_usd, roi_pct, min_abs, min_roi,
+                    )
+                    results.skipped += 1
+                    continue
+                ev_str += f" | exp_profit=${exp_profit_usd:.2f} ({roi_pct:.1f}% ROI)"
+
             logger.info(
                 "AI signal: %s → BUY %s @ %.0f¢ | conf=%.0f%%%s | %s",
                 ticker, side.upper(), price, decision["confidence"], ev_str,

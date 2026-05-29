@@ -86,6 +86,14 @@ class TradingConfig:
     min_ai_confidence: float = field(default_factory=lambda: _env_float("MIN_AI_CONFIDENCE", 70.0))
     min_confidence_to_trade: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE_TO_TRADE", 0.45))
 
+    # Minimum profit requirements — only trade when expected gain clears BOTH bars
+    min_profit_roi_pct: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ROI_PCT", 1.0))
+    min_profit_abs_usd: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ABS_USD", 5.0))
+
+    # AI position re-evaluation — check open positions against fresh data each cycle
+    enable_ai_reeval: bool  = field(default_factory=lambda: _env_bool("ENABLE_AI_REEVAL", True))
+    reeval_min_confidence: float = field(default_factory=lambda: _env_float("REEVAL_MIN_CONFIDENCE", 75.0))
+
     # AI budget
     daily_ai_budget: float = field(default_factory=lambda: _env_float("DAILY_AI_BUDGET", 10.0))
     enable_daily_cost_limiting: bool = field(default_factory=lambda: _env_bool("ENABLE_COST_LIMITING", True))

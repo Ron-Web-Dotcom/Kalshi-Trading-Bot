@@ -19,13 +19,18 @@ async def run_tracking(db_manager) -> None:
     from src.clients.kalshi_client import KalshiClient
     from src.risk.manager import RiskManager
     from src.config.settings import settings
+    from src.ai.decision import AIDecisionEngine
+    from src.data.context_builder import build_market_context
 
-    stop_loss_pct   = settings.trading.stop_loss_pct
-    take_profit_pct = settings.trading.take_profit_pct
+    stop_loss_pct    = settings.trading.stop_loss_pct
+    take_profit_pct  = settings.trading.take_profit_pct
+    enable_reeval    = settings.trading.enable_ai_reeval
+    reeval_min_conf  = settings.trading.reeval_min_confidence
 
-    kalshi = KalshiClient()
-    risk   = RiskManager(db=db_manager)
-    now    = datetime.now(timezone.utc).isoformat()
+    kalshi  = KalshiClient()
+    risk    = RiskManager(db=db_manager)
+    ai      = AIDecisionEngine(db=db_manager)
+    now     = datetime.now(timezone.utc).isoformat()
 
     try:
         positions: List[Dict] = await db_manager.fetchall(
@@ -79,6 +84,17 @@ async def run_tracking(db_manager) -> None:
                 elif take_profit_pct > 0 and pct_change >= take_profit_pct:
                     close_reason = f"take_profit:{pct_change:.1f}%"
 
+                # ── 4. AI re-evaluation — opt-out if thesis has broken down ──
+                elif enable_reeval:
+                    try:
+                        fresh_context = await build_market_context(mkt | {"ticker": ticker, "title": mkt.get("title", ticker)})
+                        reeval = await ai.evaluate_open_position(pos, mkt | {"ticker": ticker}, fresh_context)
+                        if (reeval["verdict"] == "EXIT"
+                                and reeval["confidence"] >= reeval_min_conf):
+                            close_reason = f"ai_reeval:{reeval['reasoning'][:60]}"
+                    except Exception as re_err:
+                        logger.debug("Re-eval skipped for %s: %s", ticker, re_err)
+
                 if close_reason:
                     await db_manager.execute("""
                         UPDATE positions
@@ -93,14 +109,23 @@ async def run_tracking(db_manager) -> None:
                     )
                     risk.record_trade(ticker, pnl)
                     closed += 1
-                    sign = "+" if pnl >= 0 else ""
+                    sign    = "+" if pnl >= 0 else ""
+                    trigger = (
+                        "RESOLVED"   if close_reason.startswith("resolved") else
+                        "STOP-LOSS"  if close_reason.startswith("stop_loss") else
+                        "TAKE-PROFIT" if close_reason.startswith("take_profit") else
+                        "AI OPT-OUT" if close_reason.startswith("ai_reeval") else
+                        close_reason.upper()
+                    )
                     logger.info(
                         "CLOSED  %-28s  %s  %dx  entry=%.0f¢  exit=%.0f¢  "
                         "PnL=%s$%.2f  [%s]",
                         ticker, side, contracts,
                         avg_price, final_price,
-                        sign, abs(pnl), close_reason,
+                        sign, abs(pnl), trigger,
                     )
+                    if close_reason.startswith("ai_reeval"):
+                        logger.info("  AI opted out: %s", reeval.get("reasoning", "")[:120])
                 else:
                     await db_manager.execute(
                         "UPDATE positions SET current_price=?, pnl=? WHERE id=?",

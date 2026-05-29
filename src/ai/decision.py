@@ -241,3 +241,103 @@ Critical rules:
             decision.action in ("BUY", "SELL")
             and decision.confidence >= self.trading_cfg.min_ai_confidence
         )
+
+    async def evaluate_open_position(
+        self,
+        position: Dict,
+        market: Dict,
+        context: str = "",
+    ) -> Dict:
+        """
+        Re-evaluate an open position against fresh real-world data.
+
+        Returns dict:
+          {"verdict": "HOLD" | "EXIT", "confidence": float, "reasoning": str}
+
+        EXIT means the AI believes the original thesis has broken down and
+        we should close now rather than wait for stop-loss / take-profit.
+        """
+        ticker     = position.get("ticker", "")
+        side       = position.get("side", "yes")
+        avg_price  = float(position.get("avg_price", 0))
+        contracts  = int(position.get("contracts", 0))
+        cur_price  = float(position.get("current_price") or avg_price)
+        unrealised = (cur_price - avg_price) * contracts / 100
+        pct_change = ((cur_price - avg_price) / avg_price * 100) if avg_price else 0
+        title      = market.get("title", "")
+        yes_ask    = market.get("yes_ask", 0)
+        no_ask     = market.get("no_ask", 0)
+        close_time = market.get("close_time", "unknown")
+
+        context_block = f"\n\n--- FRESH REAL-WORLD CONTEXT ---\n{context}\n--- END CONTEXT ---" if context else ""
+
+        prompt = f"""You are reviewing an OPEN prediction market position. Based on the latest real-world data, decide whether to HOLD or EXIT early.
+
+=== OPEN POSITION ===
+Market:    {ticker}
+Question:  {title}
+Our side:  {side.upper()}  (we profit if {side.upper()} resolves)
+Entry:     {avg_price:.0f}¢ per contract
+Current:   {cur_price:.0f}¢ (on the {side} side)
+Contracts: {contracts}
+Unrealised PnL: ${unrealised:+.2f}  ({pct_change:+.1f}% from entry)
+Closes:    {close_time}
+
+=== LIVE MARKET ===
+YES ask: {yes_ask:.0f}¢  |  NO ask: {no_ask:.0f}¢
+{context_block}
+
+=== YOUR TASK ===
+The original bet was that {side.upper()} would resolve. Has that thesis changed?
+
+Answer HOLD if:
+- The real-world evidence still supports our {side.upper()} position
+- Or there is no strong new evidence either way
+
+Answer EXIT if:
+- New facts directly contradict the {side.upper()} thesis with high confidence
+- The situation has fundamentally changed since entry
+- Cutting now (even at a small loss) is clearly better than holding to resolution
+
+Respond ONLY with this JSON (no markdown):
+{{
+  "verdict": "HOLD" | "EXIT",
+  "confidence": <integer 0-100 — how certain you are in this verdict>,
+  "reasoning": "<2-3 sentences explaining what changed or why you're holding>"
+}}
+
+Important: bias toward HOLD — only EXIT when evidence is clear and strong (confidence >= 75)."""
+
+        if not self.cfg.anthropic_api_key:
+            return {"verdict": "HOLD", "confidence": 50, "reasoning": "No AI key — holding by default"}
+
+        try:
+            client = self._get_client()
+            import asyncio
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: client.messages.create(
+                    model=self.cfg.model,
+                    max_tokens=512,
+                    temperature=0.2,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+            )
+            raw = response.content[0].text.strip()
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            data       = json.loads(raw.strip())
+            verdict    = data.get("verdict", "HOLD").upper()
+            confidence = float(data.get("confidence", 50))
+            reasoning  = data.get("reasoning", "")
+            logger.info(
+                "[REEVAL] %s %s → %s | conf=%d%% | %s",
+                ticker, side.upper(), verdict, confidence, reasoning[:80],
+            )
+            return {"verdict": verdict, "confidence": confidence, "reasoning": reasoning}
+        except Exception as e:
+            logger.debug("Re-eval error for %s: %s", ticker, e)
+            return {"verdict": "HOLD", "confidence": 0, "reasoning": f"Re-eval failed: {e}"}
