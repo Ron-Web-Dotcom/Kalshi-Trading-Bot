@@ -6,6 +6,9 @@ from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger("trading.paper_trader")
 
+# Kalshi charges ~2% of notional on each side (taker fee).
+KALSHI_FEE_PCT = 0.02
+
 
 class PaperTrader:
     """
@@ -28,9 +31,13 @@ class PaperTrader:
         """
         Simulate a trade. Returns trade record dict or None if rejected.
         """
-        # Determine trade size
+        # Determine trade size using fractional Kelly when risk manager available
         if forced_size is not None:
             size = forced_size
+        elif self.risk and ai_confidence > 0:
+            size = self.risk.kelly_size(ai_confidence, price_cents)
+            if self.scaler:
+                size *= self.scaler.scale_factor
         elif self.scaler:
             size = self.scaler.current_size
         else:
@@ -42,7 +49,9 @@ class PaperTrader:
             logger.warning(f"Skipping {ticker}: computed 0 contracts")
             return None
 
-        total_cost = contracts * price_cents / 100
+        notional = contracts * price_cents / 100
+        fee = notional * KALSHI_FEE_PCT
+        total_cost = notional + fee
         now = datetime.now(timezone.utc).isoformat()
 
         record = {
@@ -52,6 +61,7 @@ class PaperTrader:
             "contracts": contracts,
             "price": price_cents,
             "total_cost": total_cost,
+            "fee": fee,
             "paper_trade": 1,
             "ai_confidence": ai_confidence,
             "ai_reasoning": ai_reasoning[:500] if ai_reasoning else "",
@@ -90,7 +100,7 @@ class PaperTrader:
         logger.info(
             f"[PAPER TRADE] {action} {side.upper()} {ticker} | "
             f"{contracts} contracts @ {price_cents:.0f}¢ | "
-            f"Cost=${total_cost:.2f} | AI={ai_confidence:.0f}%"
+            f"Cost=${total_cost:.2f} (fee=${fee:.2f}) | AI={ai_confidence:.0f}%"
         )
 
         if self.discord:

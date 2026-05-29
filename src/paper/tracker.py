@@ -57,6 +57,10 @@ async def get_stats(db) -> Dict:
     """)
     if not row:
         return {}
-    total = row["wins"] + row["losses"]
-    row["win_rate"] = (row["wins"] / total * 100) if total > 0 else 0.0
+    wins = row["wins"] or 0
+    losses = row["losses"] or 0
+    total = wins + losses
+    row["wins"] = wins
+    row["losses"] = losses
+    row["win_rate"] = (wins / total * 100) if total > 0 else 0.0
     return row

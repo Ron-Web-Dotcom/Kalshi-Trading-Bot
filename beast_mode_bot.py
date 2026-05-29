@@ -24,8 +24,9 @@ Recommended: use cli.py for the unified CLI interface.
 
 import asyncio
 import argparse
-import time
+import os
 import signal
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -327,7 +328,7 @@ class BeastModeBot:
         """Background task for performance evaluation."""
         while not self.shutdown_event.is_set():
             try:
-                await run_evaluation()
+                await run_evaluation(db=db_manager)
                 await asyncio.sleep(300)  # Run every 5 minutes
             except Exception as e:
                 self.logger.error(f"Error in performance evaluation: {e}")

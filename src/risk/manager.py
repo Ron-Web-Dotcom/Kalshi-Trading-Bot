@@ -63,14 +63,21 @@ class RiskManager:
 
     def _calc_category_exposure(self, ticker: str, new_size: float,
                                  positions: List[Dict]) -> float:
-        """Sum existing exposure in the same category prefix (e.g. INAU, KXSP)."""
-        prefix = ticker[:4] if len(ticker) >= 4 else ticker
+        """Sum existing exposure in the same market category."""
+        # Use the category field if available; fall back to ticker prefix
+        prefix = ticker.split("-")[0] if "-" in ticker else (ticker[:4] if len(ticker) >= 4 else ticker)
         existing = sum(
             p.get("avg_price", 0) * p.get("contracts", 0) / 100
             for p in positions
-            if p.get("ticker", "").startswith(prefix)
+            if (p.get("category") == self._ticker_category(ticker)
+                if p.get("category") else p.get("ticker", "").startswith(prefix))
         )
         return existing + new_size
+
+    @staticmethod
+    def _ticker_category(ticker: str) -> str:
+        """Extract category prefix from ticker (e.g. 'KXETHD' → 'KXETH')."""
+        return ticker.split("-")[0] if "-" in ticker else ticker[:4]
 
     def record_trade(self, ticker: str, pnl: float = 0.0):
         """Record a completed trade for cooldown and daily loss tracking."""
@@ -85,6 +92,29 @@ class RiskManager:
             self.cfg.min_trade_size_dollars,
             min(desired, self.cfg.max_trade_size_dollars)
         )
+
+    def kelly_size(self, confidence_pct: float, price_cents: float,
+                   portfolio_value: float = 1000.0) -> float:
+        """
+        Fractional Kelly Criterion position size.
+        confidence_pct: AI confidence 0-100 (treated as implied win probability).
+        price_cents: market price in cents (0-100).
+        Returns dollar size, clamped to configured limits.
+        """
+        if price_cents <= 0 or price_cents >= 100:
+            return self.cfg.base_trade_size_dollars
+        p = confidence_pct / 100.0
+        q = 1.0 - p
+        # Decimal odds: $1 at 50¢ pays $1 profit on win (2:1 payout at 100¢)
+        b = (100.0 - price_cents) / price_cents
+        if b <= 0:
+            return self.cfg.base_trade_size_dollars
+        kelly = (p * b - q) / b
+        if kelly <= 0:
+            return self.cfg.min_trade_size_dollars
+        # Apply fractional Kelly (configurable, default 0.25)
+        fractional = kelly * self.cfg.kelly_fraction
+        return self.clamp_size(fractional * portfolio_value)
 
     def dollars_to_contracts(self, dollars: float, price_cents: float) -> int:
         """Convert dollar amount to number of contracts at given price (cents)."""

@@ -61,6 +61,7 @@ class DatabaseManager:
                         contracts INTEGER NOT NULL,
                         price REAL NOT NULL,
                         total_cost REAL NOT NULL,
+                        fee REAL DEFAULT 0,
                         paper_trade INTEGER DEFAULT 1,
                         ai_confidence REAL,
                         ai_reasoning TEXT,
@@ -118,6 +119,12 @@ class DatabaseManager:
                     );
                 """)
                 await db.commit()
+                # Idempotent migrations for existing databases
+                try:
+                    await db.execute("ALTER TABLE trade_logs ADD COLUMN fee REAL DEFAULT 0")
+                    await db.commit()
+                except Exception:
+                    pass  # Column already exists
             self._initialized = True
             logger.info(f"Database initialized at {self.db_path}")
 

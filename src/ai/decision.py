@@ -54,18 +54,24 @@ class AIDecisionEngine:
                     f"diff={s.get('diff_pct', 0):.1f}% | edge={s.get('edge_cents', 0):.1f}¢"
                 )
 
+        implied_yes = yes_ask
+        implied_no = no_ask
+        spread = yes_ask + no_ask - 100
+        liquidity_note = "LOW LIQUIDITY" if volume < 100 else ("HIGH LIQUIDITY" if volume > 10000 else "MEDIUM LIQUIDITY")
+
         return f"""You are a quantitative prediction market analyst. Analyze this Kalshi market and decide whether to trade.
 
 Market: {ticker}
 Question: {title}
-Current YES ask price: {yes_ask:.0f}¢ (implies {yes_ask:.0f}% probability)
-Current NO ask price: {no_ask:.0f}¢ (implies {no_ask:.0f}% probability)
-Volume: {volume}
-Open interest: {open_interest}
+YES ask: {yes_ask:.0f}¢  (implied YES probability: {implied_yes:.0f}%)
+NO ask:  {no_ask:.0f}¢  (implied NO probability: {implied_no:.0f}%)
+Market spread cost: {spread:.0f}¢ (YES+NO ask = {yes_ask+no_ask:.0f}¢; you pay this vig to trade both sides)
+Volume: {volume:,}  |  Open interest: {open_interest:,}  |  Liquidity: {liquidity_note}
 Closes: {close_time}
+Kalshi taker fee: ~2% of notional (already factored into minimum edge requirement)
 {signal_text}
 
-Based on the pricing, volume, and any arbitrage signals, should we trade this market?
+Evaluate: Does a genuine edge exist AFTER accounting for the spread and 2% fee?
 
 Respond with valid JSON only (no markdown):
 {{
@@ -76,10 +82,12 @@ Respond with valid JSON only (no markdown):
 }}
 
 Rules:
-- Only recommend BUY if genuine edge exists (mispricing, arbitrage, or high conviction)
-- Confidence > {self.trading_cfg.min_ai_confidence:.0f} required for a trade recommendation
-- When uncertain, choose HOLD
-- Keep reasoning concise and factual"""
+- BUY = enter a new position (on the stated side)
+- Only recommend BUY if net edge after spread+fees is positive and material (>3¢ net expected value)
+- Confidence must reflect your TRUE probability estimate vs market price, not just strength of signal
+- Confidence > {self.trading_cfg.min_ai_confidence:.0f} required to generate a trade
+- Low volume (<100) or extreme prices (<5¢ or >95¢) → HOLD unless arb signal is present
+- When uncertain, choose HOLD — missing a trade is better than a bad one"""
 
     async def decide(self, market: Dict, signals: List[Dict] = []) -> AIDecision:
         ticker = market.get("ticker", "UNKNOWN")
