@@ -1,17 +1,22 @@
 """
-Context builder — assembles real-world data for a Kalshi market before
+Context builder — assembles real-world data for ANY Kalshi market before
 sending it to Claude.
 
-For each market:
-  1. Detect what type it is (crypto / politics / finance / sports / …)
-  2. Extract relevant keywords from the title
-  3. Fetch live prices for those assets (CoinGecko / Yahoo Finance)
-  4. Fetch relevant headlines (RSS feeds)
-  5. (Optional) Check Metaculus community prediction
-  6. Return a formatted context block ready for injection into the AI prompt
+Data sources (all free, no API keys):
+  1. Crypto prices       — CoinGecko
+  2. Equity/index prices — Yahoo Finance
+  3. News headlines      — AP, Reuters, BBC, CoinDesk, Politico, WSJ RSS
+  4. Weather             — wttr.in (for temperature/rain/snow markets)
+  5. Sports scores       — ESPN public API (for game/season markets)
+  6. Economic indicators — FRED / BLS / Treasury (for CPI, Fed rate, yield markets)
+  7. Community forecasts — Metaculus (optional)
 
-The whole fetch is parallelised and has a hard timeout so a slow feed
-never blocks the trading cycle.
+Pipeline per market:
+  1. Detect category (crypto / weather / sports / economics / politics / …)
+  2. Extract relevant keywords / cities / teams / indicators from the title
+  3. Fetch all applicable data in parallel
+  4. Apply 6-second hard timeout — never block the trading cycle
+  5. Return a single formatted multi-line context block for injection into AI prompt
 """
 
 import asyncio
@@ -19,14 +24,16 @@ import logging
 import re
 from typing import Dict, List, Optional, Tuple
 
-from src.data.price_feeds import get_prices_for_keywords, format_prices, CRYPTO_IDS, EQUITY_SYMBOLS
-from src.data.news_fetcher import fetch_headlines, fetch_community_prediction, format_headlines
+from src.data.price_feeds      import get_prices_for_keywords, format_prices, CRYPTO_IDS, EQUITY_SYMBOLS
+from src.data.news_fetcher     import fetch_headlines, fetch_community_prediction, format_headlines
+from src.data.weather_fetcher  import extract_cities, fetch_weather, format_weather
+from src.data.sports_fetcher   import fetch_sports_context, detect_league
+from src.data.economic_fetcher import fetch_economic_context, detect_economic_topics
 
 logger = logging.getLogger("trading.context_builder")
 
 # ── Keyword extraction helpers ────────────────────────────────────────────────
 
-# Map of title phrases → asset keywords for price lookup
 _CRYPTO_PATTERNS = {
     r"\bbtc\b|\bbitcoin\b":   "btc",
     r"\beth\b|\bethereum\b":  "eth",
@@ -50,43 +57,51 @@ _EQUITY_PATTERNS = {
     r"\beur\b|\beuro\b":                    "eur",
 }
 
-_CATEGORY_MAP = {
-    "crypto":     ["btc", "eth", "sol", "xrp", "doge", "bnb", "ada", "avax"],
-    "finance":    ["sp500", "nasdaq", "dow", "vix", "oil", "gold", "10y"],
-    "economics":  ["sp500", "10y", "oil", "gold"],
-    "politics":   [],   # no price feeds — rely on news
-    "sports":     [],
-    "weather":    [],
-    "technology": [],
-    "health":     [],
-}
+_WEATHER_KEYWORDS = [
+    "temperature", "temp", "degrees", "fahrenheit", "celsius",
+    "rain", "snow", "hurricane", "tornado", "storm", "flood",
+    "high", "low", "forecast", "weather", "climate",
+]
+
+_POLITICS_KEYWORDS = [
+    "elect", "president", "congress", "senate", "house", "vote", "poll",
+    "democrat", "republican", "governor", "mayor", "ballot", "approval",
+    "trump", "biden", "harris",
+]
+
+_SPORTS_LEAGUES = ["nfl", "nba", "mlb", "nhl", "ncaa", "mls", "soccer",
+                   "football", "basketball", "baseball", "hockey", "tennis",
+                   "golf", "ufc", "mma", "super bowl", "world series",
+                   "stanley cup", "championship", "playoffs", "draft"]
 
 
 def _detect_category(ticker: str, title: str, raw_category: str) -> str:
-    """Best-effort category from raw Kalshi category + ticker prefix."""
-    cat = (raw_category or "").lower()
-    if cat:
-        return cat
+    """Classify market into a category used to select data sources."""
+    if raw_category:
+        return raw_category.lower()
+
     t = (ticker + " " + title).lower()
-    if any(c in t for c in ["btc", "eth", "crypto", "bitcoin", "ethereum"]):
+
+    # Check most specific first
+    if any(k in t for k in ["btc", "eth", "crypto", "bitcoin", "ethereum", "solana", "ripple"]):
         return "crypto"
-    if any(c in t for c in ["sp500", "nasdaq", "stocks", "fed", "rate", "inflation"]):
-        return "economics"
-    if any(c in t for c in ["elect", "president", "congress", "senate", "vote", "poll"]):
-        return "politics"
-    if any(c in t for c in ["nfl", "nba", "mlb", "nhl", "soccer", "world cup"]):
+    if any(k in t for k in _SPORTS_LEAGUES):
         return "sports"
+    if any(k in t for k in _WEATHER_KEYWORDS):
+        return "weather"
+    if any(k in t for k in ["cpi", "inflation", "unemployment", "gdp", "fomc", "fed rate"]):
+        return "economics"
+    if any(k in t for k in ["sp500", "nasdaq", "stocks", "s&p", "dow", "market index"]):
+        return "finance"
+    if any(k in t for k in _POLITICS_KEYWORDS):
+        return "politics"
     return "default"
 
 
 def _extract_asset_keywords(title: str) -> Tuple[List[str], List[str]]:
-    """
-    Extract crypto and equity keyword matches from a market title.
-    Returns (crypto_keywords, equity_keywords).
-    """
+    """Extract crypto and equity keyword matches from a market title."""
     t = title.lower()
-    crypto = []
-    equity = []
+    crypto, equity = [], []
     for pattern, kw in _CRYPTO_PATTERNS.items():
         if re.search(pattern, t) and kw not in crypto:
             crypto.append(kw)
@@ -97,16 +112,14 @@ def _extract_asset_keywords(title: str) -> Tuple[List[str], List[str]]:
 
 
 def _news_keywords(title: str) -> List[str]:
-    """
-    Extract meaningful words for news relevance scoring.
-    Strips common filler words.
-    """
+    """Extract meaningful words for news relevance scoring."""
     stopwords = {
         "will", "the", "a", "an", "to", "by", "at", "in", "on", "of",
         "or", "and", "is", "be", "for", "end", "above", "below", "year",
         "month", "day", "week", "hit", "reach", "close", "before", "after",
         "more", "than", "over", "under", "least", "most", "price", "market",
         "does", "when", "with", "from", "this", "that", "have", "are", "was",
+        "its", "not", "what", "how", "who", "any", "all", "new", "get", "set",
     }
     words = re.findall(r"[a-zA-Z]{3,}", title)
     return [w.lower() for w in words if w.lower() not in stopwords][:12]
@@ -117,18 +130,21 @@ def _news_keywords(title: str) -> List[str]:
 async def build_market_context(
     market: Dict,
     include_community: bool = False,
-    timeout_seconds: float = 6.0,
+    timeout_seconds: float = 8.0,
 ) -> str:
     """
-    Build a real-world context block for a Kalshi market.
+    Build a real-world context block for ANY Kalshi market.
 
-    Args:
-        market           : market dict from DB (ticker, title, category, …)
-        include_community: also fetch Metaculus community prediction
-        timeout_seconds  : hard deadline — return empty string on timeout
+    Automatically selects the right data sources based on market type:
+      - crypto/finance  → live prices (CoinGecko / Yahoo Finance)
+      - weather         → current conditions + forecast (wttr.in)
+      - sports          → scores + standings (ESPN)
+      - economics       → CPI, unemployment, Fed rate, yield (FRED/BLS)
+      - all categories  → relevant news headlines (RSS feeds)
+      - optional        → Metaculus community prediction
 
-    Returns:
-        Formatted multi-line string ready to inject into the AI prompt.
+    Returns a formatted multi-line string ready for AI prompt injection,
+    or empty string if all fetches fail / timeout.
     """
     ticker   = market.get("ticker", "")
     title    = market.get("title", "")
@@ -139,15 +155,41 @@ async def build_market_context(
     all_asset_kws = crypto_kws + equity_kws
     news_kws      = _news_keywords(title)
 
-    try:
-        tasks = {
-            "prices":    get_prices_for_keywords(all_asset_kws),
-            "headlines": fetch_headlines(news_kws, category=category, max_headlines=5),
-        }
-        if include_community:
-            tasks["community"] = fetch_community_prediction(title)
+    # ── Build task list based on detected category ────────────────────────────
+    tasks: Dict[str, any] = {}
 
-        # Hard timeout — don't block trading cycle
+    # Prices: always useful for crypto/finance; include for any market where
+    # we detected asset keywords (e.g. "Will BTC exceed $50k?" in a politics market)
+    if all_asset_kws:
+        tasks["prices"] = get_prices_for_keywords(all_asset_kws)
+
+    # Weather: fetch for weather markets or when a city name is in the title
+    cities = extract_cities(title)
+    if category == "weather" or cities:
+        if cities:
+            # Fetch the first matched city (usually the only one)
+            tasks["weather"] = fetch_weather(cities[0])
+        elif category == "weather":
+            # No city detected but category says weather — try news only
+            pass
+
+    # Sports: fetch for sports markets
+    if category == "sports" or detect_league(title):
+        tasks["sports"] = fetch_sports_context(title)
+
+    # Economics: fetch for econ/finance markers with indicator keywords
+    if category in ("economics", "finance") or detect_economic_topics(title):
+        tasks["economics"] = fetch_economic_context(title)
+
+    # News: always fetch — relevant to every market type
+    tasks["headlines"] = fetch_headlines(news_kws, category=category, max_headlines=5)
+
+    # Metaculus: optional community prediction
+    if include_community:
+        tasks["community"] = fetch_community_prediction(title)
+
+    # ── Execute all fetches in parallel with hard timeout ─────────────────────
+    try:
         gathered = await asyncio.wait_for(
             asyncio.gather(*tasks.values(), return_exceptions=True),
             timeout=timeout_seconds,
@@ -160,28 +202,40 @@ async def build_market_context(
         logger.debug("Context fetch error for %s: %s", ticker, e)
         return ""
 
+    # ── Assemble context blocks ───────────────────────────────────────────────
     blocks = []
 
-    prices    = results.get("prices", [])
-    headlines = results.get("headlines", [])
-    community = results.get("community")
-
+    prices = results.get("prices")
     if isinstance(prices, list) and prices:
         blocks.append(format_prices(prices))
 
+    weather = results.get("weather")
+    if isinstance(weather, dict) and weather:
+        blocks.append(format_weather(weather))
+
+    sports = results.get("sports")
+    if isinstance(sports, str) and sports:
+        blocks.append(sports)
+
+    economics = results.get("economics")
+    if isinstance(economics, str) and economics:
+        blocks.append(economics)
+
+    headlines = results.get("headlines")
     if isinstance(headlines, list) and headlines:
         blocks.append(format_headlines(headlines))
 
-    if community and isinstance(community, str):
+    community = results.get("community")
+    if isinstance(community, str) and community:
         blocks.append(community)
 
     if blocks:
         context = "\n\n".join(blocks)
         logger.debug(
-            "Context for %s: %d price(s), %d headline(s)",
-            ticker,
-            len(prices) if isinstance(prices, list) else 0,
-            len(headlines) if isinstance(headlines, list) else 0,
+            "Context for %s [%s]: %d block(s) — %s",
+            ticker, category,
+            len(blocks),
+            ", ".join(k for k in results if not isinstance(results[k], Exception) and results[k]),
         )
         return context
 
