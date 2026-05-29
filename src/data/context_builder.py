@@ -173,9 +173,15 @@ async def build_market_context(
             # No city detected but category says weather — try news only
             pass
 
-    # Sports: fetch for sports markets
-    if category == "sports" or detect_league(title):
+    # Sports: fetch for sports markets; detect soccer specifically for news feed routing
+    detected_league = detect_league(title)
+    if category == "sports" or detected_league:
         tasks["sports"] = fetch_sports_context(title)
+        # Use soccer-specific news feeds for soccer markets
+        if detected_league in ("epl", "laliga", "bundesliga", "seriea", "ligue1",
+                               "mls", "ucl", "uel", "uecl", "worldcup", "euros",
+                               "copalibertadores", "concacaf", "nwsl"):
+            category = "soccer"
 
     # Economics: fetch for econ/finance markers with indicator keywords
     if category in ("economics", "finance") or detect_economic_topics(title):

@@ -29,9 +29,16 @@ RSS_FEEDS: Dict[str, str] = {
     "reuters_biz":  "https://feeds.reuters.com/reuters/businessNews",
     "bbc_world":    "https://feeds.bbci.co.uk/news/world/rss.xml",
     "bbc_biz":      "https://feeds.bbci.co.uk/news/business/rss.xml",
+    "bbc_sport":    "https://feeds.bbci.co.uk/sport/rss.xml",
+    "bbc_football": "https://feeds.bbci.co.uk/sport/football/rss.xml",
     "politico":     "https://www.politico.com/rss/politicopicks.xml",
     "coindesk":     "https://www.coindesk.com/arc/outboundfeeds/rss/",
     "wsj_markets":  "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+    # Soccer-specific feeds
+    "the_athletic_soccer": "https://theathletic.com/rss-feed/soccer/",
+    "espn_soccer":  "https://www.espn.com/espn/rss/soccer/news",
+    "sky_sports":   "https://www.skysports.com/rss/12040",       # Sky Sports football
+    "goal_com":     "https://www.goal.com/feeds/en/news",
 }
 
 # Category → feed names to query
@@ -40,7 +47,8 @@ CATEGORY_FEEDS: Dict[str, List[str]] = {
     "economics":   ["ap_finance", "reuters_biz", "wsj_markets", "bbc_biz"],
     "finance":     ["ap_finance", "reuters_biz", "wsj_markets"],
     "crypto":      ["coindesk", "ap_finance", "reuters_biz"],
-    "sports":      ["ap_sports"],
+    "sports":      ["ap_sports", "bbc_sport", "espn_soccer"],
+    "soccer":      ["bbc_football", "espn_soccer", "sky_sports", "goal_com", "ap_sports"],
     "technology":  ["ap_tech", "reuters_top"],
     "health":      ["ap_top", "bbc_world"],
     "weather":     ["ap_top"],

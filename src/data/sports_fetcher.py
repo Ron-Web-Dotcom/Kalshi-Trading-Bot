@@ -4,8 +4,9 @@ Sports data via ESPN's public (unofficial) JSON API — no API key required.
 Fetches live/recent scores, standings, and team records to inform AI
 decisions on Kalshi sports markets:
   "Will the Chiefs win Super Bowl LX?"
+  "Will Manchester City win the Premier League?"
+  "Will Real Madrid reach the Champions League final?"
   "Will the Lakers make the NBA playoffs?"
-  "Will the Yankees win more than 90 games?"
 
 Endpoints used (all public, no auth):
   https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/scoreboard
@@ -25,15 +26,35 @@ _BASE    = "https://site.api.espn.com/apis/site/v2/sports"
 
 # Supported leagues with ESPN sport/league path
 LEAGUES: Dict[str, Tuple[str, str]] = {
-    "nfl":    ("football",   "nfl"),
-    "nba":    ("basketball", "nba"),
-    "mlb":    ("baseball",   "mlb"),
-    "nhl":    ("hockey",     "nhl"),
-    "ncaaf":  ("football",   "college-football"),
-    "ncaab":  ("basketball", "mens-college-basketball"),
-    "mls":    ("soccer",     "usa.1"),
-    "epl":    ("soccer",     "eng.1"),
-    "ufc":    ("mma",        "ufc"),
+    # American sports
+    "nfl":       ("football",   "nfl"),
+    "nba":       ("basketball", "nba"),
+    "mlb":       ("baseball",   "mlb"),
+    "nhl":       ("hockey",     "nhl"),
+    "ncaaf":     ("football",   "college-football"),
+    "ncaab":     ("basketball", "mens-college-basketball"),
+    "ufc":       ("mma",        "ufc"),
+    # Soccer — US
+    "mls":       ("soccer",     "usa.1"),
+    "nwsl":      ("soccer",     "usa.nwsl"),
+    # Soccer — Europe (top leagues + continental)
+    "epl":       ("soccer",     "eng.1"),        # Premier League
+    "championship": ("soccer",  "eng.2"),        # English Championship
+    "laliga":    ("soccer",     "esp.1"),         # La Liga
+    "bundesliga": ("soccer",    "ger.1"),         # Bundesliga
+    "seriea":    ("soccer",     "ita.1"),         # Serie A
+    "ligue1":    ("soccer",     "fra.1"),         # Ligue 1
+    "eredivisie": ("soccer",    "ned.1"),         # Eredivisie
+    "primeiraliga": ("soccer",  "por.1"),         # Primeira Liga
+    "superlig":  ("soccer",     "tur.1"),         # Turkish Süper Lig
+    # Soccer — continental/world
+    "ucl":       ("soccer",     "uefa.champions"), # UEFA Champions League
+    "uel":       ("soccer",     "uefa.europa"),    # UEFA Europa League
+    "uecl":      ("soccer",     "uefa.europa.conf"), # UEFA Conference League
+    "worldcup":  ("soccer",     "fifa.world"),     # FIFA World Cup
+    "euros":     ("soccer",     "uefa.euro"),      # UEFA Euros
+    "copalibertadores": ("soccer", "conmebol.libertadores"),
+    "concacaf":  ("soccer",     "concacaf.champions"),
 }
 
 # Common team aliases → ESPN team abbreviation or search term
@@ -83,49 +104,151 @@ TEAM_ALIASES: Dict[str, str] = {
     "oilers":      "EDM",  "flames":     "CGY", "canucks":    "VAN",
     "sharks":      "SJS",  "ducks":      "ANA", "kings":      "LAK",
     "coyotes":     "ARI",  "jets":       "WPG", "senators":   "OTT",
+
+    # Soccer — Premier League (EPL)
+    "arsenal":         "ARS",  "chelsea":       "CHE",  "liverpool":    "LIV",
+    "manchester city": "MCI",  "man city":      "MCI",  "man utd":      "MUN",
+    "manchester united":"MUN", "tottenham":     "TOT",  "spurs":        "TOT",
+    "newcastle":       "NEW",  "aston villa":   "AVL",  "west ham":     "WHU",
+    "brighton":        "BHA",  "everton":       "EVE",  "fulham":       "FUL",
+    "brentford":       "BRE",  "crystal palace":"CRY",  "wolverhampton":"WOL",
+    "wolves":          "WOL",  "nottingham":    "NFO",  "leicester":    "LEI",
+    "southampton":     "SOU",  "ipswich":       "IPS",  "bournemouth":  "BOU",
+
+    # Soccer — La Liga
+    "real madrid":     "RM",   "barcelona":     "BAR",  "atletico":     "ATM",
+    "atletico madrid": "ATM",  "sevilla":       "SEV",  "real sociedad":"RSO",
+    "villarreal":      "VIL",  "athletic bilbao":"ATH", "valencia":     "VAL",
+    "real betis":      "BET",  "osasuna":       "OSA",  "getafe":       "GET",
+    "girona":          "GIR",  "las palmas":    "LPA",  "mallorca":     "MLL",
+
+    # Soccer — Bundesliga
+    "bayern":          "BAY",  "bayern munich": "BAY",  "dortmund":     "BVB",
+    "borussia dortmund":"BVB", "leverkusen":    "B04",  "rb leipzig":   "RBL",
+    "frankfurt":       "SGE",  "wolfsburg":     "WOB",  "freiburg":     "SCF",
+    "stuttgart":       "VFB",  "hoffenheim":    "TSG",  "gladbach":     "BMG",
+    "borussia monchengladbach":"BMG",
+
+    # Soccer — Serie A
+    "inter milan":     "INT",  "inter":         "INT",  "juventus":     "JUV",
+    "ac milan":        "MIL",  "milan":         "MIL",  "napoli":       "NAP",
+    "roma":            "ROM",  "lazio":         "LAZ",  "atalanta":     "ATA",
+    "fiorentina":      "FIO",  "bologna":       "BOL",  "torino":       "TOR",
+
+    # Soccer — Ligue 1
+    "psg":             "PSG",  "paris saint-germain":"PSG", "marseille": "OM",
+    "monaco":          "ASM",  "lyon":          "OL",   "lille":        "LIL",
+    "nice":            "OGC",  "rennes":        "REN",  "lens":         "RCL",
+
+    # Soccer — MLS
+    "inter miami":     "MIA",  "lafc":          "LAFC", "la galaxy":    "LA",
+    "seattle sounders":"SEA",  "portland timbers":"POR", "new york city":"NYC",
+    "nycfc":           "NYC",  "new england revolution":"NE",
+    "atlanta united":  "ATL",  "columbus crew": "CLB",  "toronto fc":   "TOR",
+    "cf montreal":     "MTL",  "orlando city":  "ORL",  "nashville sc": "NSH",
+    "fc cincinnati":   "CIN",  "chicago fire":  "CHI",  "austin fc":    "ATX",
+    "real salt lake":  "RSL",  "colorado rapids":"COL", "san jose earthquakes":"SJ",
+    "houston dynamo":  "HOU",  "vancouver whitecaps":"VAN", "minnesota united":"MIN",
 }
 
-# League detection patterns
+# League detection patterns — checked in order; first match wins
 _LEAGUE_PATTERNS: Dict[str, List[str]] = {
-    "nfl":   ["nfl", "super bowl", "football", "touchdown", "quarterback"],
-    "nba":   ["nba", "basketball", "playoff", "finals"],
-    "mlb":   ["mlb", "baseball", "world series", "innings", "batting"],
-    "nhl":   ["nhl", "hockey", "stanley cup", "goalie", "puck"],
-    "ncaaf": ["ncaa football", "college football", "cfp", "bowl game"],
-    "ncaab": ["ncaa basketball", "march madness", "final four"],
-    "mls":   ["mls", "soccer", "major league soccer"],
+    # Continental / world soccer first (most specific)
+    "ucl":          ["champions league", "ucl", "champion league"],
+    "uel":          ["europa league", "uel"],
+    "uecl":         ["conference league", "uecl"],
+    "worldcup":     ["world cup", "fifa world", "world cup qualifier"],
+    "euros":        ["euro 2024", "euros", "european championship", "euro qualifier"],
+    "copalibertadores": ["copa libertadores", "libertadores"],
+    "concacaf":     ["concacaf champions"],
+    # Domestic soccer leagues
+    "epl":          ["premier league", "epl", "english premier", "fa cup"],
+    "laliga":       ["la liga", "laliga", "spanish league"],
+    "bundesliga":   ["bundesliga", "german league"],
+    "seriea":       ["serie a", "italian league", "coppa italia"],
+    "ligue1":       ["ligue 1", "ligue1", "french league"],
+    "mls":          ["mls", "major league soccer"],
+    # American sports
+    "nfl":          ["nfl", "super bowl", "football", "touchdown", "quarterback"],
+    "nba":          ["nba", "basketball", "nba finals"],
+    "mlb":          ["mlb", "baseball", "world series", "innings", "batting"],
+    "nhl":          ["nhl", "hockey", "stanley cup", "goalie", "puck"],
+    "ncaaf":        ["ncaa football", "college football", "cfp", "bowl game"],
+    "ncaab":        ["ncaa basketball", "march madness", "final four"],
+    "ufc":          ["ufc", "mma", "octagon"],
+}
+
+
+_EPL_TEAMS = {
+    "arsenal", "chelsea", "liverpool", "manchester city", "man city", "man utd",
+    "manchester united", "tottenham", "spurs", "newcastle", "aston villa", "west ham",
+    "brighton", "everton", "fulham", "brentford", "crystal palace", "wolverhampton",
+    "wolves", "nottingham", "leicester", "southampton", "ipswich", "bournemouth",
+}
+_LALIGA_TEAMS = {
+    "real madrid", "barcelona", "atletico", "atletico madrid", "sevilla",
+    "real sociedad", "villarreal", "athletic bilbao", "valencia", "real betis",
+    "osasuna", "getafe", "girona",
+}
+_BUNDESLIGA_TEAMS = {
+    "bayern", "bayern munich", "dortmund", "borussia dortmund", "leverkusen",
+    "rb leipzig", "frankfurt", "wolfsburg", "freiburg", "stuttgart", "hoffenheim",
+    "gladbach", "borussia monchengladbach",
+}
+_SERIEA_TEAMS = {
+    "inter milan", "inter", "juventus", "ac milan", "milan", "napoli",
+    "roma", "lazio", "atalanta", "fiorentina", "bologna",
+}
+_LIGUE1_TEAMS = {"psg", "paris saint-germain", "marseille", "monaco", "lyon", "lille", "nice"}
+_NBA_TEAMS = {
+    "lakers", "celtics", "warriors", "heat", "bulls", "knicks", "nets", "76ers",
+    "suns", "nuggets", "bucks", "clippers", "spurs", "mavericks", "mavs", "rockets",
+    "thunder", "jazz", "blazers", "kings", "pelicans", "grizzlies", "hawks", "hornets",
+    "magic", "pistons", "cavaliers", "cavs", "raptors", "wolves", "timberwolves", "pacers",
+}
+_MLB_TEAMS = {
+    "yankees", "red sox", "dodgers", "cubs", "mets", "braves", "astros", "phillies",
+    "blue jays", "padres", "brewers", "mariners", "nationals", "tigers", "white sox",
+    "twins", "athletics", "angels", "rangers", "royals", "orioles", "pirates",
+    "reds", "rockies", "diamondbacks", "marlins", "rays",
+}
+_NHL_TEAMS = {
+    "bruins", "canadiens", "maple leafs", "islanders", "flyers", "penguins", "capitals",
+    "blackhawks", "red wings", "blues", "wild", "predators", "lightning", "hurricanes",
+    "avalanche", "golden knights", "oilers", "flames", "canucks", "sharks", "ducks",
+    "coyotes", "senators",
+}
+_MLS_TEAMS = {
+    "inter miami", "lafc", "la galaxy", "seattle sounders", "portland timbers",
+    "new york city", "nycfc", "new england revolution", "atlanta united",
+    "columbus crew", "toronto fc", "cf montreal", "orlando city", "nashville sc",
+    "fc cincinnati", "chicago fire", "austin fc", "real salt lake", "colorado rapids",
+    "san jose earthquakes", "houston dynamo", "vancouver whitecaps", "minnesota united",
 }
 
 
 def detect_league(title: str) -> Optional[str]:
     """Detect which sports league a market title refers to."""
     t = title.lower()
+    # Pattern-based (most reliable — explicit league names)
     for league, patterns in _LEAGUE_PATTERNS.items():
         if any(p in t for p in patterns):
             return league
-    # Check team aliases as fallback
+    # Team-based fallback
     for alias in TEAM_ALIASES:
-        if re.search(r'\b' + re.escape(alias) + r'\b', t):
-            if alias in ["lakers", "celtics", "warriors", "heat", "bulls", "knicks",
-                         "nets", "76ers", "suns", "nuggets", "bucks", "clippers",
-                         "spurs", "mavericks", "mavs", "rockets", "thunder", "jazz",
-                         "blazers", "kings", "pelicans", "grizzlies", "hawks", "hornets",
-                         "magic", "pistons", "cavaliers", "cavs", "raptors", "wolves",
-                         "timberwolves", "pacers"]:
-                return "nba"
-            if alias in ["yankees", "red sox", "dodgers", "cubs", "mets", "braves",
-                         "astros", "phillies", "blue jays", "padres", "brewers",
-                         "mariners", "nationals", "tigers", "white sox", "twins",
-                         "athletics", "angels", "rangers", "royals", "orioles",
-                         "pirates", "reds", "rockies", "diamondbacks", "marlins", "rays"]:
-                return "mlb"
-            if alias in ["bruins", "canadiens", "maple leafs", "rangers", "islanders",
-                         "flyers", "penguins", "capitals", "blackhawks", "red wings",
-                         "blues", "wild", "predators", "lightning", "hurricanes",
-                         "avalanche", "golden knights", "oilers", "flames", "canucks",
-                         "sharks", "ducks", "kings", "coyotes", "jets", "senators"]:
-                return "nhl"
-            return "nfl"
+        if not re.search(r'\b' + re.escape(alias) + r'\b', t):
+            continue
+        if alias in _EPL_TEAMS:      return "epl"
+        if alias in _LALIGA_TEAMS:   return "laliga"
+        if alias in _BUNDESLIGA_TEAMS: return "bundesliga"
+        if alias in _SERIEA_TEAMS:   return "seriea"
+        if alias in _LIGUE1_TEAMS:   return "ligue1"
+        if alias in _MLS_TEAMS:      return "mls"
+        if alias in _NBA_TEAMS:      return "nba"
+        if alias in _MLB_TEAMS:      return "mlb"
+        if alias in _NHL_TEAMS:      return "nhl"
+        # Default NFL for remaining American football teams
+        return "nfl"
     return None
 
 
