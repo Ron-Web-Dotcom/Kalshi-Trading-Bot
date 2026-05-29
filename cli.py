@@ -538,8 +538,8 @@ def cmd_health(args: argparse.Namespace) -> None:
     load_dotenv()
 
     for var, placeholder in (
-        ("KALSHI_API_KEY", "your_kalshi_api_key_here"),
-        ("OPENROUTER_API_KEY", "your_openrouter_api_key_here"),
+        ("KALSHI_API_KEY_ID", "your-key-id-uuid-here"),
+        ("ANTHROPIC_API_KEY", "your_anthropic_api_key_here"),
     ):
         val = os.getenv(var, "")
         if val and val not in ("", placeholder):
@@ -592,11 +592,13 @@ def cmd_health(args: argparse.Namespace) -> None:
     except Exception as exc:
         fail("Database initialization", str(exc))
 
-    # 5. Python version
-    if sys.version_info >= (3, 12):
-        ok("Python version", f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+    # 5. Python version (3.10+ required; 3.12+ recommended)
+    vi = sys.version_info
+    ver_str = f"{vi.major}.{vi.minor}.{vi.micro}"
+    if vi >= (3, 10):
+        ok("Python version", ver_str + (" (3.12+ recommended)" if vi < (3, 12) else ""))
     else:
-        fail("Python version", f"requires >=3.12, found {sys.version}")
+        fail("Python version", f"requires >=3.10, found {ver_str}")
 
     # Summary
     print()
