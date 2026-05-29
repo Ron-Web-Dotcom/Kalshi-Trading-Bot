@@ -605,6 +605,47 @@ def cmd_health(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def cmd_test_discord(args: argparse.Namespace) -> None:
+    """Send a test alert to Discord webhook."""
+    from src.alerts.discord import DiscordAlerter
+    from src.config.settings import settings
+
+    webhook = settings.alerts.discord_webhook_url
+    if not webhook:
+        print("DISCORD_WEBHOOK_URL is not set in .env")
+        print("Add it: DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR/WEBHOOK")
+        sys.exit(1)
+
+    print(f"Sending test alert to webhook (last 10 chars: ...{webhook[-10:]})")
+
+    async def _run():
+        discord = DiscordAlerter()
+        mode = "LIVE" if settings.trading.live_trading_enabled else "PAPER"
+        ok = await discord.test_alert(mode=mode)
+        if ok:
+            print("✅  Test alert delivered — check your Discord channel")
+        else:
+            print("❌  Delivery failed — check the webhook URL and try again")
+            sys.exit(1)
+
+    asyncio.run(_run())
+
+
+def cmd_live_check(args: argparse.Namespace) -> None:
+    """Run live trading pre-flight checks."""
+    from src.execution.preflight import run_preflight, print_preflight_report
+
+    print("Running pre-flight checks for live trading...")
+
+    async def _run():
+        passed, results, balance = await run_preflight(verbose=True)
+        print_preflight_report(results, passed, balance)
+        if not passed:
+            sys.exit(1)
+
+    asyncio.run(_run())
+
+
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
@@ -767,6 +808,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the interactive 'CLOSE ALL' confirmation (dangerous)",
     )
     p_close.set_defaults(func=cmd_close_all)
+
+    # --- test-discord ---
+    p_discord = subparsers.add_parser(
+        "test-discord",
+        help="Send a test message to your Discord webhook",
+        description="Verifies DISCORD_WEBHOOK_URL is correct by delivering a test embed.",
+    )
+    p_discord.set_defaults(func=cmd_test_discord)
+
+    # --- live-check ---
+    p_live = subparsers.add_parser(
+        "live-check",
+        help="Run pre-flight safety checks before enabling live trading",
+        description=(
+            "Verifies all requirements for live trading: API keys, Kalshi "
+            "connectivity, account balance, paper trade history, Discord alerts, "
+            "and .env settings. Fix every FAIL before setting LIVE_TRADING_ENABLED=true."
+        ),
+    )
+    p_live.set_defaults(func=cmd_live_check)
 
     return parser
 

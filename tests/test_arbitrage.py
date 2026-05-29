@@ -54,7 +54,9 @@ def test_internal_arb_detected(detector):
     markets = [{"ticker": "INT-1", "yes_ask": 45, "no_ask": 45, "yes_bid": 43, "no_bid": 43}]
     signals = detector.detect_internal(markets)
     assert len(signals) == 1
-    assert signals[0]["edge_cents"] == 10  # 100 - 45 - 45
+    # gross = 100-90 = 10¢, fee = 90*0.02 = 1.8¢, net = 8.2¢
+    assert signals[0]["gross_edge_cents"] == 10
+    assert abs(signals[0]["edge_cents"] - 8.2) < 0.01  # net after 2% fee on both legs
 
 
 def test_internal_arb_not_detected_when_sum_100(detector):

@@ -60,6 +60,27 @@ class TradingBot:
         except Exception as e:
             logger.warning(f"Initial ingestion failed (will retry in loop): {e}")
 
+        # Discord startup banner
+        try:
+            from src.alerts.discord import DiscordAlerter
+            from src.clients.kalshi_client import KalshiClient
+            discord = DiscordAlerter()
+            balance = None
+            if self.live_mode:
+                try:
+                    k = KalshiClient()
+                    bal = await k.get_balance()
+                    balance = (bal.get("balance") or 0) / 100
+                    await k.close()
+                except Exception:
+                    pass
+            await discord.startup_banner(
+                mode="LIVE" if self.live_mode else "PAPER",
+                balance=balance,
+            )
+        except Exception:
+            pass
+
     async def run_cycle(self):
         results = await run_trading_job(db=self.db)
         logger.info(
