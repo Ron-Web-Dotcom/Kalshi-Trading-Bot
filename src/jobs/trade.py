@@ -325,6 +325,8 @@ async def run_trading_job(db=None) -> TradingResults:
                 ai_confidence=decision["confidence"],
                 ai_reasoning=decision["reasoning"],
                 signal_source=decision.get("model", "ai"),
+                net_ev=decision.get("net_ev"),
+                market_title=market.get("title", ""),
             )
             if rec:
                 trades_this_cycle += 1

@@ -21,16 +21,19 @@ async def run_tracking(db_manager) -> None:
     from src.config.settings import settings
     from src.ai.decision import AIDecisionEngine
     from src.data.context_builder import build_market_context
+    from src.alerts.discord import DiscordAlerter
 
     stop_loss_pct    = settings.trading.stop_loss_pct
     take_profit_pct  = settings.trading.take_profit_pct
     enable_reeval    = settings.trading.enable_ai_reeval
     reeval_min_conf  = settings.trading.reeval_min_confidence
+    paper            = not settings.trading.live_trading_enabled
 
-    kalshi  = KalshiClient()
-    risk    = RiskManager(db=db_manager)
-    ai      = AIDecisionEngine(db=db_manager)
-    now     = datetime.now(timezone.utc).isoformat()
+    kalshi   = KalshiClient()
+    risk     = RiskManager(db=db_manager)
+    ai       = AIDecisionEngine(db=db_manager)
+    discord  = DiscordAlerter()
+    now      = datetime.now(timezone.utc).isoformat()
 
     try:
         positions: List[Dict] = await db_manager.fetchall(
@@ -111,10 +114,10 @@ async def run_tracking(db_manager) -> None:
                     closed += 1
                     sign    = "+" if pnl >= 0 else ""
                     trigger = (
-                        "RESOLVED"   if close_reason.startswith("resolved") else
-                        "STOP-LOSS"  if close_reason.startswith("stop_loss") else
+                        "RESOLVED"    if close_reason.startswith("resolved")   else
+                        "STOP-LOSS"   if close_reason.startswith("stop_loss")  else
                         "TAKE-PROFIT" if close_reason.startswith("take_profit") else
-                        "AI OPT-OUT" if close_reason.startswith("ai_reeval") else
+                        "AI OPT-OUT"  if close_reason.startswith("ai_reeval")  else
                         close_reason.upper()
                     )
                     logger.info(
@@ -126,6 +129,13 @@ async def run_tracking(db_manager) -> None:
                     )
                     if close_reason.startswith("ai_reeval"):
                         logger.info("  AI opted out: %s", reeval.get("reasoning", "")[:120])
+
+                    # Discord: position closed (all triggers)
+                    await discord.position_closed(
+                        ticker=ticker, side=side, contracts=contracts,
+                        entry_cents=avg_price, exit_cents=final_price,
+                        pnl=pnl, reason=close_reason, paper=paper,
+                    )
                 else:
                     await db_manager.execute(
                         "UPDATE positions SET current_price=?, pnl=? WHERE id=?",
@@ -135,6 +145,13 @@ async def run_tracking(db_manager) -> None:
                         "MTM  %-28s  %s  cur=%.0f¢  entry=%.0f¢  PnL=%+.2f  (%.1f%%)",
                         ticker, side, cur_price, avg_price, pnl, pct_change,
                     )
+                    # Discord: AI re-eval held (optional, gated by ALERT_ON_SIGNAL)
+                    if enable_reeval and 'reeval' in dir():
+                        if reeval.get("verdict") == "HOLD" and reeval.get("confidence", 0) >= reeval_min_conf:
+                            await discord.ai_reeval_hold(
+                                ticker=ticker, side=side, pct_change=pct_change,
+                                reasoning=reeval.get("reasoning", ""), paper=paper,
+                            )
 
             except Exception as e:
                 logger.warning("Track error for %s: %s", ticker, e)

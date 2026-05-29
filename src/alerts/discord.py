@@ -82,25 +82,48 @@ class DiscordAlerter:
     async def trade_executed(self, ticker: str, action: str, side: str,
                               price: float, contracts: int, size_dollars: float,
                               pnl: Optional[float], ai_confidence: Optional[float],
-                              paper: bool = True, signal_source: str = "") -> None:
+                              paper: bool = True, signal_source: str = "",
+                              reasoning: str = "", net_ev: Optional[float] = None,
+                              exp_profit: Optional[float] = None,
+                              market_title: str = "") -> None:
         if not self.cfg.alert_on_trade:
             return
-        color = 0x00FF00 if action == "BUY" else 0xFF4444
+        color    = 0x00FF00 if action == "BUY" else 0xFF4444
         mode_tag = "📝 PAPER" if paper else "💰 LIVE"
-        source_tag = f" [{signal_source}]" if signal_source else ""
+
+        # Source badge
+        if signal_source in ("internal_arb", "cross_market_arb"):
+            source_emoji = "⚡"
+        elif signal_source == "rule_based":
+            source_emoji = "📐"
+        else:
+            source_emoji = "🤖"
+
+        # Max payout if position resolves in our favour
+        max_payout = contracts * (100 - price) / 100
+
         fields = [
-            {"name": "Action", "value": f"{action} {side.upper()}", "inline": True},
-            {"name": "Price", "value": f"{price:.0f}¢", "inline": True},
-            {"name": "Contracts", "value": str(contracts), "inline": True},
-            {"name": "Size", "value": f"${size_dollars:.2f}", "inline": True},
+            {"name": "Side",      "value": f"**{side.upper()}**",       "inline": True},
+            {"name": "Price",     "value": f"{price:.0f}¢",             "inline": True},
+            {"name": "Contracts", "value": str(contracts),              "inline": True},
+            {"name": "Capital",   "value": f"${size_dollars:.2f}",      "inline": True},
+            {"name": "Max Payout","value": f"${max_payout:.2f}",        "inline": True},
         ]
-        if pnl is not None:
-            fields.append({"name": "PnL", "value": f"${pnl:+.2f}", "inline": True})
         if ai_confidence is not None:
             fields.append({"name": "AI Confidence", "value": f"{ai_confidence:.0f}%", "inline": True})
+        if net_ev is not None:
+            fields.append({"name": "Net EV / contract", "value": f"{net_ev:.1f}¢",    "inline": True})
+        if exp_profit is not None:
+            fields.append({"name": "Exp. Profit",  "value": f"${exp_profit:.2f}",     "inline": True})
+        if pnl is not None:
+            fields.append({"name": "PnL", "value": f"${pnl:+.2f}", "inline": True})
+        if reasoning:
+            fields.append({"name": f"{source_emoji} AI Reasoning", "value": reasoning[:300], "inline": False})
+
+        title_line = f"\n_{market_title[:80]}_" if market_title else ""
         payload = self._embed(
-            title=f"{mode_tag} Trade{source_tag} — {ticker}",
-            description=f"Market: **{ticker}**",
+            title=f"{source_emoji} {mode_tag} Trade Entered — {ticker}",
+            description=f"**{action} {side.upper()}** on `{ticker}`{title_line}",
             color=color,
             fields=fields,
         )
@@ -152,6 +175,76 @@ class DiscordAlerter:
             description=f"```{error_msg[:1000]}```",
             color=0xFF0000,
             fields=[{"name": "Context", "value": context[:200], "inline": False}] if context else None,
+        )
+        await self._post(payload)
+
+    async def position_closed(self, ticker: str, side: str, contracts: int,
+                               entry_cents: float, exit_cents: float,
+                               pnl: float, reason: str, paper: bool = True) -> None:
+        """Alert when any position is closed (stop-loss, take-profit, resolved, AI opt-out)."""
+        if not self.cfg.alert_on_trade:
+            return
+        pnl_sign = "+" if pnl >= 0 else ""
+        color    = 0x00FF00 if pnl >= 0 else 0xFF4444
+        mode_tag = "📝 PAPER" if paper else "💰 LIVE"
+
+        # Human-readable trigger label
+        if reason.startswith("resolved"):
+            trigger_emoji, trigger_label = "✅", "Market Resolved"
+        elif reason.startswith("stop_loss"):
+            trigger_emoji, trigger_label = "🛑", "Stop-Loss"
+        elif reason.startswith("take_profit"):
+            trigger_emoji, trigger_label = "🎯", "Take-Profit"
+        elif reason.startswith("ai_reeval"):
+            trigger_emoji, trigger_label = "🤖", "AI Opted Out"
+            # Extract the reasoning text that follows "ai_reeval:"
+            ai_reason = reason[len("ai_reeval:"):].strip()
+        else:
+            trigger_emoji, trigger_label = "🔒", reason
+
+        fields = [
+            {"name": "Side",      "value": side.upper(),                  "inline": True},
+            {"name": "Contracts", "value": str(contracts),                "inline": True},
+            {"name": "Entry",     "value": f"{entry_cents:.0f}¢",         "inline": True},
+            {"name": "Exit",      "value": f"{exit_cents:.0f}¢",          "inline": True},
+            {"name": "PnL",       "value": f"${pnl_sign}{abs(pnl):.2f}",  "inline": True},
+            {"name": "Trigger",   "value": f"{trigger_emoji} {trigger_label}", "inline": True},
+        ]
+
+        # For AI opt-out, add the reasoning as its own field so it's readable
+        if reason.startswith("ai_reeval") and ai_reason:
+            fields.append({
+                "name":   "AI Reasoning",
+                "value":  ai_reason[:300],
+                "inline": False,
+            })
+
+        payload = self._embed(
+            title=f"{trigger_emoji} {mode_tag} Position Closed — {ticker}",
+            description=(
+                f"Closed **{side.upper()}** position on `{ticker}`\n"
+                f"PnL: **${pnl_sign}{abs(pnl):.2f}**  ({trigger_label})"
+            ),
+            color=color,
+            fields=fields,
+        )
+        await self._post(payload)
+
+    async def ai_reeval_hold(self, ticker: str, side: str, pct_change: float,
+                              reasoning: str, paper: bool = True) -> None:
+        """Alert when AI re-evaluates a position and decides to HOLD (optional — only if ALERT_ON_SIGNAL)."""
+        if not self.cfg.alert_on_signal:
+            return
+        color    = 0x5865F2   # Discord blurple — neutral
+        mode_tag = "📝 PAPER" if paper else "💰 LIVE"
+        payload  = self._embed(
+            title=f"🤖 {mode_tag} AI Re-eval: HOLD — {ticker}",
+            description=(
+                f"AI reviewed `{ticker}` ({side.upper()}) and decided to **HOLD**.\n"
+                f"Unrealised: **{pct_change:+.1f}%**\n\n"
+                f"_{reasoning[:300]}_"
+            ),
+            color=color,
         )
         await self._post(payload)
 

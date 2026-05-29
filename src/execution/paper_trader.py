@@ -29,7 +29,9 @@ class PaperTrader:
     async def execute(self, ticker: str, action: str, side: str,
                       price_cents: float, ai_confidence: float = 0.0,
                       ai_reasoning: str = "", signal_source: str = "paper",
-                      forced_size: Optional[float] = None) -> Optional[Dict]:
+                      forced_size: Optional[float] = None,
+                      net_ev: Optional[float] = None,
+                      market_title: str = "") -> Optional[Dict]:
         """Simulate a trade. Returns trade record dict or None if rejected."""
 
         # ── Safety gate: price must be 1–99¢ ─────────────────────────────────
@@ -129,12 +131,17 @@ class PaperTrader:
 
         if self.discord:
             try:
+                exp_profit = (contracts * net_ev / 100) if net_ev is not None else None
                 await self.discord.trade_executed(
                     ticker=ticker, action=action, side=side,
                     price=price_cents, contracts=contracts,
                     size_dollars=total_cost, pnl=None,
                     ai_confidence=ai_confidence, paper=True,
                     signal_source=signal_source,
+                    reasoning=ai_reasoning,
+                    net_ev=net_ev,
+                    exp_profit=exp_profit,
+                    market_title=market_title,
                 )
             except Exception:
                 pass
