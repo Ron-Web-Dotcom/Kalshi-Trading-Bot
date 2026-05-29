@@ -11,11 +11,14 @@ logger = logging.getLogger("trading.ai_decision")
 
 @dataclass
 class AIDecision:
-    action: str          # BUY / SELL / HOLD
+    action: str          # BUY / HOLD
     confidence: float    # 0–100
     reasoning: str
     model: str
     ticker: str
+    side: str = "yes"    # yes / no — which side to buy
+    true_prob: Optional[float] = None   # AI's estimated P(YES)
+    net_ev: Optional[float]   = None    # expected value per contract in cents
 
 
 class AIDecisionEngine:
@@ -38,57 +41,71 @@ class AIDecisionEngine:
         return self._client
 
     def _build_prompt(self, market: Dict, signals: List[Dict], context: str = "") -> str:
-        ticker = market.get("ticker", "")
-        title = market.get("title", "")
-        yes_ask = market.get("yes_ask", 0)
-        no_ask = market.get("no_ask", 0)
-        volume = market.get("volume", 0)
+        ticker        = market.get("ticker", "")
+        title         = market.get("title", "")
+        yes_ask       = market.get("yes_ask", 0)
+        no_ask        = market.get("no_ask", 0)
+        volume        = market.get("volume", 0)
         open_interest = market.get("open_interest", 0)
-        close_time = market.get("close_time", "unknown")
+        close_time    = market.get("close_time", "unknown")
 
-        signal_text = ""
+        arb_text = ""
         for s in signals:
             if s.get("ticker") == ticker:
-                signal_text = (
-                    f"\nArbitrage signal detected: {s.get('signal_source')} | "
-                    f"diff={s.get('diff_pct', 0):.1f}% | edge={s.get('edge_cents', 0):.1f}¢"
+                arb_text = (
+                    f"\nArbitrage signal: {s.get('signal_source')} | "
+                    f"diff={s.get('diff_pct', 0):.1f}% | net edge={s.get('edge_cents', 0):.1f}¢"
                 )
 
-        implied_yes = yes_ask
-        implied_no = no_ask
-        spread = yes_ask + no_ask - 100
-        liquidity_note = "LOW LIQUIDITY" if volume < 100 else ("HIGH LIQUIDITY" if volume > 10000 else "MEDIUM LIQUIDITY")
-        context_block = f"\n\nReal-world context:\n{context}" if context else ""
+        # Pre-compute EV helpers so Claude reasons correctly
+        yes_ev_if_true = (100 - yes_ask) * 0.98   # profit if YES resolves; 2% fee
+        no_ev_if_true  = (100 - no_ask)  * 0.98   # profit if NO resolves
+        spread         = yes_ask + no_ask - 100
+        liquidity      = ("LOW" if volume < 100 else "HIGH" if volume > 10000 else "MEDIUM")
+        context_block  = f"\n\n--- REAL-WORLD CONTEXT ---\n{context}\n--- END CONTEXT ---" if context else ""
 
-        return f"""You are a quantitative prediction market analyst. Analyze this Kalshi market and decide whether to trade.
+        return f"""You are an expert quantitative prediction market trader. Your ONLY goal is to find bets where your estimated true probability beats the market price by enough to profit after fees.
 
-Market: {ticker}
+=== MARKET ===
+Ticker:   {ticker}
 Question: {title}
-YES ask: {yes_ask:.0f}¢  (implied YES probability: {implied_yes:.0f}%)
-NO ask:  {no_ask:.0f}¢  (implied NO probability: {implied_no:.0f}%)
-Market spread cost: {spread:.0f}¢ (YES+NO ask = {yes_ask+no_ask:.0f}¢; you pay this vig to trade both sides)
-Volume: {volume:,}  |  Open interest: {open_interest:,}  |  Liquidity: {liquidity_note}
-Closes: {close_time}
-Kalshi taker fee: ~2% of notional (already factored into minimum edge requirement)
-{signal_text}{context_block}
+Closes:   {close_time}
 
-Evaluate: Does a genuine edge exist AFTER accounting for the spread and 2% fee?
+=== PRICES (in cents, market pays 100¢ on correct resolution) ===
+YES ask: {yes_ask:.0f}¢  → market implies {yes_ask:.0f}% chance YES resolves
+NO ask:  {no_ask:.0f}¢  → market implies {no_ask:.0f}% chance NO resolves
+Spread:  {spread:.0f}¢ (YES+NO sum; ideally 100¢, excess is market maker profit)
+Volume:  {volume:,}  |  Open interest: {open_interest:,}  |  Liquidity: {liquidity}
 
-Respond with valid JSON only (no markdown):
+=== EXPECTED VALUE (per contract, after 2% Kalshi fee) ===
+If you BUY YES @ {yes_ask:.0f}¢: you win {yes_ev_if_true:.1f}¢ if YES, lose {yes_ask:.0f}¢ if NO
+If you BUY NO  @ {no_ask:.0f}¢: you win {no_ev_if_true:.1f}¢ if NO,  lose {no_ask:.0f}¢ if YES
+For BUY YES to have +EV: your true P(YES) must exceed {yes_ask/98*100:.1f}%
+For BUY NO  to have +EV: your true P(NO)  must exceed {no_ask/98*100:.1f}%
+{arb_text}{context_block}
+
+=== YOUR TASK ===
+Step 1 — Use the real-world context above to estimate the TRUE probability of YES resolving.
+Step 2 — Compare to market price. Calculate net EV = (true_prob - market_price/100) * 98¢.
+Step 3 — Only BUY if |net_ev| > 4¢ AND volume >= 100 AND price is between 5¢ and 95¢.
+Step 4 — Choose the side (YES or NO) with positive EV.
+
+Respond ONLY with this exact JSON (no markdown, no explanation outside it):
 {{
-  "action": "BUY" | "SELL" | "HOLD",
+  "true_prob_yes": <your estimated probability 0-100 that YES resolves>,
+  "action": "BUY" | "HOLD",
   "side": "yes" | "no" | null,
-  "confidence": <integer 0-100>,
-  "reasoning": "<1-2 sentences explaining the decision>"
+  "net_ev_cents": <expected profit per contract in cents, negative if unfavourable>,
+  "confidence": <integer 0-100 — how certain you are of your true_prob estimate>,
+  "reasoning": "<2-3 sentences: what facts from context drove your probability estimate and why>"
 }}
 
-Rules:
-- BUY = enter a new position (on the stated side)
-- Only recommend BUY if net edge after spread+fees is positive and material (>3¢ net expected value)
-- Confidence must reflect your TRUE probability estimate vs market price, not just strength of signal
-- Confidence > {self.trading_cfg.min_ai_confidence:.0f} required to generate a trade
-- Low volume (<100) or extreme prices (<5¢ or >95¢) → HOLD unless arb signal is present
-- When uncertain, choose HOLD — missing a trade is better than a bad one"""
+Critical rules:
+- Base true_prob on FACTS from the context block, not gut feeling. If no context, be very conservative.
+- confidence reflects certainty in your probability estimate, not how much you like the trade
+- confidence >= {self.trading_cfg.min_ai_confidence:.0f} required to place a trade
+- If context is missing or insufficient to form a strong view → HOLD
+- HOLD is almost always safer than a poorly-supported BUY"""
 
     async def decide(self, market: Dict, signals: List[Dict] = []) -> AIDecision:
         ticker = market.get("ticker", "UNKNOWN")
@@ -119,10 +136,24 @@ Rules:
                 )
             )
             raw = response.content[0].text.strip()
-            data = json.loads(raw)
-            action = data.get("action", "HOLD").upper()
-            confidence = float(data.get("confidence", 0))
-            reasoning = data.get("reasoning", "")
+            # Strip markdown fences if model wraps JSON
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            data = json.loads(raw.strip())
+
+            action      = data.get("action", "HOLD").upper()
+            side        = (data.get("side") or "yes").lower()
+            confidence  = float(data.get("confidence", 0))
+            reasoning   = data.get("reasoning", "")
+            true_prob   = data.get("true_prob_yes")
+            net_ev      = data.get("net_ev_cents")
+
+            # Extra guard: reject low EV even if model says BUY
+            if action == "BUY" and net_ev is not None and float(net_ev) < 4.0:
+                action = "HOLD"
+                reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < 4¢ threshold] " + reasoning
 
             decision = AIDecision(
                 action=action,
@@ -130,10 +161,16 @@ Rules:
                 reasoning=reasoning,
                 model=self.cfg.model,
                 ticker=ticker,
+                side=side,
+                true_prob=true_prob,
+                net_ev=net_ev,
             )
 
+            ev_str = f" | EV={net_ev:.1f}¢" if net_ev is not None else ""
+            tp_str = f" | P(YES)={true_prob:.0f}%" if true_prob is not None else ""
             logger.info(
-                f"[AI] {ticker} → {action} | confidence={confidence:.0f}% | {reasoning[:80]}"
+                "[AI] %s → %s/%s | conf=%d%%%s%s | %s",
+                ticker, action, side.upper(), confidence, tp_str, ev_str, reasoning[:80],
             )
 
             # Persist decision

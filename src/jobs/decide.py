@@ -16,10 +16,13 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
     decision = await engine.decide(market, signals)
     if engine.should_trade(decision):
         return {
-            "ticker": market.get("ticker"),
-            "action": decision.action,
+            "ticker":     market.get("ticker"),
+            "action":     decision.action,
+            "side":       decision.side,
             "confidence": decision.confidence,
-            "reasoning": decision.reasoning,
-            "model": decision.model,
+            "reasoning":  decision.reasoning,
+            "model":      decision.model,
+            "true_prob":  decision.true_prob,
+            "net_ev":     decision.net_ev,
         }
     return None

@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 logger = logging.getLogger("trading.jobs.trade")
 
@@ -214,11 +214,34 @@ async def run_trading_job(db=None) -> TradingResults:
 
         # ── 5. AI decisions on top non-arb markets ────────────────────────────
         arb_tickers = {s["ticker"] for s in all_signals}
-        candidates  = [m for m in markets if m.get("ticker") not in arb_tickers]
-        candidates  = candidates[:max_scan]
+
+        # Smart pre-filter and scoring before AI scan
+        # Score = volume-weighted tradability; exclude near-certain and dead markets
+        def _score_candidate(m: Dict) -> float:
+            yes_ask = m.get("yes_ask", 0)
+            no_ask  = m.get("no_ask", 0)
+            volume  = m.get("volume", 0)
+            if yes_ask <= 5 or yes_ask >= 95:   # near-certain → skip
+                return -1.0
+            if no_ask <= 5 or no_ask >= 95:
+                return -1.0
+            if volume < min_vol:
+                return -1.0
+            # Markets near 50¢ have most uncertainty = most opportunity
+            distance_from_50 = abs(yes_ask - 50)
+            uncertainty_bonus = max(0, 25 - distance_from_50)   # 0–25
+            return volume * 0.001 + uncertainty_bonus
+
+        candidates = [
+            m for m in markets
+            if m.get("ticker") not in arb_tickers
+            and _score_candidate(m) > 0
+        ]
+        candidates.sort(key=_score_candidate, reverse=True)
+        candidates = candidates[:max_scan]
 
         logger.info(
-            "── AI Decisions (%d candidates, cap=%d remaining) ─────────────",
+            "── AI Decisions (%d scored candidates, cap=%d remaining) ─────",
             len(candidates), max_trades - trades_this_cycle,
         )
 
@@ -227,41 +250,43 @@ async def run_trading_job(db=None) -> TradingResults:
                 logger.info("Trade cap (%d) reached — stopping AI scan", max_trades)
                 break
 
-            ticker   = market.get("ticker", "")
-            yes_ask  = market.get("yes_ask", 0)
-            volume   = market.get("volume", 0)
-            title    = (market.get("title") or "")[:50]
+            ticker  = market.get("ticker", "")
+            yes_ask = market.get("yes_ask", 0)
+            no_ask  = market.get("no_ask", 0)
+            volume  = market.get("volume", 0)
+            title   = (market.get("title") or "")[:50]
 
             logger.debug(
-                "AI eval: %-30s | YES ask=%g¢ | vol=%g | %s",
-                ticker, yes_ask, volume, title,
+                "AI eval: %-30s | YES=%g¢ NO=%g¢ | vol=%g | %s",
+                ticker, yes_ask, no_ask, volume, title,
             )
-
-            # Price sanity guard
-            if yes_ask <= 0 or yes_ask >= 100:
-                logger.info(
-                    "SKIP %s | Price %.0f¢ invalid (must be 1–99¢)", ticker, yes_ask
-                )
-                results.skipped += 1
-                continue
 
             decision = await make_decision_for_market(market, all_signals, db=db)
             if not decision:
                 logger.info(
-                    "SKIP %s | AI returned HOLD or confidence below %.0f%%",
+                    "SKIP %s | AI → HOLD or conf < %.0f%%",
                     ticker, settings.trading.min_ai_confidence,
                 )
                 results.skipped += 1
                 continue
 
+            # Use the side the AI chose; pick correct ask price for that side
+            side  = decision.get("side", "yes")
+            price = yes_ask if side == "yes" else no_ask
+            net_ev = decision.get("net_ev")
+            ev_str = f" | EV={net_ev:.1f}¢" if net_ev is not None else ""
+
+            # Final EV sanity check on actual price
+            if price <= 0 or price >= 100:
+                logger.info("SKIP %s | %s ask=%.0f¢ out of range", ticker, side.upper(), price)
+                results.skipped += 1
+                continue
+
             logger.info(
-                "AI signal: %s → %s | confidence=%.0f%% | %s",
-                ticker, decision["action"], decision["confidence"],
+                "AI signal: %s → BUY %s @ %.0f¢ | conf=%.0f%%%s | %s",
+                ticker, side.upper(), price, decision["confidence"], ev_str,
                 decision["reasoning"][:80],
             )
-
-            side  = "yes"
-            price = yes_ask
 
             allowed, reason = risk.check_trade(
                 ticker, scaler.current_size,
