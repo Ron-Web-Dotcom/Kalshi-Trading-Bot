@@ -48,10 +48,11 @@ async def run_trading_job(db=None) -> TradingResults:
         db = DatabaseManager()
         await db.initialize()
 
-    live_mode = settings.trading.live_trading_enabled
-    max_trades  = settings.trading.max_trades_per_cycle
-    max_scan    = settings.trading.max_markets_to_scan
-    min_vol     = settings.trading.min_market_volume
+    live_mode    = settings.trading.live_trading_enabled
+    max_trades   = settings.trading.max_trades_per_cycle
+    max_scan     = settings.trading.max_markets_to_scan
+    min_vol      = settings.trading.min_market_volume
+    portfolio_val = settings.trading.portfolio_value
 
     kalshi    = KalshiClient()
     fetcher   = MarketDataFetcher(kalshi, db)
@@ -127,7 +128,7 @@ async def run_trading_job(db=None) -> TradingResults:
                 for side, price in [("yes", yes_p), ("no", no_p)]:
                     allowed, reason = risk.check_trade(
                         ticker + f"_{side}", scaler.current_size,
-                        current_positions=[], portfolio_value=1000.0,
+                        current_positions=[], portfolio_value=portfolio_val,
                     )
                     if not allowed:
                         logger.info(
@@ -179,7 +180,7 @@ async def run_trading_job(db=None) -> TradingResults:
 
                 allowed, reason = risk.check_trade(
                     ticker, scaler.current_size,
-                    current_positions=[], portfolio_value=1000.0,
+                    current_positions=[], portfolio_value=portfolio_val,
                 )
                 if not allowed:
                     logger.info("SKIP cross-arb %s | Reason: %s", ticker, reason)
@@ -264,7 +265,7 @@ async def run_trading_job(db=None) -> TradingResults:
 
             allowed, reason = risk.check_trade(
                 ticker, scaler.current_size,
-                current_positions=[], portfolio_value=1000.0,
+                current_positions=[], portfolio_value=portfolio_val,
             )
             if not allowed:
                 logger.info("SKIP %s | Risk gate: %s", ticker, reason)

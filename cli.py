@@ -169,75 +169,122 @@ def cmd_dashboard(args: argparse.Namespace) -> None:
 
 
 def cmd_status(args: argparse.Namespace) -> None:
-    """Show current portfolio status: balance, positions, and P&L."""
+    """Show portfolio status — DB paper stats + live Kalshi balance (if reachable)."""
 
     async def _status() -> None:
-        from src.clients.kalshi_client import KalshiClient
+        from src.utils.database import DatabaseManager
+        from src.config.settings import settings
 
-        client = KalshiClient()
+        db = DatabaseManager()
+        await db.initialize()
+
+        # ── Paper trade stats from local DB (always available) ───────────────
+        stats = await db.fetchone("""
+            SELECT
+                COUNT(*)                                           AS total,
+                SUM(CASE WHEN pnl > 0  THEN 1 ELSE 0 END)         AS wins,
+                SUM(CASE WHEN pnl < 0  THEN 1 ELSE 0 END)         AS losses,
+                SUM(CASE WHEN pnl IS NULL THEN 1 ELSE 0 END)       AS open_count,
+                SUM(COALESCE(pnl, 0))                              AS total_pnl,
+                SUM(COALESCE(total_cost, 0))                       AS total_cost,
+                SUM(COALESCE(fee, 0))                              AS total_fees,
+                AVG(ai_confidence)                                 AS avg_conf
+            FROM trade_logs WHERE paper_trade=1
+        """) or {}
+
+        total     = stats.get("total") or 0
+        wins      = stats.get("wins")  or 0
+        losses    = stats.get("losses") or 0
+        open_c    = stats.get("open_count") or 0
+        total_pnl = stats.get("total_pnl")  or 0.0
+        total_cost = stats.get("total_cost") or 0.0
+        total_fees = stats.get("total_fees") or 0.0
+        avg_conf  = stats.get("avg_conf") or 0.0
+        settled   = wins + losses
+        win_rate  = (wins / settled * 100) if settled > 0 else 0.0
+
+        # Open positions
+        positions = await db.fetchall(
+            "SELECT ticker, side, contracts, avg_price, current_price, pnl "
+            "FROM positions WHERE status='open' ORDER BY pnl DESC"
+        )
+
+        # Last 5 closed trades
+        last5 = await db.fetchall("""
+            SELECT ticker, action, side, price, contracts, total_cost, pnl,
+                   signal_source, executed_at
+            FROM trade_logs WHERE paper_trade=1 AND pnl IS NOT NULL
+            ORDER BY executed_at DESC LIMIT 5
+        """)
+
+        # Markets cached count
+        mkt_count = (await db.fetchone("SELECT COUNT(*) AS n FROM markets") or {}).get("n", 0)
+
+        W = 62
+        sep = "═" * W
+        thin = "─" * W
+
+        print(f"\n╔{sep}╗")
+        print(f"║{'  KALSHI BOT — PAPER TRADING STATUS':^{W}}║")
+        print(f"╠{sep}╣")
+        mode = "PAPER (safe)" if not settings.trading.live_trading_enabled else "⚠ LIVE"
+        print(f"║  Mode            : {mode:<{W-20}}║")
+        print(f"║  Markets cached  : {mkt_count:<{W-20}}║")
+        print(f"╠{sep}╣")
+        print(f"║{'  PAPER TRADE PERFORMANCE':^{W}}║")
+        print(f"╠{sep}╣")
+        pnl_str = f"{'+'if total_pnl>=0 else ''}${total_pnl:.2f}"
+        print(f"║  Total trades    : {total:<5}  (open: {open_c}  settled: {settled}){'':<5}║")
+        print(f"║  Win / Loss      : {wins} / {losses:<{W-22}}║")
+        print(f"║  Win rate        : {win_rate:.1f}%{'':<{W-22}}║")
+        print(f"║  Total PnL       : {pnl_str:<{W-20}}║")
+        print(f"║  Total capital   : ${total_cost:.2f}  fees: ${total_fees:.2f}{'':<{W-34}}║")
+        print(f"║  Avg AI conf     : {avg_conf:.0f}%{'':<{W-22}}║")
+        print(f"╠{sep}╣")
+
+        if positions:
+            print(f"║  {'OPEN POSITIONS':^{W-2}}║")
+            print(f"║  {'TICKER':<28} {'SIDE':<4} {'CTR':>4} {'ENTRY':>6} {'CUR':>6} {'PnL':>8}  ║")
+            print(f"║  {thin[:-2]}  ║")
+            for p in positions[:10]:
+                pnl_v  = p.get("pnl") or 0.0
+                cur    = p.get("current_price") or p.get("avg_price") or 0
+                pstr   = f"${pnl_v:+.2f}"
+                print(f"║  {(p['ticker'] or '')[:28]:<28} {p['side']:<4} "
+                      f"{p['contracts']:>4} {p['avg_price']:>5.0f}¢ {cur:>5.0f}¢ {pstr:>8}  ║")
+        else:
+            print(f"║  No open positions.{'':<{W-21}}║")
+
+        print(f"╠{sep}╣")
+        if last5:
+            print(f"║  {'LAST 5 SETTLED TRADES':^{W-2}}║")
+            print(f"║  {'TICKER':<26} {'ACT':<4} {'SIDE':<4} {'PRICE':>6} {'PnL':>8} {'SOURCE':<10}  ║")
+            print(f"║  {thin[:-2]}  ║")
+            for t in last5:
+                pnl_v = t.get("pnl") or 0.0
+                src   = (t.get("signal_source") or "")[:10]
+                print(f"║  {(t['ticker'] or '')[:26]:<26} {t['action']:<4} {t['side']:<4} "
+                      f"{t['price']:>5.0f}¢ ${pnl_v:>+7.2f} {src:<10}  ║")
+        else:
+            print(f"║  No settled trades yet.{'':<{W-25}}║")
+
+        # Try live API balance (graceful fallback)
+        print(f"╠{sep}╣")
         try:
-            # Fetch balance
-            balance_resp = await client.get_balance()
-            balance_cents = balance_resp.get("balance", 0)
-            balance_usd = balance_cents / 100.0
-
-            # Fetch positions — Kalshi API v2 returns event_positions and market_positions
-            portfolio_value_cents = balance_resp.get("portfolio_value", 0)
-            portfolio_value_usd = portfolio_value_cents / 100.0
-
-            positions_resp = await client.get_positions()
-            event_positions = positions_resp.get("event_positions", [])
-            active_positions = [
-                p for p in event_positions
-                if float(p.get("event_exposure_dollars", "0")) > 0
-            ]
-
-            # Display
-            print("=" * 56)
-            print("  PORTFOLIO STATUS")
-            print("=" * 56)
-            print(f"  Available Cash:     ${balance_usd:>10,.2f}")
-            print(f"  Position Value:     ${portfolio_value_usd:>10,.2f}")
-            print(f"  Total Portfolio:    ${balance_usd + portfolio_value_usd:>10,.2f}")
-            print(f"  Active Positions:   {len(active_positions):>10}")
-
-            total_exposure = 0.0
-            total_realized_pnl = 0.0
-            total_fees = 0.0
-
-            if active_positions:
-                print()
-                print(f"  {'Event':<30} {'Exposure':>10} {'Cost':>10} {'P&L':>10} {'Fees':>8}")
-                print(f"  {'-'*30} {'-'*10} {'-'*10} {'-'*10} {'-'*8}")
-
-                for pos in active_positions:
-                    ticker = pos.get("event_ticker", "???")
-                    exposure = float(pos.get("event_exposure_dollars", "0"))
-                    cost = float(pos.get("total_cost_dollars", "0"))
-                    pnl = float(pos.get("realized_pnl_dollars", "0"))
-                    fees = float(pos.get("fees_paid_dollars", "0"))
-                    total_exposure += exposure
-                    total_realized_pnl += pnl
-                    total_fees += fees
-                    print(
-                        f"  {ticker:<30} ${exposure:>8.2f} ${cost:>8.2f} "
-                        f"${pnl:>8.2f} ${fees:>6.2f}"
-                    )
-
-                print()
-                print(f"  Total Exposure:     ${total_exposure:>10,.2f}")
-                print(f"  Total Realized P&L: ${total_realized_pnl:>10,.2f}")
-                print(f"  Total Fees Paid:    ${total_fees:>10,.2f}")
-
-            print("=" * 56)
-        finally:
+            from src.clients.kalshi_client import KalshiClient
+            client = KalshiClient()
+            bal_resp = await client.get_balance()
             await client.close()
+            cash  = (bal_resp.get("balance") or 0) / 100
+            port  = (bal_resp.get("portfolio_value") or 0) / 100
+            print(f"║  KALSHI ACCOUNT (live)                                        ║")
+            print(f"║  Cash: ${cash:,.2f}   Portfolio value: ${port:,.2f}{'':<{W-45}}║")
+        except Exception:
+            print(f"║  Kalshi API: offline (paper stats above from local DB){'':<{W-55}}║")
 
-    try:
-        asyncio.run(_status())
-    except Exception as exc:
-        print(f"Error fetching status: {exc}")
-        sys.exit(1)
+        print(f"╚{sep}╝\n")
+
+    asyncio.run(_status())
 
 
 def cmd_scores(args: argparse.Namespace) -> None:

@@ -51,16 +51,34 @@ async def run_evaluation(db=None) -> None:
         scaler      = AutoScaler()
         scale_factor = scaler.update(total_pnl)
 
-        now = datetime.now(timezone.utc).isoformat()
+        now  = datetime.now(timezone.utc).isoformat()
+        today = now[:10]  # YYYY-MM-DD
+
         await db.insert("performance_metrics", {
-            "total_trades":        total,
-            "winning_trades":      wins,
-            "losing_trades":       losses,
-            "total_pnl":           total_pnl,
-            "win_rate":            win_rate,
+            "total_trades":         total,
+            "winning_trades":       wins,
+            "losing_trades":        losses,
+            "total_pnl":            total_pnl,
+            "win_rate":             win_rate,
             "current_scale_factor": scaler.scale_factor,
-            "recorded_at":         now,
+            "recorded_at":          now,
         })
+
+        # Upsert today's daily_stats
+        daily = await db.fetchone(
+            "SELECT trades, pnl, ai_cost FROM daily_stats WHERE date=?", (today,)
+        )
+        ai_cost = await db.get_daily_ai_cost()
+        if daily:
+            await db.execute(
+                "UPDATE daily_stats SET trades=?, pnl=?, ai_cost=? WHERE date=?",
+                (total, total_pnl, ai_cost, today)
+            )
+        else:
+            await db.execute(
+                "INSERT INTO daily_stats (date, trades, pnl, ai_cost) VALUES (?,?,?,?)",
+                (today, total, total_pnl, ai_cost)
+            )
 
         # ── Console summary ──────────────────────────────────────────────────
         pnl_sign = "+" if total_pnl >= 0 else ""
