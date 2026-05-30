@@ -57,15 +57,15 @@ async def run_trading_job(db=None) -> TradingResults:
     min_vol       = settings.trading.min_market_volume
     portfolio_val = settings.trading.portfolio_value
 
-    kalshi     = KalshiClient()
+    kalshi      = KalshiClient()
     poly_client = PolymarketTradingClient()
-    fetcher    = MarketDataFetcher(kalshi, db)
-    comparator = ExternalMarketComparator(db)
-    arb        = ArbitrageDetector()
-    risk       = RiskManager(db)
-    scaler     = AutoScaler()
-    discord    = DiscordAlerter()
-    results    = TradingResults()
+    fetcher     = MarketDataFetcher(kalshi, db)
+    comparator  = ExternalMarketComparator(db)
+    arb         = ArbitrageDetector()
+    risk        = RiskManager(db)
+    scaler      = AutoScaler()
+    discord     = DiscordAlerter()
+    results     = TradingResults()
     trades_this_cycle = 0
 
     mode_label = "LIVE" if live_mode else "PAPER"
@@ -194,7 +194,7 @@ async def run_trading_job(db=None) -> TradingResults:
                     results.skipped += 1
                     continue
 
-                rec = await trader.execute(
+                rec = await kalshi_trader.execute(
                     ticker=ticker, action="BUY", side=side,
                     price_cents=price, ai_confidence=95.0,
                     ai_reasoning=(
@@ -241,7 +241,6 @@ async def run_trading_job(db=None) -> TradingResults:
         if poly_enabled:
             try:
                 poly_markets = await poly_client.get_markets(limit=200)
-                # Filter to reasonable volume and price range
                 poly_markets = [
                     m for m in poly_markets
                     if m.get("volume", 0) >= min_vol
@@ -331,7 +330,6 @@ async def run_trading_job(db=None) -> TradingResults:
                         net_ev or 0, exp_profit_usd or 0, poly_str,
                     )
 
-                    # Discord: notify we found the best opportunity before placing
                     platform = best.get("platform", "kalshi")
                     try:
                         await discord.best_opportunity_found(
@@ -352,7 +350,6 @@ async def run_trading_job(db=None) -> TradingResults:
                     except Exception:
                         pass
 
-                    # Route to the correct platform's trader
                     platform = best.get("platform", "kalshi")
                     active_trader = kalshi_trader if platform == "kalshi" else poly_trader
 
@@ -366,8 +363,8 @@ async def run_trading_job(db=None) -> TradingResults:
                         signal_source=decision.get("model", "ai"),
                         net_ev=net_ev,
                         market_title=market.get("title", ""),
-                        **({"poly_token_id": market.get("_yes_token") if side == "yes" else market.get("_no_token")}
-                           if platform == "polymarket" else {}),
+                        **({{"poly_token_id": market.get("_yes_token") if side == "yes" else market.get("_no_token")}}
+                           if platform == "polymarket" else {{}}),
                     )
                     if rec:
                         trades_this_cycle += 1

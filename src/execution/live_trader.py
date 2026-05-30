@@ -40,10 +40,11 @@ class LiveTrader:
     async def execute(self, ticker: str, action: str, side: str,
                       price_cents: float, ai_confidence: float = 0.0,
                       ai_reasoning: str = "", signal_source: str = "live",
-                      forced_size: Optional[float] = None) -> Optional[Dict]:
+                      forced_size: Optional[float] = None,
+                      net_ev: Optional[float] = None,
+                      market_title: str = "", **kwargs) -> Optional[Dict]:
         """Place a real limit order on Kalshi. Returns order dict or None."""
 
-        # ── Safety gates ──────────────────────────────────────────────────────
         if not self.cfg.live_trading_enabled:
             logger.error("execute() called but live trading disabled — aborting")
             return None
@@ -52,7 +53,6 @@ class LiveTrader:
             logger.warning(f"[LIVE] Refusing trade {ticker}: invalid price {price_cents:.0f}¢")
             return None
 
-        # ── Size ──────────────────────────────────────────────────────────────
         if forced_size is not None:
             size = forced_size
         elif self.risk and ai_confidence > 0:
@@ -71,7 +71,6 @@ class LiveTrader:
         fee = notional * KALSHI_FEE_PCT
         total_cost = notional + fee
 
-        # ── Place order ───────────────────────────────────────────────────────
         try:
             order_resp = await self.kalshi.create_order(
                 ticker=ticker,
@@ -136,6 +135,7 @@ class LiveTrader:
                     price=price_cents, contracts=contracts,
                     size_dollars=total_cost, pnl=None,
                     ai_confidence=ai_confidence, paper=False,
+                    market_title=market_title,
                 )
             except Exception:
                 pass
