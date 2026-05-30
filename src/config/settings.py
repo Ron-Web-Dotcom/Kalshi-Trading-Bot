@@ -41,7 +41,7 @@ class KalshiConfig:
     base_url: str = field(default_factory=lambda: _env(
         "KALSHI_BASE_URL",
         "https://demo-api.kalshi.co/trade-api/v2" if _env_bool("KALSHI_USE_DEMO", True)
-        else "https://trading.kalshi.com/trade-api/v2"
+        else "https://trading-api.kalshi.com/trade-api/v2"
     ))
     rate_limit_per_second: int = field(default_factory=lambda: _env_int("KALSHI_RATE_LIMIT", 10))
     timeout: int = field(default_factory=lambda: _env_int("KALSHI_TIMEOUT", 30))
