@@ -120,11 +120,17 @@ class DatabaseManager:
                 """)
                 await db.commit()
                 # Idempotent migrations for existing databases
-                try:
-                    await db.execute("ALTER TABLE trade_logs ADD COLUMN fee REAL DEFAULT 0")
-                    await db.commit()
-                except Exception:
-                    pass  # Column already exists
+                for migration in [
+                    "ALTER TABLE trade_logs ADD COLUMN fee REAL DEFAULT 0",
+                    "ALTER TABLE trade_logs ADD COLUMN platform TEXT DEFAULT 'kalshi'",
+                    "ALTER TABLE positions  ADD COLUMN platform TEXT DEFAULT 'kalshi'",
+                    "ALTER TABLE positions  ADD COLUMN poly_token_id TEXT",
+                ]:
+                    try:
+                        await db.execute(migration)
+                        await db.commit()
+                    except Exception:
+                        pass  # Column already exists
             self._initialized = True
             logger.info(f"Database initialized at {self.db_path}")
 

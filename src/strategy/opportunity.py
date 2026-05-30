@@ -1,13 +1,15 @@
 """
-Best-single-opportunity hunter.
+Best-single-opportunity hunter — scans BOTH Kalshi and Polymarket.
 
-Scans ALL candidate markets, scores each one, and returns only the single
-highest-confidence, highest-EV trade for the cycle.
+Pulls live markets from both platforms, evaluates each with the AI using
+full real-world context, scores each candidate, and returns the single
+highest-confidence, highest-EV trade regardless of which platform it's on.
 
 Philosophy:
   - Don't chase volume; chase conviction.
   - One great trade beats five mediocre ones, especially on a small account.
   - If nothing clears the bar, return nothing — cash is a valid position.
+  - Platform is irrelevant; edge is everything.
 
 Scoring formula (all components 0–1, multiplied together):
   score = ev_score × confidence_score × data_quality × liquidity_score
@@ -15,7 +17,7 @@ Scoring formula (all components 0–1, multiplied together):
 Where:
   ev_score        = min(net_ev_cents / 20, 1.0)   — caps at 20¢ net EV
   confidence_score= confidence / 100
-  data_quality    = 1.0 if Poly match exists, 0.6 otherwise
+  data_quality    = 1.0 if cross-platform price match exists, 0.7 otherwise
   liquidity_score = min(volume / 10000, 1.0)
 """
 
@@ -44,7 +46,7 @@ def score_opportunity(
     ev_score         = min(net_ev / 20.0, 1.0)
     confidence_score = confidence / 100.0
     liquidity_score  = min(volume / 10000.0, 1.0)
-    data_quality     = 1.0 if poly_comp else 0.6
+    data_quality     = 1.0 if poly_comp else 0.7
 
     return ev_score * confidence_score * data_quality * liquidity_score
 
@@ -64,17 +66,25 @@ class OpportunityHunter:
         arb_signals:   List[Dict],
         poly_comps:    List[Dict],
         min_score:     float = 0.05,
+        poly_markets:  Optional[List[Dict]] = None,
     ) -> Optional[Dict]:
         """
-        Score all markets, return the highest-scoring one.
+        Score all candidates from BOTH Kalshi and Polymarket, return the best.
 
         Returns a dict:
-          {market, decision, poly_comp, score, side, price_cents}
+          {market, decision, poly_comp, score, side, price_cents, platform}
         or None if no market clears min_score.
         """
         from src.jobs.decide import make_decision_for_market
 
-        # Build poly lookup by ticker for O(1) access
+        # Merge Polymarket markets into candidate pool
+        all_candidates = list(markets)
+        if poly_markets:
+            all_candidates.extend(poly_markets)
+            logger.info("  Candidates: %d Kalshi + %d Polymarket = %d total",
+                        len(markets), len(poly_markets), len(all_candidates))
+
+        # Build poly cross-reference by Kalshi ticker
         poly_by_ticker = {c["kalshi_ticker"]: c for c in poly_comps}
 
         best_score    = 0.0
@@ -82,9 +92,9 @@ class OpportunityHunter:
         evaluated     = 0
         skipped_score = 0
 
-        logger.info("── Opportunity Hunt (%d candidates) ─────────────────────────", len(markets))
+        logger.info("── Opportunity Hunt (%d total candidates) ────────────────────", len(all_candidates))
 
-        for market in markets:
+        for market in all_candidates:
             ticker  = market.get("ticker", "")
             yes_ask = market.get("yes_ask", 0)
             no_ask  = market.get("no_ask",  0)
@@ -126,6 +136,7 @@ class OpportunityHunter:
                 best_score  = score
                 side        = decision.get("side", "yes")
                 price_cents = yes_ask if side == "yes" else no_ask
+                platform    = market.get("platform", "kalshi")
                 best_result = {
                     "market":      market,
                     "decision":    decision,
@@ -133,6 +144,7 @@ class OpportunityHunter:
                     "score":       score,
                     "side":        side,
                     "price_cents": price_cents,
+                    "platform":    platform,
                 }
 
         logger.info(
@@ -145,9 +157,11 @@ class OpportunityHunter:
             d = best_result["decision"]
             p = best_result.get("poly_comp")
             poly_str = f" | Poly_YES={p['poly_yes']:.0f}¢" if p else ""
+            platform_tag = best_result["platform"].upper()
             logger.info(
-                "BEST OPPORTUNITY: %s → BUY %s @ %.0f¢ | "
+                "BEST OPPORTUNITY [%s]: %s → BUY %s @ %.0f¢ | "
                 "score=%.3f conf=%d%% EV=%.1f¢%s | %s",
+                platform_tag,
                 m.get("ticker"), d.get("side", "yes").upper(),
                 best_result["price_cents"],
                 best_score, d.get("confidence", 0), d.get("net_ev") or 0,

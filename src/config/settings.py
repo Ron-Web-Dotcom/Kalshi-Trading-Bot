@@ -109,6 +109,16 @@ class TradingConfig:
 
 
 @dataclass
+class PolymarketConfig:
+    api_key:              str   = field(default_factory=lambda: _env("POLY_API_KEY"))
+    api_secret:           str   = field(default_factory=lambda: _env("POLY_API_SECRET"))
+    passphrase:           str   = field(default_factory=lambda: _env("POLY_API_PASSPHRASE"))
+    live_trading_enabled: bool  = field(default_factory=lambda: _env_bool("POLY_LIVE_TRADING", False))
+    enabled:              bool  = field(default_factory=lambda: _env_bool("POLY_ENABLED", True))
+    min_order_usdc:       float = field(default_factory=lambda: _env_float("POLY_MIN_ORDER", 1.0))
+
+
+@dataclass
 class AIConfig:
     anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))
     model: str = field(default_factory=lambda: _env("AI_MODEL", "claude-sonnet-4-6"))
@@ -145,12 +155,13 @@ class DatabaseConfig:
 
 @dataclass
 class Settings:
-    kalshi: KalshiConfig = field(default_factory=KalshiConfig)
-    trading: TradingConfig = field(default_factory=TradingConfig)
-    ai: AIConfig = field(default_factory=AIConfig)
-    alerts: AlertsConfig = field(default_factory=AlertsConfig)
-    logging: LoggingConfig = field(default_factory=LoggingConfig)
-    database: DatabaseConfig = field(default_factory=DatabaseConfig)
+    kalshi:     KalshiConfig     = field(default_factory=KalshiConfig)
+    polymarket: PolymarketConfig = field(default_factory=PolymarketConfig)
+    trading:    TradingConfig    = field(default_factory=TradingConfig)
+    ai:         AIConfig         = field(default_factory=AIConfig)
+    alerts:     AlertsConfig     = field(default_factory=AlertsConfig)
+    logging:    LoggingConfig    = field(default_factory=LoggingConfig)
+    database:   DatabaseConfig   = field(default_factory=DatabaseConfig)
 
 
 # Singleton

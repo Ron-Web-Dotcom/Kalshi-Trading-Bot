@@ -235,11 +235,12 @@ class DiscordAlerter:
         confidence: float, net_ev: Optional[float], exp_profit: Optional[float],
         score: float, reasoning: str,
         poly_yes: Optional[float] = None, poly_no: Optional[float] = None,
-        market_title: str = "", paper: bool = True,
+        market_title: str = "", paper: bool = True, platform: str = "kalshi",
     ) -> None:
         """Alert fired BEFORE placing the trade — 'here's the best opportunity we found today'."""
         if not self.cfg.alert_on_trade:
             return
+        platform_tag = "🟣 POLYMARKET" if platform == "polymarket" else "🟦 KALSHI"
         mode_tag   = "📝 PAPER" if paper else "💰 LIVE"
         score_pct  = f"{score * 100:.1f}"
         ev_str     = f"{net_ev:.1f}¢" if net_ev is not None else "n/a"
@@ -266,12 +267,13 @@ class DiscordAlerter:
                 "inline": False,
             })
 
+        fields.insert(0, {"name": "Platform", "value": platform_tag, "inline": True})
         title_line = f"\n_{market_title[:80]}_" if market_title else ""
         payload = self._embed(
             title=f"🎯 {mode_tag} Best Opportunity Found — {ticker}",
             description=(
-                f"**Placing bet: BUY {side.upper()} on `{ticker}`**{title_line}\n"
-                f"Scanned all markets — this is today's best edge."
+                f"**Placing bet: BUY {side.upper()} on `{ticker}`** {platform_tag}{title_line}\n"
+                f"Scanned Kalshi + Polymarket — this is today's best edge."
             ),
             color=0x00BFFF,
             fields=fields,
