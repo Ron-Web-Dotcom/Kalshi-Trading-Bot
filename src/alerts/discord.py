@@ -187,7 +187,8 @@ class DiscordAlerter:
 
     async def position_closed(self, ticker: str, side: str, contracts: int,
                                entry_cents: float, exit_cents: float,
-                               pnl: float, reason: str, paper: bool = True) -> None:
+                               pnl: float, reason: str, paper: bool = True,
+                               market_result: str = "", market_title: str = "") -> None:
         """Alert when any position is closed (stop-loss, take-profit, resolved, AI opt-out)."""
         if not self.cfg.alert_on_trade:
             return
@@ -197,14 +198,18 @@ class DiscordAlerter:
 
         # Human-readable trigger label
         if reason.startswith("resolved"):
-            trigger_emoji, trigger_label = "✅", "Market Resolved"
+            result     = market_result or reason.split(":")[-1].strip()
+            won        = (side.lower() == result.lower()) if result else (pnl >= 0)
+            outcome    = "WON ✅" if won else "LOST ❌"
+            result_str = result.upper() if result else "?"
+            trigger_emoji  = "✅" if won else "❌"
+            trigger_label  = f"Market Resolved {result_str} — You {outcome}"
         elif reason.startswith("stop_loss"):
-            trigger_emoji, trigger_label = "🛑", "Stop-Loss"
+            trigger_emoji, trigger_label = "🛑", "Stop-Loss Triggered"
         elif reason.startswith("take_profit"):
-            trigger_emoji, trigger_label = "🎯", "Take-Profit"
+            trigger_emoji, trigger_label = "🎯", "Take-Profit Hit"
         elif reason.startswith("ai_reeval"):
             trigger_emoji, trigger_label = "🤖", "AI Opted Out"
-            # Extract the reasoning text that follows "ai_reeval:"
             ai_reason = reason[len("ai_reeval:"):].strip()
         else:
             trigger_emoji, trigger_label = "🔒", reason
@@ -226,12 +231,22 @@ class DiscordAlerter:
                 "inline": False,
             })
 
+        title_line = f"\n_{market_title[:80]}_" if market_title else ""
+        if reason.startswith("resolved"):
+            desc = (
+                f"**Prediction: {side.upper()}** on `{ticker}`{title_line}\n"
+                f"Market resolved **{result_str}** — **{outcome}**\n"
+                f"PnL: **${pnl_sign}{abs(pnl):.2f}**"
+            )
+        else:
+            desc = (
+                f"Closed **{side.upper()}** position on `{ticker}`{title_line}\n"
+                f"PnL: **${pnl_sign}{abs(pnl):.2f}**  ({trigger_label})"
+            )
+
         payload = self._embed(
             title=f"{trigger_emoji} {mode_tag} Position Closed — {ticker}",
-            description=(
-                f"Closed **{side.upper()}** position on `{ticker}`\n"
-                f"PnL: **${pnl_sign}{abs(pnl):.2f}**  ({trigger_label})"
-            ),
+            description=desc,
             color=color,
             fields=fields,
         )
