@@ -137,10 +137,13 @@ async def run_tracking(db_manager) -> None:
                         logger.info("  AI opted out: %s", reeval.get("reasoning", "")[:120])
 
                     # Discord: position closed (all triggers)
+                    market_result = mkt.get("result", "") if close_reason.startswith("resolved") else ""
                     await discord.position_closed(
                         ticker=ticker, side=side, contracts=contracts,
                         entry_cents=avg_price, exit_cents=final_price,
                         pnl=pnl, reason=close_reason, paper=paper,
+                        market_result=market_result,
+                        market_title=mkt.get("title", "") or mkt.get("question", ""),
                     )
                 else:
                     await db_manager.execute(
