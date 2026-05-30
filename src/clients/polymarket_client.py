@@ -1,25 +1,15 @@
 """
-Polymarket CLOB trading client — L2 authentication (API key + secret + passphrase).
+Polymarket CLOB trading client — Ed25519 authentication.
 
-Supports:
-  - Reading market data (already in external_markets.py)
-  - Paper trading simulation (tracks positions in local DB, no real orders)
-  - Live trading via signed CLOB API orders (requires POLY_API_KEY etc. in .env)
+Authentication (from Polymarket docs):
+  Sign: Ed25519(secret_key, timestamp + method + path + body)
+  Headers: X-PM-Access-Key, X-PM-Timestamp, X-PM-Signature (base64)
 
-Authentication:
-  L2 auth signs requests with HMAC-SHA256:
-  signature = HMAC_SHA256(api_secret, timestamp + method + path + body)
-  Headers: POLY-API-KEY, POLY-API-SIGNATURE, POLY-API-PASSPHRASE, POLY-API-TIMESTAMP
-
-Polymarket price convention:
-  Prices are fractions 0.0–1.0 on the wire (e.g. 0.45 = 45¢ equivalent).
-  We convert to cents internally: price_cents = price_fraction * 100.
-  Min order size: $1 USDC (on Polygon).
-  Polymarket fee: ~2% on winnings (not on notional), built into price spread.
+The secret key is a base64-encoded Ed25519 private key (32 bytes).
+cryptography library (already in requirements) handles signing.
 """
 
-import hashlib
-import hmac
+import base64
 import json
 import logging
 import time
@@ -29,61 +19,68 @@ import httpx
 
 logger = logging.getLogger("trading.polymarket_client")
 
-CLOB_BASE   = "https://clob.polymarket.com"
-GAMMA_BASE  = "https://gamma-api.polymarket.com"
-_TIMEOUT    = httpx.Timeout(15.0)
+CLOB_BASE  = "https://clob.polymarket.com"
+GAMMA_BASE = "https://gamma-api.polymarket.com"
+_TIMEOUT   = httpx.Timeout(15.0)
 
 
 class PolymarketTradingClient:
     """
-    Full Polymarket CLOB client.
+    Full Polymarket CLOB client with Ed25519 request signing.
 
-    Paper mode (default): simulates orders, records positions in local DB.
+    Paper mode (default): simulates orders, records to local DB.
     Live mode: signs and submits real CLOB orders on Polygon.
     """
 
     def __init__(self):
         from src.config.settings import settings
-        cfg              = settings.polymarket
-        self.api_key     = cfg.api_key
-        self.api_secret  = cfg.api_secret
-        self.passphrase  = cfg.passphrase
-        self.live        = cfg.live_trading_enabled
+        cfg             = settings.polymarket
+        self.key_id     = cfg.api_key        # the UUID (KEY ID)
+        self.secret_b64 = cfg.api_secret     # base64 Ed25519 private key
+        self.live       = cfg.live_trading_enabled
         self._http: Optional[httpx.AsyncClient] = None
+        self._signing_key = None             # lazy-loaded Ed25519PrivateKey
 
     def _client(self) -> httpx.AsyncClient:
         if self._http is None or self._http.is_closed:
             self._http = httpx.AsyncClient(timeout=_TIMEOUT, headers={"User-Agent": "Mozilla/5.0"})
         return self._http
 
-    # ── Auth helpers ──────────────────────────────────────────────────────────
+    def _get_signing_key(self):
+        """Lazy-load and cache the Ed25519 private key."""
+        if self._signing_key is None and self.secret_b64:
+            try:
+                from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+                raw = base64.b64decode(self.secret_b64)
+                # Ed25519 private key is 32 bytes; if 64 bytes it's seed+public, take first 32
+                self._signing_key = Ed25519PrivateKey.from_private_bytes(raw[:32])
+            except Exception as e:
+                logger.error("Failed to load Polymarket signing key: %s", e)
+        return self._signing_key
 
     def _sign(self, timestamp: str, method: str, path: str, body: str = "") -> str:
-        """HMAC-SHA256 signature for L2 auth."""
-        msg = timestamp + method.upper() + path + body
-        return hmac.new(
-            self.api_secret.encode(),
-            msg.encode(),
-            hashlib.sha256,
-        ).hexdigest()
+        """Ed25519 sign → base64 encoded signature."""
+        key = self._get_signing_key()
+        if not key:
+            return ""
+        msg = (timestamp + method.upper() + path + body).encode()
+        sig = key.sign(msg)
+        return base64.b64encode(sig).decode()
 
     def _auth_headers(self, method: str, path: str, body: str = "") -> Dict[str, str]:
-        ts = str(int(time.time() * 1000))
+        ts  = str(int(time.time() * 1000))
+        sig = self._sign(ts, method, path, body)
         return {
-            "POLY-API-KEY":        self.api_key,
-            "POLY-API-SIGNATURE":  self._sign(ts, method, path, body),
-            "POLY-API-PASSPHRASE": self.passphrase,
-            "POLY-API-TIMESTAMP":  ts,
-            "Content-Type":        "application/json",
+            "X-PM-Access-Key":  self.key_id,
+            "X-PM-Timestamp":   ts,
+            "X-PM-Signature":   sig,
+            "Content-Type":     "application/json",
         }
 
     # ── Market data ───────────────────────────────────────────────────────────
 
     async def get_markets(self, limit: int = 300) -> List[Dict]:
-        """
-        Fetch active Polymarket markets with current YES/NO prices.
-        Returns normalised dicts matching our internal format.
-        """
+        """Fetch active Polymarket markets with current YES/NO prices."""
         try:
             r = await self._client().get(
                 f"{GAMMA_BASE}/markets",
@@ -99,13 +96,14 @@ class PolymarketTradingClient:
                 if len(prices) < 2:
                     continue
                 try:
-                    yes_price = float(prices[0]) * 100   # fraction → cents
+                    yes_price = float(prices[0]) * 100
                     no_price  = float(prices[1]) * 100
                 except (TypeError, ValueError):
                     continue
                 if not (5 < yes_price < 95):
                     continue
 
+                token_ids = m.get("clobTokenIds") or []
                 markets.append({
                     "platform":    "polymarket",
                     "ticker":      m.get("conditionId") or m.get("id", ""),
@@ -114,16 +112,14 @@ class PolymarketTradingClient:
                     "category":    (m.get("category") or "").lower(),
                     "yes_ask":     yes_price,
                     "no_ask":      no_price,
-                    "yes_bid":     yes_price - 1,   # approximate; Gamma doesn't give bid
-                    "no_bid":      no_price  - 1,
+                    "yes_bid":     max(yes_price - 1, 1),
+                    "no_bid":      max(no_price  - 1, 1),
                     "volume":      float(m.get("volume") or 0),
-                    "end_date":    m.get("endDate", ""),
                     "close_time":  m.get("endDate", ""),
                     "open_interest": 0,
                     "status":      "open",
-                    # Token IDs needed for order placement
-                    "_yes_token":  m.get("clobTokenIds", [None])[0] if m.get("clobTokenIds") else None,
-                    "_no_token":   m.get("clobTokenIds", [None, None])[1] if m.get("clobTokenIds") and len(m.get("clobTokenIds", [])) > 1 else None,
+                    "_yes_token":  token_ids[0] if len(token_ids) > 0 else None,
+                    "_no_token":   token_ids[1] if len(token_ids) > 1 else None,
                 })
             logger.debug("Polymarket: fetched %d tradeable markets", len(markets))
             return markets
@@ -132,8 +128,8 @@ class PolymarketTradingClient:
             return []
 
     async def get_balance(self) -> Optional[float]:
-        """Fetch USDC balance from Polymarket (requires auth)."""
-        if not self.api_key:
+        """Fetch USDC balance (requires valid credentials)."""
+        if not self.key_id:
             return None
         path = "/balance"
         try:
@@ -142,8 +138,7 @@ class PolymarketTradingClient:
                 headers=self._auth_headers("GET", path),
             )
             r.raise_for_status()
-            data = r.json()
-            return float(data.get("balance", 0))
+            return float(r.json().get("balance", 0))
         except Exception as e:
             logger.debug("Polymarket balance fetch failed: %s", e)
             return None
@@ -153,44 +148,35 @@ class PolymarketTradingClient:
     async def place_order(
         self,
         token_id:    str,
-        side:        str,     # "buy" or "sell"
-        price_cents: float,   # 0–100¢
-        size_usdc:   float,   # dollar amount to spend
+        side:        str,
+        price_cents: float,
+        size_usdc:   float,
     ) -> Optional[Dict]:
-        """
-        Place a limit order on Polymarket CLOB.
-        Returns order response or None on failure.
-
-        price_cents is converted back to fraction for the wire format.
-        size = size_usdc / price_fraction  → number of shares/contracts.
-        """
+        """Place a limit order. Paper mode logs and returns simulated response."""
         if not self.live:
             logger.debug(
-                "[POLY PAPER] Would place %s order: token=%s price=%.0f¢ size=$%.2f",
-                side.upper(), token_id[:12] if token_id else "?", price_cents, size_usdc,
+                "[POLY PAPER] %s token=%s price=%.0f¢ size=$%.2f",
+                side.upper(), (token_id or "?")[:12], price_cents, size_usdc,
             )
-            return {"simulated": True, "token_id": token_id, "price": price_cents, "size": size_usdc}
+            return {"simulated": True, "token_id": token_id, "price": price_cents}
 
-        if not self.api_key or not self.api_secret:
-            logger.error("Polymarket live trading requires POLY_API_KEY and POLY_API_SECRET")
+        if not self.key_id or not self.secret_b64:
+            logger.error("Polymarket live trading requires POLY_API_KEY and POLY_API_SECRET in .env")
             return None
 
         price_frac = price_cents / 100.0
         shares     = round(size_usdc / price_frac, 2) if price_frac > 0 else 0
-
-        body_dict = {
+        body_dict  = {
             "order": {
-                "tokenID":  token_id,
-                "price":    str(round(price_frac, 4)),
-                "size":     str(shares),
-                "side":     side.lower(),
-                "type":     "GTC",   # Good-Till-Cancelled limit order
-                "feeRateBps": "0",
+                "tokenID": token_id,
+                "price":   str(round(price_frac, 4)),
+                "size":    str(shares),
+                "side":    side.lower(),
+                "type":    "GTC",
             }
         }
         body = json.dumps(body_dict)
         path = "/order"
-
         try:
             r = await self._client().post(
                 f"{CLOB_BASE}{path}",
@@ -200,10 +186,9 @@ class PolymarketTradingClient:
             r.raise_for_status()
             resp = r.json()
             logger.info(
-                "POLY ORDER placed: token=%s %s @ %.0f¢ $%.2f → order_id=%s",
-                token_id[:12] if token_id else "?",
-                side.upper(), price_cents, size_usdc,
-                resp.get("orderID", "?"),
+                "POLY ORDER: token=%s %s @ %.0f¢ $%.2f → id=%s",
+                (token_id or "?")[:12], side.upper(),
+                price_cents, size_usdc, resp.get("orderID", "?"),
             )
             return resp
         except Exception as e:
