@@ -194,7 +194,7 @@ async def run_trading_job(db=None) -> TradingResults:
                     results.skipped += 1
                     continue
 
-                rec = await trader.execute(
+                rec = await kalshi_trader.execute(
                     ticker=ticker, action="BUY", side=side,
                     price_cents=price, ai_confidence=95.0,
                     ai_reasoning=(

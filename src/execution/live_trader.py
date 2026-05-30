@@ -40,7 +40,9 @@ class LiveTrader:
     async def execute(self, ticker: str, action: str, side: str,
                       price_cents: float, ai_confidence: float = 0.0,
                       ai_reasoning: str = "", signal_source: str = "live",
-                      forced_size: Optional[float] = None) -> Optional[Dict]:
+                      forced_size: Optional[float] = None,
+                      net_ev: Optional[float] = None,
+                      market_title: str = "", **kwargs) -> Optional[Dict]:
         """Place a real limit order on Kalshi. Returns order dict or None."""
 
         # ── Safety gates ──────────────────────────────────────────────────────
