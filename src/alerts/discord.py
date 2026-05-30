@@ -65,15 +65,22 @@ class DiscordAlerter:
             logger.warning("Discord test alert failed — check DISCORD_WEBHOOK_URL in .env")
         return ok
 
-    async def startup_banner(self, mode: str, balance: Optional[float] = None) -> None:
+    async def startup_banner(self, mode: str, balance: Optional[float] = None,
+                              poly_enabled: bool = False) -> None:
         """Send bot startup notification."""
+        from src.config.settings import settings
+        poly_on = poly_enabled or settings.polymarket.enabled
         color = 0xFF4444 if mode == "LIVE" else 0x00FF7F
-        fields = [{"name": "Trading Mode", "value": f"**{mode}**", "inline": True}]
+        platforms = "🟦 Kalshi + 🟣 Polymarket" if poly_on else "🟦 Kalshi"
+        fields = [
+            {"name": "Trading Mode", "value": f"**{mode}**", "inline": True},
+            {"name": "Platforms",    "value": platforms,      "inline": True},
+        ]
         if balance is not None:
             fields.append({"name": "Account Balance", "value": f"${balance:.2f}", "inline": True})
         payload = self._embed(
-            title=f"🚀 Kalshi Bot Started — {mode} MODE",
-            description="Bot is online and scanning markets.",
+            title=f"🚀 Kalshi + Polymarket Bot Started — {mode} MODE",
+            description=f"Bot is online and scanning markets on {platforms}.",
             color=color,
             fields=fields,
         )
