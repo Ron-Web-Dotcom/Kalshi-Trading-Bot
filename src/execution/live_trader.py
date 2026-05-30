@@ -138,6 +138,7 @@ class LiveTrader:
                     price=price_cents, contracts=contracts,
                     size_dollars=total_cost, pnl=None,
                     ai_confidence=ai_confidence, paper=False,
+                    market_title=market_title,
                 )
             except Exception:
                 pass

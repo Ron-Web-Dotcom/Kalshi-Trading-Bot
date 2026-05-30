@@ -66,6 +66,15 @@ async def run_trading_job(db=None) -> TradingResults:
     scaler     = AutoScaler()
     discord    = DiscordAlerter()
     results    = TradingResults()
+    kalshi      = KalshiClient()
+    poly_client = PolymarketTradingClient()
+    fetcher     = MarketDataFetcher(kalshi, db)
+    comparator  = ExternalMarketComparator(db)
+    arb         = ArbitrageDetector()
+    risk        = RiskManager(db)
+    scaler      = AutoScaler()
+    discord     = DiscordAlerter()
+    results     = TradingResults()
     trades_this_cycle = 0
 
     mode_label = "LIVE" if live_mode else "PAPER"
@@ -368,6 +377,8 @@ async def run_trading_job(db=None) -> TradingResults:
                         market_title=market.get("title", ""),
                         **({"poly_token_id": market.get("_yes_token") if side == "yes" else market.get("_no_token")}
                            if platform == "polymarket" else {}),
+                        **({{"poly_token_id": market.get("_yes_token") if side == "yes" else market.get("_no_token")}}
+                           if platform == "polymarket" else {{}}),
                     )
                     if rec:
                         trades_this_cycle += 1
