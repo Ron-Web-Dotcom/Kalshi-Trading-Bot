@@ -144,7 +144,7 @@ async def run_trading_job(db=None) -> TradingResults:
                         )
                         results.skipped += 1
                         continue
-                    rec = await trader.execute(
+                    rec = await kalshi_trader.execute(
                         ticker=ticker, action="BUY", side=side,
                         price_cents=price, ai_confidence=99.0,
                         ai_reasoning=(
@@ -280,7 +280,7 @@ async def run_trading_job(db=None) -> TradingResults:
         if not best:
             try:
                 await discord.no_opportunity(
-                    markets_scanned=len(candidates), paper=not live_mode
+                    markets_scanned=len(kalshi_candidates) + len(poly_markets), paper=not live_mode
                 )
             except Exception:
                 pass
