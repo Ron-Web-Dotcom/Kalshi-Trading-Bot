@@ -22,11 +22,29 @@ class RiskManager:
             self._daily_loss = 0.0
             self._daily_loss_date = today
 
+    async def get_daily_loss_from_db(self) -> float:
+        """Read today's realised losses from DB so the circuit breaker survives restarts."""
+        if not self.db:
+            return self._daily_loss
+        try:
+            today = date.today().isoformat()
+            row = await self.db.fetchone(
+                "SELECT COALESCE(SUM(ABS(pnl)),0) AS loss FROM trade_logs "
+                "WHERE pnl < 0 AND executed_at >= ?",
+                (today + "T00:00:00",)
+            )
+            return float((row or {}).get("loss", 0))
+        except Exception:
+            return self._daily_loss
+
     def check_trade(self, ticker: str, size_dollars: float,
                     current_positions: List[Dict],
-                    portfolio_value: float = 1000.0) -> Tuple[bool, str]:
+                    portfolio_value: float = 1000.0,
+                    daily_loss_override: float = 0.0) -> Tuple[bool, str]:
         """
         Returns (allowed, reason). Reason is empty string if allowed.
+        Pass daily_loss_override from DB query to make the circuit breaker
+        survive process restarts.
         """
         self._reset_daily_if_needed()
 
@@ -42,10 +60,11 @@ class RiskManager:
         if size_dollars > self.cfg.max_trade_size_dollars:
             return False, f"Trade size ${size_dollars:.2f} exceeds max ${self.cfg.max_trade_size_dollars:.2f}"
 
-        # 3. Daily loss circuit breaker
+        # 3. Daily loss circuit breaker — use DB value if provided (survives restarts)
+        effective_daily_loss = max(self._daily_loss, daily_loss_override)
         max_daily_loss = portfolio_value * (self.cfg.max_daily_loss_pct / 100)
-        if self._daily_loss >= max_daily_loss:
-            return False, f"Daily loss limit reached: ${self._daily_loss:.2f} >= ${max_daily_loss:.2f}"
+        if effective_daily_loss >= max_daily_loss:
+            return False, f"Daily loss limit reached: ${effective_daily_loss:.2f} >= ${max_daily_loss:.2f}"
 
         # 4. Max position size as % of portfolio
         max_position = portfolio_value * (self.cfg.max_position_size_pct / 100)
