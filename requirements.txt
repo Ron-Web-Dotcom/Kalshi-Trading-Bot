@@ -1,0 +1,43 @@
+# ============================================================
+# Kalshi AI Trading Bot — Production Dependencies
+# All pinned to latest stable as of 2026-05-29
+# ============================================================
+
+# HTTP client (async, used for all API calls)
+httpx==0.28.1
+
+# Async SQLite database
+aiosqlite==0.22.1
+
+# Kalshi RSA request signing
+cryptography==48.0.0
+
+# Anthropic Claude SDK (AI decision engine)
+anthropic==0.105.2
+
+# Data handling
+pandas==3.0.3
+numpy==2.4.6
+
+# Environment config
+python-dotenv==1.2.2
+
+# Settings validation
+pydantic==2.13.4
+pydantic-settings==2.14.1
+
+# YAML config support
+pyyaml==6.0.3
+
+# Date/time
+python-dateutil==2.9.0.post0
+pytz==2026.2
+
+# Type hints
+typing-extensions==4.15.0
+
+# ── Dev / Test (not needed on VPS) ───────────────────────────
+pytest==9.0.3
+pytest-asyncio==1.4.0
+black==26.5.1
+isort==8.0.1
