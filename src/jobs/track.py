@@ -55,6 +55,12 @@ async def run_tracking(db_manager) -> None:
             avg_price = float(pos.get("avg_price", 0))   # cents
             contracts = int(pos.get("contracts", 0))
             pos_id    = pos["id"]
+            platform  = pos.get("platform", "kalshi")
+
+            # Polymarket positions: Kalshi API knows nothing about them — skip for now
+            if platform == "polymarket":
+                logger.debug("TRACK SKIP Polymarket position %s (no live price feed yet)", ticker)
+                continue
 
             try:
                 resp   = await kalshi.get_market(ticker)
@@ -146,7 +152,7 @@ async def run_tracking(db_manager) -> None:
                         ticker, side, cur_price, avg_price, pnl, pct_change,
                     )
                     # Discord: AI re-eval held (optional, gated by ALERT_ON_SIGNAL)
-                    if enable_reeval and 'reeval' in dir():
+                    if enable_reeval and 'reeval' in locals():
                         if reeval.get("verdict") == "HOLD" and reeval.get("confidence", 0) >= reeval_min_conf:
                             await discord.ai_reeval_hold(
                                 ticker=ticker, side=side, pct_change=pct_change,

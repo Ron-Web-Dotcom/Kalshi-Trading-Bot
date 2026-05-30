@@ -57,24 +57,15 @@ async def run_trading_job(db=None) -> TradingResults:
     min_vol       = settings.trading.min_market_volume
     portfolio_val = settings.trading.portfolio_value
 
-    kalshi     = KalshiClient()
-    poly_client = PolymarketTradingClient()
-    fetcher    = MarketDataFetcher(kalshi, db)
-    comparator = ExternalMarketComparator(db)
-    arb        = ArbitrageDetector()
-    risk       = RiskManager(db)
-    scaler     = AutoScaler()
-    discord    = DiscordAlerter()
-    results    = TradingResults()
-    kalshi      = KalshiClient()
-    poly_client = PolymarketTradingClient()
-    fetcher     = MarketDataFetcher(kalshi, db)
-    comparator  = ExternalMarketComparator(db)
-    arb         = ArbitrageDetector()
-    risk        = RiskManager(db)
-    scaler      = AutoScaler()
-    discord     = DiscordAlerter()
-    results     = TradingResults()
+    kalshi            = KalshiClient()
+    poly_client       = PolymarketTradingClient()
+    fetcher           = MarketDataFetcher(kalshi, db)
+    comparator        = ExternalMarketComparator(db)
+    arb               = ArbitrageDetector()
+    risk              = RiskManager(db)
+    scaler            = AutoScaler()
+    discord           = DiscordAlerter()
+    results           = TradingResults()
     trades_this_cycle = 0
 
     mode_label = "LIVE" if live_mode else "PAPER"
@@ -172,6 +163,8 @@ async def run_trading_job(db=None) -> TradingResults:
                                 ticker=ticker, signal_type="internal_arb",
                                 gross_edge=sig["gross_edge_cents"],
                                 net_edge=net,
+                                kalshi_price=yes_p,
+                                poly_price=no_p,
                             )
 
             else:
@@ -231,9 +224,10 @@ async def run_trading_job(db=None) -> TradingResults:
         # ── 5. Daily trade gate — sit out if already traded today ────────────────
         from datetime import date as _date
         today = _date.today().isoformat()
+        paper_flag = 0 if live_mode else 1   # live trades recorded as paper_trade=0
         trades_today_row = await db.fetchone(
-            "SELECT COUNT(*) AS n FROM trade_logs WHERE paper_trade=1 AND executed_at >= ?",
-            (today + "T00:00:00",)
+            "SELECT COUNT(*) AS n FROM trade_logs WHERE paper_trade=? AND executed_at >= ?",
+            (paper_flag, today + "T00:00:00",)
         )
         trades_today = (trades_today_row or {}).get("n", 0)
         max_per_day  = settings.trading.max_trades_per_day
@@ -303,7 +297,7 @@ async def run_trading_job(db=None) -> TradingResults:
             ticker   = market.get("ticker", "")
             net_ev   = decision.get("net_ev")
 
-            # Profit gate
+            # Profit gate — None net_ev is treated as failing (not bypassing)
             planned_size_usd = scaler.current_size
             contracts_est    = (planned_size_usd / (price / 100)) if price > 0 else 0
             exp_profit_usd   = contracts_est * (net_ev / 100) if net_ev is not None else None
@@ -311,16 +305,19 @@ async def run_trading_job(db=None) -> TradingResults:
             min_roi = settings.trading.min_profit_roi_pct
             min_abs = settings.trading.min_profit_abs_usd
 
-            if exp_profit_usd is not None and (exp_profit_usd < min_abs or (roi_pct or 0) < min_roi):
+            if exp_profit_usd is None or exp_profit_usd < min_abs or (roi_pct or 0) < min_roi:
                 logger.info(
-                    "Best opportunity SKIPPED — profit gate: $%.2f (%.1f%% ROI) < min $%.2f / %.1f%%",
-                    exp_profit_usd, roi_pct or 0, min_abs, min_roi,
+                    "Best opportunity SKIPPED — profit gate: %s (%.1f%% ROI) < min $%.2f / %.1f%%",
+                    f"${exp_profit_usd:.2f}" if exp_profit_usd is not None else "EV=null",
+                    roi_pct or 0, min_abs, min_roi,
                 )
                 results.skipped += 1
             else:
+                daily_loss_db = await risk.get_daily_loss_from_db()
                 allowed, reason = risk.check_trade(
                     ticker, scaler.current_size,
                     current_positions=[], portfolio_value=portfolio_val,
+                    daily_loss_override=daily_loss_db,
                 )
                 if not allowed:
                     logger.info("Best opportunity BLOCKED by risk gate: %s", reason)

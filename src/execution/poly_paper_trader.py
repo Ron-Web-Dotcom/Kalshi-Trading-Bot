@@ -17,7 +17,9 @@ from typing import Dict, Optional
 
 logger = logging.getLogger("trading.poly_paper_trader")
 
-POLY_FEE_APPROX = 0.01   # ~1% effective on notional (conservative)
+def _poly_fee(price_cents: float, contracts: int) -> float:
+    """Polymarket charges 2% of winnings: fee = contracts × (100 - price)/100 × 0.02"""
+    return contracts * (100.0 - price_cents) / 100.0 * 0.02
 
 
 class PolyPaperTrader:
@@ -80,9 +82,29 @@ class PolyPaperTrader:
             return None
 
         notional   = contracts * price_cents / 100
-        fee        = notional * POLY_FEE_APPROX
+        fee        = _poly_fee(price_cents, contracts)
         total_cost = notional + fee
         now        = datetime.now(timezone.utc).isoformat()
+
+        # Live mode: place real order FIRST — only write to DB on success
+        if self.poly_cfg.live_trading_enabled:
+            if not poly_token_id:
+                logger.error("POLY LIVE: no token_id for %s — cannot place order", ticker)
+                return None
+            from src.clients.polymarket_client import PolymarketTradingClient
+            client = PolymarketTradingClient()
+            resp   = await client.place_order(
+                token_id=poly_token_id, side="buy",
+                price_cents=price_cents, size_usdc=size,
+            )
+            await client.close()
+            if not resp or resp.get("simulated"):
+                logger.error("POLY LIVE order failed for %s — not recording to DB", ticker)
+                return None
+            live_order_id = resp.get("orderID")
+            logger.info("POLY LIVE order placed: %s", live_order_id)
+        else:
+            live_order_id = None
 
         if self.db:
             # Duplicate guard
@@ -94,6 +116,7 @@ class PolyPaperTrader:
                 logger.info("POLY SKIP %s: open position exists (id=%s)", ticker, existing["id"])
                 return None
 
+            paper_flag = 0 if self.poly_cfg.live_trading_enabled else 1
             record_id = await self.db.insert("trade_logs", {
                 "ticker":        ticker,
                 "action":        action,
@@ -102,7 +125,7 @@ class PolyPaperTrader:
                 "price":         price_cents,
                 "total_cost":    total_cost,
                 "fee":           fee,
-                "paper_trade":   1,
+                "paper_trade":   paper_flag,
                 "platform":      "polymarket",
                 "ai_confidence": ai_confidence,
                 "ai_reasoning":  (ai_reasoning or "")[:500],
@@ -134,27 +157,8 @@ class PolyPaperTrader:
             "total_cost": total_cost, "fee": fee,
             "platform": "polymarket",
         }
-
-        # Live mode: place real order
-        if self.poly_cfg.live_trading_enabled:
-            if not poly_token_id:
-                logger.error("POLY LIVE: no token_id for %s — cannot place order", ticker)
-            else:
-                from src.clients.polymarket_client import PolymarketTradingClient
-                client = PolymarketTradingClient()
-                resp   = await client.place_order(
-                    token_id=poly_token_id,
-                    side="buy",
-                    price_cents=price_cents,
-                    size_usdc=size,
-                )
-                if resp and not resp.get("simulated"):
-                    record["poly_order_id"] = resp.get("orderID")
-                    logger.info("POLY LIVE order placed: %s", resp.get("orderID"))
-                elif not resp:
-                    logger.error("POLY LIVE order failed for %s", ticker)
-                    return None
-                await client.close()
+        if live_order_id:
+            record["poly_order_id"] = live_order_id
 
         if self.discord:
             try:
