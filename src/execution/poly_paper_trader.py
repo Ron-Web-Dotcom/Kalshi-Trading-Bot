@@ -64,7 +64,8 @@ class PolyPaperTrader:
             size = forced_size
         elif self.risk and ai_confidence > 0:
             kelly_prob = true_prob if true_prob is not None else ai_confidence
-            size = self.risk.kelly_size(kelly_prob, price_cents)
+            size = self.risk.kelly_size(kelly_prob, price_cents,
+                                        portfolio_value=self.cfg.portfolio_value)
             if self.scaler:
                 size *= self.scaler.scale_factor
         elif self.scaler:
@@ -118,8 +119,10 @@ class PolyPaperTrader:
         else:
             live_order_id = None
 
+        # Write to DB regardless of live/paper — live orders need tracking too
+        if self.db:
             paper_flag = 0 if self.poly_cfg.live_trading_enabled else 1
-            record_id = await self.db.insert("trade_logs", {
+            await self.db.insert("trade_logs", {
                 "ticker":        ticker,
                 "action":        action,
                 "side":          side,
@@ -135,7 +138,6 @@ class PolyPaperTrader:
                 "pnl":           None,
                 "executed_at":   now,
             })
-
             await self.db.execute("""
                 INSERT INTO positions
                   (ticker, side, contracts, avg_price, current_price, pnl,

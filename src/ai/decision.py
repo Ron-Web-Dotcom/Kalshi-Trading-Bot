@@ -37,7 +37,7 @@ class AIDecisionEngine:
     def _get_client(self):
         if self._client is None:
             import anthropic
-            self._client = anthropic.Anthropic(api_key=self.cfg.anthropic_api_key)
+            self._client = anthropic.AsyncAnthropic(api_key=self.cfg.anthropic_api_key)
         return self._client
 
     def _build_prompt(self, market: Dict, signals: List[Dict], context: str = "") -> str:
@@ -135,17 +135,11 @@ Rules:
         prompt = self._build_prompt(market, signals, context)
         try:
             client = self._get_client()
-            # Use sync client in async context via run_in_executor
-            import asyncio
-            loop = asyncio.get_running_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: client.messages.create(
-                    model=self.cfg.model,
-                    max_tokens=self.cfg.max_tokens,
-                    temperature=self.cfg.temperature,
-                    messages=[{"role": "user", "content": prompt}],
-                )
+            response = await client.messages.create(
+                model=self.cfg.model,
+                max_tokens=self.cfg.max_tokens,
+                temperature=self.cfg.temperature,
+                messages=[{"role": "user", "content": prompt}],
             )
             raw = response.content[0].text.strip()
             # Strip markdown fences if model wraps JSON
@@ -157,15 +151,41 @@ Rules:
 
             action      = data.get("action", "HOLD").upper()
             side        = (data.get("side") or "yes").lower()
-            confidence  = float(data.get("confidence", 0))
-            reasoning   = data.get("reasoning", "")
+            confidence  = max(0.0, min(float(data.get("confidence", 0)), 100.0))
+            reasoning   = str(data.get("reasoning", ""))[:500]
             true_prob   = data.get("true_prob_yes")
             net_ev      = data.get("net_ev_cents")
 
-            # Extra guard: reject low EV even if model says BUY
-            if action == "BUY" and net_ev is not None and float(net_ev) < 4.0:
+            # Sanity clamps — physically impossible values indicate hallucination
+            if true_prob is not None:
+                true_prob = max(0.0, min(float(true_prob), 100.0))
+            if net_ev is not None:
+                net_ev = float(net_ev)
+                # Max possible net EV on any contract is (100-1)*0.98 = 97.02¢
+                net_ev = max(-100.0, min(net_ev, 97.0))
+
+            # Validate side is recognised
+            if side not in ("yes", "no"):
+                side = "yes"
+
+            # Reject low EV
+            if action == "BUY" and net_ev is not None and net_ev < 4.0:
                 action = "HOLD"
                 reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < 4¢ threshold] " + reasoning
+
+            # Reject physically impossible EV given the market price
+            if action == "BUY" and net_ev is not None:
+                _yes_ask = float(market.get("yes_ask", 50))
+                _no_ask  = float(market.get("no_ask", 50))
+                price_for_side = _yes_ask if side == "yes" else _no_ask
+                max_possible_ev = (100.0 - price_for_side) * 0.98
+                if net_ev > max_possible_ev + 1.0:
+                    logger.warning(
+                        "[AI SANITY] %s net_ev=%.1f¢ > physical max=%.1f¢ — downgrading to HOLD",
+                        ticker, net_ev, max_possible_ev,
+                    )
+                    action = "HOLD"
+                    reasoning = f"[Sanity: impossible EV {net_ev:.1f}¢ > max {max_possible_ev:.1f}¢] " + reasoning
 
             decision = AIDecision(
                 action=action,
@@ -325,16 +345,11 @@ Important: bias toward HOLD — only EXIT when evidence is clear and strong (con
 
         try:
             client = self._get_client()
-            import asyncio
-            loop = asyncio.get_running_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: client.messages.create(
-                    model=self.cfg.model,
-                    max_tokens=512,
-                    temperature=0.2,
-                    messages=[{"role": "user", "content": prompt}],
-                )
+            response = await client.messages.create(
+                model=self.cfg.model,
+                max_tokens=512,
+                temperature=0.2,
+                messages=[{"role": "user", "content": prompt}],
             )
             raw = response.content[0].text.strip()
             if raw.startswith("```"):

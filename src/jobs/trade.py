@@ -18,7 +18,7 @@ class TradingResults:
     skipped: int = 0
 
 
-async def run_trading_job(db=None) -> TradingResults:
+async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> TradingResults:
     """
     One full trading cycle:
 
@@ -61,10 +61,23 @@ async def run_trading_job(db=None) -> TradingResults:
     poly_client       = PolymarketTradingClient()
     fetcher           = MarketDataFetcher(kalshi, db)
     comparator        = ExternalMarketComparator(db)
-    arb               = ArbitrageDetector()
-    risk              = RiskManager(db)
-    scaler            = AutoScaler()
+    # Use singletons passed from TradingBot when available (preserves cooldown/scale state)
+    arb               = arb_det   if arb_det  is not None else ArbitrageDetector()
+    risk              = risk       if risk     is not None else RiskManager(db)
+    scaler            = scaler     if scaler   is not None else AutoScaler()
     discord           = DiscordAlerter()
+
+    # Fetch live balance so Kelly and risk checks use real portfolio size (A2)
+    if live_mode:
+        try:
+            bal = await kalshi.get_balance()
+            live_balance = (bal.get("balance") or 0) / 100  # cents → dollars
+            if live_balance > 0:
+                portfolio_val = live_balance
+                settings.trading.portfolio_value = portfolio_val
+                logger.info("Live portfolio: $%.2f", portfolio_val)
+        except Exception as _be:
+            logger.warning("Could not fetch live balance — using config $%.2f: %s", portfolio_val, _be)
     results           = TradingResults()
     trades_this_cycle = 0
 

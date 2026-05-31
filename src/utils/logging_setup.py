@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from typing import Optional
 
 _loggers: dict = {}
@@ -60,7 +61,12 @@ def setup_logging(log_level: str = "INFO") -> None:
             f"bot_{datetime.now().strftime('%Y%m%d')}.log",
         )
         fmt = "%(asctime)s [%(levelname)-8s] %(name)s: %(message)s"
-        fh  = logging.FileHandler(log_file, encoding="utf-8")
+        fh  = RotatingFileHandler(
+            log_file,
+            maxBytes=50 * 1024 * 1024,  # 50 MB per file
+            backupCount=14,              # keep 14 rotated files (~700 MB max)
+            encoding="utf-8",
+        )
         fh.setLevel(level)
         fh.setFormatter(logging.Formatter(fmt, datefmt))
         handlers.append(fh)

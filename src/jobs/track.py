@@ -50,6 +50,7 @@ async def run_tracking(db_manager) -> None:
         closed = 0
 
         for pos in positions:
+            reeval    = None  # reset per iteration — prevents cross-position contamination
             ticker    = pos["ticker"]
             side      = pos.get("side", "yes")
             avg_price = float(pos.get("avg_price", 0))   # cents

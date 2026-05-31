@@ -52,6 +52,15 @@ class TradingBot:
         self._shutdown  = asyncio.Event()
         self._cycle     = 0
 
+        # Singletons — share state across cycles so cooldowns, scaling, and
+        # arb signal dedup persist without restarting (fixes A10/A11/A12)
+        from src.risk.manager import RiskManager
+        from src.risk.scaling import AutoScaler
+        from src.strategy.arbitrage import ArbitrageDetector
+        self.risk    = RiskManager(db=self.db)
+        self.scaler  = AutoScaler()
+        self.arb_det = ArbitrageDetector()
+
     def _print_startup_banner(self):
         mode  = "LIVE TRADING  ⚠️  REAL MONEY" if self.live_mode else "PAPER TRADING  ✅  No real money"
         lines = [
@@ -109,7 +118,9 @@ class TradingBot:
             "┌── Trading Cycle #%d ─────────────────────────────────────",
             self._cycle,
         )
-        results = await run_trading_job(db=self.db)
+        results = await run_trading_job(
+            db=self.db, risk=self.risk, scaler=self.scaler, arb_det=self.arb_det
+        )
         logger.info(
             "└── Cycle #%d done: %d trade(s) (arb=%d ai=%d skip=%d) $%.2f capital",
             self._cycle,
