@@ -374,8 +374,6 @@ async def run_trading_job(db=None) -> TradingResults:
                         market_title=market.get("title", ""),
                         **({"poly_token_id": market.get("_yes_token") if side == "yes" else market.get("_no_token")}
                            if platform == "polymarket" else {}),
-                        **({{"poly_token_id": market.get("_yes_token") if side == "yes" else market.get("_no_token")}}
-                           if platform == "polymarket" else {{}}),
                     )
                     if rec:
                         trades_this_cycle += 1
