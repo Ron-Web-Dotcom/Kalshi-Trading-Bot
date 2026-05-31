@@ -336,6 +336,29 @@ class DiscordAlerter:
         )
         await self._post(payload)
 
+    async def daily_summary(self, date: str, trades: int, capital: float,
+                             pnl: float, open_positions: int, paper: bool = True) -> None:
+        """Send daily recap every evening regardless of activity."""
+        mode_tag  = "📝 PAPER" if paper else "💰 LIVE"
+        pnl_sign  = "+" if pnl >= 0 else ""
+        pnl_emoji = "📈" if pnl >= 0 else "📉"
+        color     = 0x00FF00 if pnl >= 0 else 0xFF4444
+        status    = "Bot is alive and running ✅" if trades >= 0 else "Check bot status ⚠️"
+        payload   = self._embed(
+            title=f"📊 {mode_tag} Daily Summary — {date}",
+            description=f"{status}\nScanning **Kalshi + Polymarket** 24/7 in paper mode.",
+            color=color,
+            fields=[
+                {"name": "Trades Today",     "value": str(trades),                          "inline": True},
+                {"name": "Capital Deployed", "value": f"${capital:.2f}",                    "inline": True},
+                {"name": f"{pnl_emoji} PnL", "value": f"${pnl_sign}{pnl:.2f}",             "inline": True},
+                {"name": "Open Positions",   "value": str(open_positions),                  "inline": True},
+                {"name": "Mode",             "value": "Paper (no real money)",               "inline": True},
+                {"name": "Next Summary",     "value": "Tomorrow 8PM UTC",                   "inline": True},
+            ],
+        )
+        await self._post(payload)
+
     async def pnl_update(self, total_pnl: float, win_rate: float,
                           total_trades: int, scale_factor: float) -> None:
         color = 0x00FF00 if total_pnl >= 0 else 0xFF4444
