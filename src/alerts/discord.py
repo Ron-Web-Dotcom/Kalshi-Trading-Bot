@@ -425,6 +425,109 @@ class DiscordAlerter:
         )
         await self._post(payload)
 
+    async def trade_review(
+        self,
+        ticker: str,
+        platform: str,
+        intended_side: str,
+        intended_price: float,
+        size_usd: float,
+        verdict: str,           # STRONG_BUY / GOOD_TRADE / WRONG_SIDE / BAD_TRADE / PASS
+        ai_side: str,           # what side AI recommends
+        ai_confidence: float,
+        true_prob: float,       # AI's estimated true probability (0-100)
+        net_ev: float,
+        reasoning: str,
+        context_snippet: str,   # first 300 chars of real-world context
+        correct_price: float = 0,   # market's actual price for AI's recommended side
+    ) -> None:
+        """Post a trade advisor review to Discord."""
+        verdict_upper = verdict.upper()
+
+        if verdict_upper in ("STRONG_BUY", "GOOD_TRADE"):
+            color = 0x00FF00
+            icon  = "✅"
+            title_tag = "STRONG BUY" if verdict_upper == "STRONG_BUY" else "GOOD TRADE"
+            desc = f"✅ **{title_tag}** — go ahead and place this trade."
+        elif verdict_upper == "WRONG_SIDE":
+            color = 0xFF8C00
+            icon  = "⚠️"
+            desc  = f"⚠️ Good prediction, **WRONG SIDE** — flip to **{ai_side.upper()}**"
+            title_tag = "WRONG SIDE"
+        elif verdict_upper == "BAD_TRADE":
+            color = 0xFF0000
+            icon  = "❌"
+            desc  = "❌ **OPT OUT** — negative edge on this trade."
+            title_tag = "BAD TRADE"
+        else:  # PASS
+            color = 0x808080
+            icon  = "💤"
+            desc  = "💤 **PASS** — no clear edge, sit this one out."
+            title_tag = "PASS"
+
+        # Expected profit: (size / price * 100) contracts * net_ev / 100
+        contracts_approx = (size_usd / intended_price * 100) if intended_price > 0 else 0
+        exp_profit = contracts_approx * net_ev / 100
+
+        fields = [
+            {
+                "name":   "Your Trade",
+                "value":  f"{intended_side.upper()} @ {intended_price:.0f}¢ on {platform.capitalize()}",
+                "inline": True,
+            },
+            {
+                "name":   "AI Verdict",
+                "value":  f"{icon} {title_tag}",
+                "inline": True,
+            },
+            {
+                "name":   "AI True Prob",
+                "value":  f"{true_prob:.0f}% (market implies {intended_price:.0f}%)",
+                "inline": True,
+            },
+            {
+                "name":   "Net EV",
+                "value":  f"{net_ev:.1f}¢ per contract",
+                "inline": True,
+            },
+            {
+                "name":   "Confidence",
+                "value":  f"{ai_confidence:.0f}%",
+                "inline": True,
+            },
+            {
+                "name":   "Expected Profit",
+                "value":  f"${exp_profit:.2f}",
+                "inline": True,
+            },
+            {
+                "name":   "Real-World Data",
+                "value":  (context_snippet[:300] if context_snippet else "_No context available_"),
+                "inline": False,
+            },
+            {
+                "name":   "AI Reasoning",
+                "value":  (reasoning[:300] if reasoning else "_No reasoning_"),
+                "inline": False,
+            },
+        ]
+
+        if verdict_upper == "WRONG_SIDE" and correct_price > 0:
+            fields.append({
+                "name":   "✅ Correct Trade",
+                "value":  f"BUY {ai_side.upper()} @ {correct_price:.0f}¢",
+                "inline": True,
+            })
+
+        platform_tag = "🟣 Polymarket" if platform.lower() == "polymarket" else "🟦 Kalshi"
+        payload = self._embed(
+            title=f"🔍 Trade Advisor — {ticker} [{platform_tag}]",
+            description=desc,
+            color=color,
+            fields=fields,
+        )
+        await self._post(payload)
+
     async def pnl_update(self, total_pnl: float, win_rate: float,
                           total_trades: int, scale_factor: float) -> None:
         color = 0x00FF00 if total_pnl >= 0 else 0xFF4444
