@@ -47,7 +47,8 @@ class PaperTrader:
             size = forced_size
         elif self.risk and ai_confidence > 0:
             kelly_prob = true_prob if true_prob is not None else ai_confidence
-            size = self.risk.kelly_size(kelly_prob, price_cents)
+            size = self.risk.kelly_size(kelly_prob, price_cents,
+                                        portfolio_value=self.cfg.portfolio_value)
             if self.scaler:
                 size *= self.scaler.scale_factor
         elif self.scaler:

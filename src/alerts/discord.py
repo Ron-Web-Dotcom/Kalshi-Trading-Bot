@@ -1,5 +1,6 @@
 """Phase 9 — Discord webhook alerts for trades, signals, and errors."""
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -21,12 +22,17 @@ class DiscordAlerter:
             logger.debug("Discord not configured — skipping alert")
             return False
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(self.webhook_url, json=payload)
-                resp.raise_for_status()
-                return True
+            async def _send():
+                async with httpx.AsyncClient(timeout=4) as client:
+                    resp = await client.post(self.webhook_url, json=payload)
+                    resp.raise_for_status()
+                    return True
+            return await asyncio.wait_for(_send(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("Discord alert timed out (>5s) — trade cycle unaffected")
+            return False
         except Exception as e:
-            logger.warning(f"Discord alert failed: {e}")
+            logger.warning("Discord alert failed: %s", e)
             return False
 
     def _embed(self, title: str, description: str, color: int,

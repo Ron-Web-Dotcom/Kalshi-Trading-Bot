@@ -22,6 +22,10 @@ class DatabaseManager:
             if self._initialized:
                 return
             async with aiosqlite.connect(self.db_path) as db:
+                # WAL mode: allows concurrent readers while writer is active
+                await db.execute("PRAGMA journal_mode=WAL")
+                await db.execute("PRAGMA busy_timeout=5000")  # wait up to 5s on lock
+                await db.execute("PRAGMA synchronous=NORMAL")  # safe + faster than FULL
                 await db.executescript("""
                     CREATE TABLE IF NOT EXISTS markets (
                         ticker TEXT PRIMARY KEY,
@@ -36,7 +40,8 @@ class DatabaseManager:
                         open_interest REAL,
                         close_time TEXT,
                         last_price REAL,
-                        fetched_at TEXT
+                        fetched_at TEXT,
+                        platform TEXT DEFAULT 'kalshi'
                     );
 
                     CREATE TABLE IF NOT EXISTS positions (
@@ -125,6 +130,7 @@ class DatabaseManager:
                     "ALTER TABLE trade_logs ADD COLUMN platform TEXT DEFAULT 'kalshi'",
                     "ALTER TABLE positions  ADD COLUMN platform TEXT DEFAULT 'kalshi'",
                     "ALTER TABLE positions  ADD COLUMN poly_token_id TEXT",
+                    "ALTER TABLE markets    ADD COLUMN platform TEXT DEFAULT 'kalshi'",
                 ]:
                     try:
                         await db.execute(migration)

@@ -60,7 +60,8 @@ class LiveTrader:
             size = forced_size
         elif self.risk and ai_confidence > 0:
             kelly_prob = true_prob if true_prob is not None else ai_confidence
-            size = self.risk.kelly_size(kelly_prob, price_cents)
+            size = self.risk.kelly_size(kelly_prob, price_cents,
+                                        portfolio_value=self.cfg.portfolio_value)
             if self.scaler:
                 size *= self.scaler.scale_factor
         elif self.scaler:
@@ -74,6 +75,19 @@ class LiveTrader:
         notional = contracts * price_cents / 100
         fee = notional * KALSHI_FEE_PCT
         total_cost = notional + fee
+
+        # ── Duplicate guard BEFORE placing — prevent orphaned live orders ─────
+        if self.db:
+            existing = await self.db.fetchone(
+                "SELECT id FROM positions WHERE ticker=? AND side=? AND status='open'",
+                (ticker, side)
+            )
+            if existing:
+                logger.warning(
+                    "[LIVE] Dup guard: %s %s already open (id=%s) — not placing order",
+                    ticker, side, existing["id"]
+                )
+                return None
 
         # ── Place order ───────────────────────────────────────────────────────
         try:
@@ -118,17 +132,6 @@ class LiveTrader:
         }
 
         if self.db:
-            # Duplicate-position guard — prevent double-entry if cycle overlaps
-            existing = await self.db.fetchone(
-                "SELECT id FROM positions WHERE ticker=? AND side=? AND status='open'",
-                (ticker, side)
-            )
-            if existing:
-                logger.warning(
-                    "[LIVE] Duplicate guard: %s %s already open (id=%s) — order placed but not re-recorded",
-                    ticker, side, existing["id"]
-                )
-                return None
             record_id = await self.db.insert("trade_logs", record)
             record["id"] = record_id
             await self.db.execute("""

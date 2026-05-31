@@ -100,13 +100,19 @@ def test_bug02_reeval_unbound_does_not_crash():
 # ---------------------------------------------------------------------------
 
 def test_bug03_no_get_event_loop():
+    """BUG-03: deprecated get_event_loop() removed; AsyncAnthropic used instead."""
     import inspect
     from src.ai import decision
     source = inspect.getsource(decision)
     assert "get_event_loop()" not in source, (
-        "BUG-03: get_event_loop() must be replaced with get_running_loop()"
+        "BUG-03: get_event_loop() must not be called in async context"
     )
-    assert "get_running_loop()" in source
+    # Either use get_running_loop() or (better) use AsyncAnthropic directly
+    uses_async_client = "AsyncAnthropic" in source
+    uses_running_loop = "get_running_loop()" in source
+    assert uses_async_client or uses_running_loop, (
+        "BUG-03: must use AsyncAnthropic or get_running_loop()"
+    )
 
 
 # ---------------------------------------------------------------------------

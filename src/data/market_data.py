@@ -111,15 +111,25 @@ class MarketDataFetcher:
         logger.info("━━━ MARKET INGEST END ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         return markets
 
-    async def get_cached_markets(self, min_volume: float = 0) -> List[Dict]:
-        """Return markets from DB. Prices are in cents (matching Kalshi API)."""
-        query  = "SELECT * FROM markets WHERE status='open'"
-        params: tuple = ()
+    async def get_cached_markets(self, min_volume: float = 0,
+                                  max_age_minutes: int = 15) -> List[Dict]:
+        """Return markets from DB fresher than max_age_minutes. Prices in cents."""
+        from datetime import timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).isoformat()
+        query  = "SELECT * FROM markets WHERE status='open' AND fetched_at >= ?"
+        params: tuple = (cutoff,)
         if min_volume > 0:
             query  += " AND volume >= ?"
-            params  = (min_volume,)
+            params += (min_volume,)
         query += " ORDER BY volume DESC"
-        return await self.db.fetchall(query, params)
+        rows = await self.db.fetchall(query, params)
+        if not rows:
+            logger.warning(
+                "No markets fresher than %d min — ingest may have failed. "
+                "Trading cycle will be skipped.",
+                max_age_minutes,
+            )
+        return rows
 
     async def run_continuous(self, interval_seconds: int = 300):
         self._running = True
