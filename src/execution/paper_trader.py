@@ -31,6 +31,7 @@ class PaperTrader:
                       ai_reasoning: str = "", signal_source: str = "paper",
                       forced_size: Optional[float] = None,
                       net_ev: Optional[float] = None,
+                      true_prob: Optional[float] = None,
                       market_title: str = "") -> Optional[Dict]:
         """Simulate a trade. Returns trade record dict or None if rejected."""
 
@@ -45,7 +46,8 @@ class PaperTrader:
         if forced_size is not None:
             size = forced_size
         elif self.risk and ai_confidence > 0:
-            size = self.risk.kelly_size(ai_confidence, price_cents)
+            kelly_prob = true_prob if true_prob is not None else ai_confidence
+            size = self.risk.kelly_size(kelly_prob, price_cents)
             if self.scaler:
                 size *= self.scaler.scale_factor
         elif self.scaler:
@@ -83,9 +85,10 @@ class PaperTrader:
         }
 
         if self.db:
-            # Duplicate-position guard: skip if open position already exists
+            # Duplicate-position guard: skip if open position on same side already exists
             existing = await self.db.fetchone(
-                "SELECT id FROM positions WHERE ticker=? AND status='open'", (ticker,)
+                "SELECT id FROM positions WHERE ticker=? AND side=? AND status='open'",
+                (ticker, side)
             )
             if existing:
                 logger.info(

@@ -37,7 +37,7 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
         if spent >= tcfg.daily_ai_budget:
             logger.warning(
                 "Daily AI budget exhausted ($%.4f >= $%.2f) — skipping AI call",
-                spent, cfg.daily_budget_usd,
+                spent, tcfg.daily_ai_budget,
             )
             return None
 

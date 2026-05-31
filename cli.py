@@ -66,30 +66,12 @@ def cmd_run(args: argparse.Namespace) -> None:
             print("\nTrading bot stopped by user.")
         return
 
-    # DEFAULT: AI directional strategy with disciplined settings active.
-    # Despite earlier README copy, this is a single-model OpenRouter call
-    # per decision (with a fallback chain), not a parallel ensemble.
-    print("🤖  AI DIRECTIONAL MODE (default)")
-    print("   Single-model OpenRouter call per decision (fallback chain on error).")
-    print("   Category scoring + portfolio guardrails active.")
-    print("   Use --safe-compounder for conservative math-only mode.")
-    print("   Use --beast to run without guardrails (not recommended).")
-
-    from beast_mode_bot import BeastModeBot
-    from src.strategies.category_scorer import CategoryScorer
-    from src.strategies.portfolio_enforcer import PortfolioEnforcer
-
-    # Apply disciplined settings overrides
-    from src.config.settings import settings as cfg
-    cfg.trading.min_confidence_to_trade = 0.45
-    cfg.trading.max_position_size_pct = 3.0
-    cfg.trading.kelly_fraction = 0.25
-    cfg.trading.max_drawdown_pct = 15.0
-    cfg.trading.max_sector_exposure_pct = 30.0
-
-    bot = BeastModeBot(live_mode=live_mode)
+    # DEFAULT: use main bot.py TradingBot (disciplined settings from .env)
+    print("Starting Kalshi + Polymarket AI trading bot (disciplined mode)...")
+    from bot import TradingBot
+    bot = TradingBot(live_mode=live_mode)
     try:
-        asyncio.run(bot.run())
+        asyncio.run(bot.run_loop())
     except KeyboardInterrupt:
         print("\nTrading bot stopped by user.")
 

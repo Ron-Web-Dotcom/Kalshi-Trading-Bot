@@ -42,6 +42,7 @@ class LiveTrader:
                       ai_reasoning: str = "", signal_source: str = "live",
                       forced_size: Optional[float] = None,
                       net_ev: Optional[float] = None,
+                      true_prob: Optional[float] = None,
                       market_title: str = "", **kwargs) -> Optional[Dict]:
         """Place a real limit order on Kalshi. Returns order dict or None."""
 
@@ -58,7 +59,8 @@ class LiveTrader:
         if forced_size is not None:
             size = forced_size
         elif self.risk and ai_confidence > 0:
-            size = self.risk.kelly_size(ai_confidence, price_cents)
+            kelly_prob = true_prob if true_prob is not None else ai_confidence
+            size = self.risk.kelly_size(kelly_prob, price_cents)
             if self.scaler:
                 size *= self.scaler.scale_factor
         elif self.scaler:
@@ -116,6 +118,17 @@ class LiveTrader:
         }
 
         if self.db:
+            # Duplicate-position guard — prevent double-entry if cycle overlaps
+            existing = await self.db.fetchone(
+                "SELECT id FROM positions WHERE ticker=? AND side=? AND status='open'",
+                (ticker, side)
+            )
+            if existing:
+                logger.warning(
+                    "[LIVE] Duplicate guard: %s %s already open (id=%s) — order placed but not re-recorded",
+                    ticker, side, existing["id"]
+                )
+                return None
             record_id = await self.db.insert("trade_logs", record)
             record["id"] = record_id
             await self.db.execute("""

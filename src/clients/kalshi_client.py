@@ -109,7 +109,10 @@ class KalshiClient:
                 return resp.json()
             except httpx.HTTPStatusError as e:
                 if attempt == retries - 1:
-                    logger.error(f"HTTP {e.response.status_code} on {method} {path}: {e.response.text[:200]}")
+                    _safe = e.response.text[:200]
+                    if self.cfg.api_key_id:
+                        _safe = _safe.replace(self.cfg.api_key_id, "[KEY_ID]")
+                    logger.error("HTTP %d on %s %s: %s", e.response.status_code, method, path, _safe)
                     raise
                 await asyncio.sleep(2 ** attempt)
             except Exception as e:
