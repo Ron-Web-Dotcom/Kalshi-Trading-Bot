@@ -678,6 +678,205 @@ def cmd_test_discord(args: argparse.Namespace) -> None:
     asyncio.run(_run())
 
 
+def cmd_review(args: argparse.Namespace) -> None:
+    """Analyze a trade the user is considering and post results to Discord."""
+
+    ticker   = args.ticker
+    side     = args.side.lower()
+    price    = float(args.price)
+    platform = args.platform.lower()
+    size_usd = float(args.size)
+    record   = getattr(args, "record", False)
+
+    if side not in ("yes", "no"):
+        print("Error: --side must be 'yes' or 'no'.")
+        sys.exit(1)
+    if not (0 < price <= 100):
+        print("Error: --price must be between 0 and 100 (cents).")
+        sys.exit(1)
+
+    async def _run() -> None:
+        from src.data.context_builder import build_market_context
+        from src.ai.decision import AIDecisionEngine
+
+        # ── Build a market dict from inputs ──────────────────────────────────
+        # Try to enrich from the local DB first.
+        market: dict = {
+            "ticker":    ticker,
+            "title":     ticker,
+            "yes_ask":   price if side == "yes" else (100 - price),
+            "no_ask":    price if side == "no"  else (100 - price),
+            "yes_bid":   max(price - 2, 1),
+            "no_bid":    max((100 - price) - 2, 1),
+            "volume":    0,
+            "open_interest": 0,
+            "close_time": "unknown",
+            "platform":  platform,
+        }
+
+        try:
+            from src.utils.database import DatabaseManager
+            db = DatabaseManager()
+            await db.initialize()
+            row = await db.fetchone("SELECT * FROM markets WHERE ticker=?", (ticker,))
+            if row:
+                market.update({k: v for k, v in row.items() if v is not None})
+        except Exception:
+            pass  # DB not available — use constructed market
+
+        # ── Fetch real-world context ──────────────────────────────────────────
+        print(f"\n🔍 Reviewing trade: {side.upper()} {ticker} @ {price:.0f}¢ on {platform}")
+        print("  Fetching real-world context…")
+        try:
+            context = await build_market_context(market)
+        except Exception as exc:
+            context = f"(context unavailable: {exc})"
+            print(f"  Warning: context fetch failed — {exc}")
+
+        # ── AI decision ───────────────────────────────────────────────────────
+        print("  Calling AI decision engine…")
+        engine = AIDecisionEngine()
+        try:
+            decision = await engine.decide(market, [])
+        except Exception as exc:
+            print(f"  Error: AI decision failed — {exc}")
+            sys.exit(1)
+
+        ai_action     = decision.action.upper()        # BUY / HOLD
+        ai_side       = (decision.side or "yes").lower()
+        ai_confidence = decision.confidence
+        true_prob     = decision.true_prob or 0.0
+        net_ev        = decision.net_ev or 0.0
+        reasoning     = decision.reasoning or ""
+
+        # Correct price for AI's recommended side
+        correct_price = market.get("yes_ask", price) if ai_side == "yes" else market.get("no_ask", 100 - price)
+
+        # ── Verdict logic ─────────────────────────────────────────────────────
+        same_side = (ai_side == side)
+
+        if ai_action == "BUY" and same_side:
+            if net_ev >= 4 and ai_confidence >= 70:
+                verdict = "STRONG_BUY"
+            elif net_ev >= 0:
+                verdict = "GOOD_TRADE"
+            else:
+                verdict = "BAD_TRADE"
+        elif ai_action == "BUY" and not same_side:
+            verdict = "WRONG_SIDE"
+        elif net_ev < 0:
+            verdict = "BAD_TRADE"
+        else:
+            verdict = "BAD_TRADE" if ai_action in ("HOLD", "PASS") else "PASS"
+
+        # ── Terminal output ───────────────────────────────────────────────────
+        ICONS = {
+            "STRONG_BUY": "✅",
+            "GOOD_TRADE": "✅",
+            "WRONG_SIDE": "⚠️ ",
+            "BAD_TRADE":  "❌",
+            "PASS":       "💤",
+        }
+        icon = ICONS.get(verdict, "❓")
+        context_snippet = (context or "")[:300]
+
+        print()
+        print("=" * 62)
+        print(f"  TRADE ADVISOR RESULT")
+        print("=" * 62)
+        print(f"  Ticker    : {ticker}")
+        print(f"  Platform  : {platform}")
+        print(f"  Your trade: {side.upper()} @ {price:.0f}¢  (${size_usd:.2f} at risk)")
+        print(f"  Verdict   : {icon} {verdict}")
+        print(f"  AI side   : {ai_side.upper()}  (action={ai_action})")
+        print(f"  AI true p : {true_prob:.0f}%  (market implies {price:.0f}%)")
+        print(f"  Net EV    : {net_ev:.1f}¢/contract")
+        print(f"  Confidence: {ai_confidence:.0f}%")
+        if verdict == "WRONG_SIDE":
+            print(f"  ✅ Flip to : BUY {ai_side.upper()} @ {correct_price:.0f}¢")
+        print()
+        print(f"  Context   : {context_snippet}")
+        print()
+        print(f"  Reasoning : {reasoning[:400]}")
+        print("=" * 62)
+
+        # ── Discord alert ─────────────────────────────────────────────────────
+        try:
+            from src.alerts.discord import DiscordAlerter
+            discord = DiscordAlerter()
+            await discord.trade_review(
+                ticker=ticker,
+                platform=platform,
+                intended_side=side,
+                intended_price=price,
+                size_usd=size_usd,
+                verdict=verdict,
+                ai_side=ai_side,
+                ai_confidence=ai_confidence,
+                true_prob=true_prob,
+                net_ev=net_ev,
+                reasoning=reasoning,
+                context_snippet=context_snippet,
+                correct_price=correct_price,
+            )
+            print("  Discord alert posted.")
+        except Exception as exc:
+            print(f"  Discord alert failed: {exc}")
+
+        # ── Record position if --record and verdict is positive ───────────────
+        if record and verdict in ("STRONG_BUY", "GOOD_TRADE", "WRONG_SIDE"):
+            record_side = side  # always record the user's original side
+            try:
+                from src.utils.database import DatabaseManager
+                from datetime import datetime, timezone
+                db = DatabaseManager()
+                await db.initialize()
+                now = datetime.now(timezone.utc).isoformat()
+                contracts = max(1, int(size_usd / price * 100))
+                await db.execute(
+                    """
+                    INSERT INTO positions
+                        (ticker, side, contracts, avg_price, current_price, pnl,
+                         status, opened_at, close_reason)
+                    VALUES (?, ?, ?, ?, ?, 0, 'open', ?, ?)
+                    """,
+                    (
+                        ticker,
+                        record_side,
+                        contracts,
+                        price,
+                        price,
+                        now,
+                        f"manual:{platform}",
+                    ),
+                )
+                # Also write to trade_logs so history shows it
+                await db.execute(
+                    """
+                    INSERT INTO trade_logs
+                        (ticker, action, side, contracts, price, total_cost, fee,
+                         paper_trade, ai_confidence, ai_reasoning, signal_source,
+                         pnl, executed_at)
+                    VALUES (?, 'BUY', ?, ?, ?, ?, 0, 1, ?, ?, 'manual', NULL, ?)
+                    """,
+                    (
+                        ticker,
+                        record_side,
+                        contracts,
+                        price,
+                        size_usd,
+                        ai_confidence,
+                        reasoning[:500],
+                        now,
+                    ),
+                )
+                print(f"  Position recorded ({contracts} contracts) — bot will track it.")
+            except Exception as exc:
+                print(f"  Warning: could not record position — {exc}")
+
+    asyncio.run(_run())
+
+
 def cmd_live_check(args: argparse.Namespace) -> None:
     """Run live trading pre-flight checks."""
     from src.execution.preflight import run_preflight, print_preflight_report
@@ -713,6 +912,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  python cli.py history                  Show trade history + category breakdown\n"
             "  python cli.py status                   Check portfolio balance and positions\n"
             "  python cli.py health                   Verify all connections and config\n"
+            "  python cli.py review --ticker KXBTCD-25MAY2600 --side yes --price 45  Analyze a trade\n"
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -863,6 +1063,55 @@ def build_parser() -> argparse.ArgumentParser:
         description="Verifies DISCORD_WEBHOOK_URL is correct by delivering a test embed.",
     )
     p_discord.set_defaults(func=cmd_test_discord)
+
+    # --- review ---
+    p_review = subparsers.add_parser(
+        "review",
+        help="Analyze a trade you're considering and get AI verdict + Discord alert",
+        description=(
+            "Submit any trade idea (Kalshi or Polymarket) and get a real-time AI "
+            "analysis: good/bad, correct side, true probability vs market price, "
+            "expected value, and a Discord embed with real-world data."
+        ),
+    )
+    p_review.add_argument(
+        "--ticker",
+        required=True,
+        help="Market ticker (e.g. KXBTCD-25MAY2600) or question text",
+    )
+    p_review.add_argument(
+        "--side",
+        required=True,
+        choices=["yes", "no"],
+        help="Side you intend to buy: yes or no",
+    )
+    p_review.add_argument(
+        "--price",
+        required=True,
+        type=float,
+        help="Price in cents (0–100) you plan to enter at",
+    )
+    p_review.add_argument(
+        "--platform",
+        default="kalshi",
+        choices=["kalshi", "polymarket"],
+        help="Platform the market is on (default: kalshi)",
+    )
+    p_review.add_argument(
+        "--size",
+        default=10.0,
+        type=float,
+        help="Dollars you plan to risk (default: 10.0)",
+    )
+    p_review.add_argument(
+        "--record",
+        action="store_true",
+        help=(
+            "Record the position to the DB so the bot tracks it for "
+            "stop-loss, take-profit, and AI re-evaluation (signal_source='manual')"
+        ),
+    )
+    p_review.set_defaults(func=cmd_review)
 
     # --- live-check ---
     p_live = subparsers.add_parser(
