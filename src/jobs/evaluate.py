@@ -17,7 +17,11 @@ async def run_evaluation(db=None) -> None:
         await db.initialize()
 
     try:
-        stats = await db.fetchone("""
+        from src.config.settings import settings
+        paper_flag = 0 if settings.trading.live_trading_enabled else 1
+        mode_label = "LIVE" if settings.trading.live_trading_enabled else "PAPER"
+
+        stats = await db.fetchone(f"""
             SELECT
                 COUNT(*)                                           AS total_trades,
                 SUM(CASE WHEN pnl > 0  THEN 1 ELSE 0 END)        AS winning_trades,
@@ -25,10 +29,10 @@ async def run_evaluation(db=None) -> None:
                 SUM(CASE WHEN pnl IS NULL THEN 1 ELSE 0 END)      AS open_trades,
                 SUM(COALESCE(pnl, 0))                             AS total_pnl,
                 AVG(ai_confidence)                                    AS avg_confidence
-            FROM trade_logs WHERE paper_trade=1
+            FROM trade_logs WHERE paper_trade={paper_flag}
         """)
         if not stats or not stats.get("total_trades"):
-            logger.info("[EVAL] No paper trades yet — nothing to evaluate")
+            logger.info("[EVAL] No %s trades yet — nothing to evaluate", mode_label)
             return
 
         total     = stats["total_trades"]      or 0
@@ -40,11 +44,11 @@ async def run_evaluation(db=None) -> None:
         win_rate  = (wins / (wins + losses) * 100) if (wins + losses) > 0 else 0.0
 
         # Last 5 completed trades
-        last5 = await db.fetchall("""
+        last5 = await db.fetchall(f"""
             SELECT ticker, action, side, price, contracts, total_cost, pnl,
                    signal_source, ai_confidence, executed_at
             FROM trade_logs
-            WHERE paper_trade=1
+            WHERE paper_trade={paper_flag}
             ORDER BY executed_at DESC LIMIT 5
         """)
 
@@ -83,7 +87,7 @@ async def run_evaluation(db=None) -> None:
         # ── Console summary ──────────────────────────────────────────────────
         pnl_sign = "+" if total_pnl >= 0 else ""
         logger.info("╔══════════════════════════════════════════════╗")
-        logger.info("║           PERFORMANCE SNAPSHOT (PAPER)       ║")
+        logger.info("║     PERFORMANCE SNAPSHOT (%-5s)              ║", mode_label)
         logger.info("╠══════════════════════════════════════════════╣")
         logger.info("║  Total trades  : %-5d (open: %-3d)           ║", total, open_pos)
         logger.info("║  Win / Loss    : %-3d / %-3d                  ║", wins, losses)

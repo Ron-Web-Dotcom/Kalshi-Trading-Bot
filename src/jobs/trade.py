@@ -259,9 +259,12 @@ async def run_trading_job(db=None) -> TradingResults:
         from src.strategy.opportunity import OpportunityHunter
 
         arb_tickers = {s["ticker"] for s in all_signals}
+        open_positions = await db.fetchall("SELECT ticker FROM positions WHERE status='open'")
+        open_tickers = {p["ticker"] for p in (open_positions or [])}
         kalshi_candidates = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
+            and m.get("ticker") not in open_tickers
             and 5 < m.get("yes_ask", 0) < 95
             and m.get("volume", 0) >= min_vol
         ][:max_scan]
@@ -371,6 +374,7 @@ async def run_trading_job(db=None) -> TradingResults:
                         ai_reasoning=decision["reasoning"],
                         signal_source=decision.get("model", "ai"),
                         net_ev=net_ev,
+                        true_prob=decision.get("true_prob"),
                         market_title=market.get("title", ""),
                         **({"poly_token_id": market.get("_yes_token") if side == "yes" else market.get("_no_token")}
                            if platform == "polymarket" else {}),
@@ -384,7 +388,14 @@ async def run_trading_job(db=None) -> TradingResults:
     except Exception as e:
         logger.error("Trade job crashed: %s", e, exc_info=True)
         try:
-            await discord.error_alert(str(e), context="run_trading_job")
+            from src.config.settings import settings as _s
+            _err = str(e)[:500]
+            for _secret in filter(None, [
+                _s.kalshi.api_key_id, _s.kalshi.api_key,
+                _s.polymarket.api_secret, _s.ai.anthropic_api_key,
+            ]):
+                _err = _err.replace(_secret, "[REDACTED]")
+            await discord.error_alert(_err, context="run_trading_job")
         except Exception:
             pass
     finally:

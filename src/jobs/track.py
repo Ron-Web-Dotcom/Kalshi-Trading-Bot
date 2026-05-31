@@ -79,8 +79,9 @@ async def run_tracking(db_manager) -> None:
                 # ── 1. Market resolved ────────────────────────────────────
                 if status in ("resolved", "settled", "finalized"):
                     result = mkt.get("result", "")
-                    won    = (side == "yes" and result == "yes") or \
-                             (side == "no"  and result == "no")
+                    result_lower = (result or "").lower().strip()
+                    won    = (side == "yes" and result_lower == "yes") or \
+                             (side == "no"  and result_lower == "no")
                     final_price  = 100.0 if won else 0.0
                     pnl          = (final_price - avg_price) * contracts / 100
                     close_reason = f"resolved:{result}"
@@ -113,8 +114,10 @@ async def run_tracking(db_manager) -> None:
                     """, (final_price, pnl, now, close_reason, pos_id))
 
                     await db_manager.execute(
-                        "UPDATE trade_logs SET pnl=? WHERE ticker=? AND pnl IS NULL",
-                        (pnl, ticker)
+                        "UPDATE trade_logs SET pnl=? WHERE ticker=? AND side=? AND pnl IS NULL "
+                        "AND executed_at = (SELECT MAX(executed_at) FROM trade_logs "
+                        "WHERE ticker=? AND side=? AND pnl IS NULL)",
+                        (pnl, ticker, side, ticker, side)
                     )
                     risk.record_trade(ticker, pnl)
                     closed += 1
@@ -133,7 +136,7 @@ async def run_tracking(db_manager) -> None:
                         avg_price, final_price,
                         sign, abs(pnl), trigger,
                     )
-                    if close_reason.startswith("ai_reeval"):
+                    if close_reason.startswith("ai_reeval") and "reeval" in locals():
                         logger.info("  AI opted out: %s", reeval.get("reasoning", "")[:120])
 
                     # Discord: position closed (all triggers)

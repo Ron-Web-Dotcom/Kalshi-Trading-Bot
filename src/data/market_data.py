@@ -94,6 +94,16 @@ class MarketDataFetcher:
                 )
             logger.info("─" * 80)
 
+        # Mark any market not in this fresh batch as closed so stale rows don't get traded
+        fetched_tickers = [m.get("ticker") for m in markets if m.get("ticker")]
+        if fetched_tickers:
+            placeholders = ",".join("?" * len(fetched_tickers))
+            await self.db.execute(
+                f"UPDATE markets SET status='closed' WHERE status='open' "
+                f"AND ticker NOT IN ({placeholders})",
+                tuple(fetched_tickers),
+            )
+
         logger.info(
             f"Ingest complete: {stored} stored, {skipped} skipped "
             f"(no ticker)  @{now[:19]}"

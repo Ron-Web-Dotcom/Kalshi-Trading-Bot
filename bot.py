@@ -192,11 +192,12 @@ class TradingBot:
                     )
                     open_n = (open_row or {}).get("n", 0)
 
-                    # Today's paper PnL
+                    # Today's PnL (paper or live depending on mode)
+                    _paper_flag = 0 if settings.trading.live_trading_enabled else 1
                     pnl_row = await self.db.fetchone(
                         "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
-                        "WHERE executed_at >= ? AND pnl IS NOT NULL",
-                        (today + "T00:00:00",)
+                        "WHERE executed_at >= ? AND pnl IS NOT NULL AND paper_trade=?",
+                        (today + "T00:00:00", _paper_flag)
                     )
                     paper_pnl = (pnl_row or {}).get("pnl", 0.0)
 

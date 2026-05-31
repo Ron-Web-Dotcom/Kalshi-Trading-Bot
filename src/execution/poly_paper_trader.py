@@ -45,6 +45,7 @@ class PolyPaperTrader:
         signal_source: str = "poly_ai",
         forced_size:  Optional[float] = None,
         net_ev:       Optional[float] = None,
+        true_prob:    Optional[float] = None,
         market_title: str = "",
         poly_token_id: Optional[str] = None,
     ) -> Optional[Dict]:
@@ -62,7 +63,8 @@ class PolyPaperTrader:
         if forced_size is not None:
             size = forced_size
         elif self.risk and ai_confidence > 0:
-            size = self.risk.kelly_size(ai_confidence, price_cents)
+            kelly_prob = true_prob if true_prob is not None else ai_confidence
+            size = self.risk.kelly_size(kelly_prob, price_cents)
             if self.scaler:
                 size *= self.scaler.scale_factor
         elif self.scaler:
@@ -86,7 +88,17 @@ class PolyPaperTrader:
         total_cost = notional + fee
         now        = datetime.now(timezone.utc).isoformat()
 
-        # Live mode: place real order FIRST — only write to DB on success
+        # Duplicate guard BEFORE placing any live order
+        if self.db:
+            existing = await self.db.fetchone(
+                "SELECT id FROM positions WHERE ticker=? AND side=? AND platform='polymarket' AND status='open'",
+                (ticker, side)
+            )
+            if existing:
+                logger.info("POLY SKIP %s %s: open position exists (id=%s)", ticker, side, existing["id"])
+                return None
+
+        # Live mode: place real order only after dup check passes
         if self.poly_cfg.live_trading_enabled:
             if not poly_token_id:
                 logger.error("POLY LIVE: no token_id for %s — cannot place order", ticker)
@@ -105,16 +117,6 @@ class PolyPaperTrader:
             logger.info("POLY LIVE order placed: %s", live_order_id)
         else:
             live_order_id = None
-
-        if self.db:
-            # Duplicate guard
-            existing = await self.db.fetchone(
-                "SELECT id FROM positions WHERE ticker=? AND platform='polymarket' AND status='open'",
-                (ticker,)
-            )
-            if existing:
-                logger.info("POLY SKIP %s: open position exists (id=%s)", ticker, existing["id"])
-                return None
 
             paper_flag = 0 if self.poly_cfg.live_trading_enabled else 1
             record_id = await self.db.insert("trade_logs", {

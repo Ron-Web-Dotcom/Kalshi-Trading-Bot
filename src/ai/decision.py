@@ -137,7 +137,7 @@ Rules:
             client = self._get_client()
             # Use sync client in async context via run_in_executor
             import asyncio
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             response = await loop.run_in_executor(
                 None,
                 lambda: client.messages.create(
@@ -326,7 +326,7 @@ Important: bias toward HOLD — only EXIT when evidence is clear and strong (con
         try:
             client = self._get_client()
             import asyncio
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             response = await loop.run_in_executor(
                 None,
                 lambda: client.messages.create(
