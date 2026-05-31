@@ -31,7 +31,7 @@ INGEST_INTERVAL  = 300   # refresh market data every 5 min
 TRACK_INTERVAL   = 120   # check position PnL every 2 min
 EVAL_INTERVAL    = 300   # print performance snapshot every 5 min
 TRADE_INTERVAL   = 60    # run trading cycle every 60 s
-DAILY_SUMMARY_HOUR = 20  # send daily summary at 8 PM UTC
+HEARTBEAT_INTERVAL = 3600  # send hourly heartbeat every 60 min
 
 
 class TradingBot:
@@ -158,41 +158,79 @@ class TradingBot:
                     logger.error("Trade cycle error: %s", e)
                 await asyncio.sleep(TRADE_INTERVAL)
 
-        async def daily_summary_loop():
-            """Send a daily summary to Discord at DAILY_SUMMARY_HOUR UTC."""
+        async def hourly_heartbeat_loop():
+            """Send an hourly heartbeat to Discord with scan stats and top candidates."""
             from src.alerts.discord import DiscordAlerter
-            from datetime import datetime, timezone
-            sent_today = None
+            # Wait until the top of the next hour before first send
+            now = datetime.now(timezone.utc)
+            seconds_until_next_hour = 3600 - (now.minute * 60 + now.second)
+            await asyncio.sleep(seconds_until_next_hour)
             while not self._shutdown.is_set():
-                now = datetime.now(timezone.utc)
-                if now.hour == DAILY_SUMMARY_HOUR and sent_today != now.date():
-                    try:
-                        discord = DiscordAlerter()
-                        today = now.date().isoformat()
-                        row = await self.db.fetchone(
-                            "SELECT COUNT(*) as trades, COALESCE(SUM(total_cost),0) as capital "
-                            "FROM trade_logs WHERE executed_at >= ?", (today + "T00:00:00",)
-                        )
-                        pnl_row = await self.db.fetchone(
-                            "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
-                            "WHERE executed_at >= ? AND pnl IS NOT NULL", (today + "T00:00:00",)
-                        )
-                        open_row = await self.db.fetchone(
-                            "SELECT COUNT(*) as n FROM positions WHERE status='open'"
-                        )
-                        trades  = (row or {}).get("trades", 0)
-                        capital = (row or {}).get("capital", 0)
-                        pnl     = (pnl_row or {}).get("pnl", 0)
-                        open_n  = (open_row or {}).get("n", 0)
-                        await discord.daily_summary(
-                            date=today, trades=trades, capital=capital,
-                            pnl=pnl, open_positions=open_n,
-                            paper=not settings.trading.live_trading_enabled,
-                        )
-                        sent_today = now.date()
-                    except Exception as e:
-                        logger.error("Daily summary error: %s", e)
-                await asyncio.sleep(60)
+                try:
+                    discord = DiscordAlerter()
+                    today = datetime.now(timezone.utc).date().isoformat()
+
+                    # Total markets in DB
+                    mkt_row = await self.db.fetchone(
+                        "SELECT COUNT(*) as n FROM markets"
+                    )
+                    markets_total = (mkt_row or {}).get("n", 0)
+
+                    # Kalshi vs Polymarket split
+                    kal_row = await self.db.fetchone(
+                        "SELECT COUNT(*) as n FROM markets WHERE platform='kalshi' OR platform IS NULL"
+                    )
+                    poly_row = await self.db.fetchone(
+                        "SELECT COUNT(*) as n FROM markets WHERE platform='polymarket'"
+                    )
+                    kalshi_count = (kal_row or {}).get("n", 0)
+                    poly_count   = (poly_row or {}).get("n", 0)
+
+                    # Open positions
+                    open_row = await self.db.fetchone(
+                        "SELECT COUNT(*) as n FROM positions WHERE status='open'"
+                    )
+                    open_n = (open_row or {}).get("n", 0)
+
+                    # Today's paper PnL
+                    pnl_row = await self.db.fetchone(
+                        "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
+                        "WHERE executed_at >= ? AND pnl IS NOT NULL",
+                        (today + "T00:00:00",)
+                    )
+                    paper_pnl = (pnl_row or {}).get("pnl", 0.0)
+
+                    # Top 3 candidates by volume (yes_ask between 5 and 95)
+                    candidates_rows = await self.db.fetchall(
+                        "SELECT ticker, title, yes_ask, no_ask, volume, platform "
+                        "FROM markets "
+                        "WHERE yes_ask > 5 AND yes_ask < 95 "
+                        "ORDER BY volume DESC LIMIT 3"
+                    )
+                    top_candidates = [
+                        {
+                            "ticker":   r["ticker"],
+                            "title":    r.get("title", ""),
+                            "yes_ask":  r.get("yes_ask", 0),
+                            "no_ask":   r.get("no_ask",  0),
+                            "volume":   r.get("volume",  0),
+                            "platform": r.get("platform", "kalshi"),
+                        }
+                        for r in (candidates_rows or [])
+                    ]
+
+                    await discord.hourly_heartbeat(
+                        markets_scanned=markets_total,
+                        kalshi_count=kalshi_count,
+                        poly_count=poly_count,
+                        top_candidates=top_candidates,
+                        open_positions=open_n,
+                        paper_pnl=paper_pnl,
+                        paper=not settings.trading.live_trading_enabled,
+                    )
+                except Exception as e:
+                    logger.error("Hourly heartbeat error: %s", e)
+                await asyncio.sleep(HEARTBEAT_INTERVAL)
 
         def _on_signal(signum, frame):
             logger.info("Shutdown signal %s — stopping bot...", signum)
@@ -206,7 +244,7 @@ class TradingBot:
             asyncio.create_task(track_loop(),         name="track"),
             asyncio.create_task(eval_loop(),          name="eval"),
             asyncio.create_task(trade_loop(),         name="trade"),
-            asyncio.create_task(daily_summary_loop(), name="daily_summary"),
+            asyncio.create_task(hourly_heartbeat_loop(), name="hourly_heartbeat"),
         ]
 
         await self._shutdown.wait()

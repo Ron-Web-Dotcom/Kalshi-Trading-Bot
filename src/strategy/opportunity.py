@@ -35,7 +35,14 @@ def score_opportunity(
     """
     Compute a 0.0–1.0 opportunity score for a market + AI decision pair.
     Higher = better trade.
+
+    Time bonus multiplier:
+      - closes within 6 h  → 1.5x
+      - closes within 24 h → 1.3x
+      - otherwise          → 1.0x
     """
+    from datetime import datetime, timezone
+
     net_ev     = decision.get("net_ev") or 0.0
     confidence = decision.get("confidence", 0.0)
     volume     = market.get("volume", 0)
@@ -48,7 +55,31 @@ def score_opportunity(
     liquidity_score  = min(volume / 10000.0, 1.0)
     data_quality     = 1.0 if poly_comp else 0.7
 
-    return ev_score * confidence_score * data_quality * liquidity_score
+    base_score = ev_score * confidence_score * data_quality * liquidity_score
+
+    # --- Time bonus: prioritise markets closing soon ---
+    time_bonus = 1.0
+    close_time_raw = market.get("close_time") or market.get("expiration_time")
+    if close_time_raw:
+        try:
+            if isinstance(close_time_raw, str):
+                # Accept ISO-8601 with or without timezone suffix
+                close_dt = datetime.fromisoformat(
+                    close_time_raw.replace("Z", "+00:00")
+                )
+            else:
+                close_dt = close_time_raw  # already a datetime
+            if close_dt.tzinfo is None:
+                close_dt = close_dt.replace(tzinfo=timezone.utc)
+            hours_left = (close_dt - datetime.now(timezone.utc)).total_seconds() / 3600
+            if 0 < hours_left <= 6:
+                time_bonus = 1.5
+            elif 0 < hours_left <= 24:
+                time_bonus = 1.3
+        except Exception:
+            pass  # unparseable — no bonus
+
+    return base_score * time_bonus
 
 
 class OpportunityHunter:
