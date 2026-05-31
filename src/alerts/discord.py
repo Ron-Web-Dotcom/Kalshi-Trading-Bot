@@ -359,6 +359,72 @@ class DiscordAlerter:
         )
         await self._post(payload)
 
+    async def hourly_heartbeat(
+        self,
+        markets_scanned: int,
+        kalshi_count: int,
+        poly_count: int,
+        top_candidates: list,  # list of dicts: ticker, title, yes_ask, no_ask, volume, platform
+        open_positions: int,
+        paper_pnl: float,
+        paper: bool = True,
+    ) -> None:
+        """Send hourly scan summary — bot heartbeat + top market candidates."""
+        now_utc  = datetime.now(timezone.utc)
+        hhmm     = now_utc.strftime("%H:%M")
+        pnl_sign = "+" if paper_pnl >= 0 else ""
+        color    = 0x5865F2  # Discord blurple — neutral heartbeat colour
+
+        # Build watching field value
+        if top_candidates:
+            lines = []
+            for i, c in enumerate(top_candidates[:3], 1):
+                ticker   = c.get("ticker", "?")
+                title    = (c.get("title") or "")[:40]
+                yes_ask  = c.get("yes_ask", 0)
+                no_ask   = c.get("no_ask",  0)
+                volume   = c.get("volume",  0)
+                platform = c.get("platform", "kalshi")
+                plat_tag = "🟣" if platform == "polymarket" else "🟦"
+                lines.append(
+                    f"{i}. {plat_tag} `{ticker}` — {title}\n"
+                    f"   YES {yes_ask:.0f}¢ | NO {no_ask:.0f}¢ | vol {volume:,}"
+                )
+            watching_value = "\n".join(lines)
+        else:
+            watching_value = "_No candidates above threshold_"
+
+        fields = [
+            {
+                "name":   "Markets Scanned",
+                "value":  f"{kalshi_count} Kalshi + {poly_count} Polymarket = **{markets_scanned} total**",
+                "inline": False,
+            },
+            {
+                "name":   "Open Positions",
+                "value":  f"{open_positions} | Paper PnL: **${pnl_sign}{paper_pnl:.2f}**",
+                "inline": False,
+            },
+            {
+                "name":   "👀 Watching — Top Candidates",
+                "value":  watching_value,
+                "inline": False,
+            },
+            {
+                "name":   "Next Scan",
+                "value":  "in ~60s",
+                "inline": False,
+            },
+        ]
+
+        payload = self._embed(
+            title=f"🔍 Hourly Scan Report — {hhmm} UTC",
+            description="Bot alive ✅ | Scanning Kalshi + Polymarket every 60s",
+            color=color,
+            fields=fields,
+        )
+        await self._post(payload)
+
     async def pnl_update(self, total_pnl: float, win_rate: float,
                           total_trades: int, scale_factor: float) -> None:
         color = 0x00FF00 if total_pnl >= 0 else 0xFF4444
