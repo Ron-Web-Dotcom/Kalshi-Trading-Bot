@@ -212,6 +212,22 @@ class TradingBot:
                     )
                     paper_pnl = (pnl_row or {}).get("pnl", 0.0)
 
+                    # All-time win rate — the bot's track record
+                    wl_row = await self.db.fetchone(
+                        "SELECT "
+                        "  COUNT(*) as total, "
+                        "  SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
+                        "  SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
+                        "  COALESCE(SUM(pnl), 0) as total_pnl "
+                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL"
+                    )
+                    wl = wl_row or {}
+                    total_closed = wl.get("total", 0) or 0
+                    total_wins   = wl.get("wins",  0) or 0
+                    total_losses = wl.get("losses",0) or 0
+                    total_pnl    = wl.get("total_pnl", 0.0) or 0.0
+                    win_rate     = (total_wins / total_closed * 100) if total_closed > 0 else 0.0
+
                     # Top 3 candidates by volume (yes_ask between 5 and 95)
                     candidates_rows = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform "
@@ -248,6 +264,11 @@ class TradingBot:
                         paper_pnl=paper_pnl,
                         paper=not settings.trading.live_trading_enabled,
                         closed_trades=closed_trades,
+                        win_rate=win_rate,
+                        total_wins=total_wins,
+                        total_losses=total_losses,
+                        total_pnl=total_pnl,
+                        total_closed=total_closed,
                     )
                 except Exception as e:
                     logger.error("Hourly heartbeat error: %s", e)

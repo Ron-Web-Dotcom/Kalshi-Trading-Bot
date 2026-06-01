@@ -76,20 +76,20 @@ class TradingConfig:
 
     # Cycle limits (configurable without code changes)
     max_trades_per_cycle: int = field(default_factory=lambda: _env_int("MAX_TRADES_PER_CYCLE", 3))
-    max_trades_per_day: int   = field(default_factory=lambda: _env_int("MAX_TRADES_PER_DAY", 5))
-    max_markets_to_scan: int  = field(default_factory=lambda: _env_int("MAX_MARKETS_TO_SCAN", 100))
-    min_market_volume: float  = field(default_factory=lambda: _env_float("MIN_MARKET_VOLUME", 50.0))
+    max_trades_per_day: int   = field(default_factory=lambda: _env_int("MAX_TRADES_PER_DAY", 10))
+    max_markets_to_scan: int  = field(default_factory=lambda: _env_int("MAX_MARKETS_TO_SCAN", 200))
+    min_market_volume: float  = field(default_factory=lambda: _env_float("MIN_MARKET_VOLUME", 10.0))
 
     # Kelly criterion
     kelly_fraction: float = field(default_factory=lambda: _env_float("KELLY_FRACTION", 0.25))
 
-    # AI thresholds — lowered to surface more candidates while still requiring real edge
-    min_ai_confidence: float = field(default_factory=lambda: _env_float("MIN_AI_CONFIDENCE", 60.0))
-    min_confidence_to_trade: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE_TO_TRADE", 0.40))
+    # AI thresholds — paper mode: trade more to gather data, real-world reasoning required
+    min_ai_confidence: float = field(default_factory=lambda: _env_float("MIN_AI_CONFIDENCE", 55.0))
+    min_confidence_to_trade: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE_TO_TRADE", 0.35))
 
-    # Minimum profit requirements — relaxed so more opportunities clear the bar
-    min_profit_roi_pct: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ROI_PCT", 0.5))
-    min_profit_abs_usd: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ABS_USD", 1.0))
+    # Minimum profit requirements — paper mode: just need any positive edge
+    min_profit_roi_pct: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ROI_PCT", 0.1))
+    min_profit_abs_usd: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ABS_USD", 0.50))
 
     # AI position re-evaluation — check open positions against fresh data each cycle
     enable_ai_reeval: bool  = field(default_factory=lambda: _env_bool("ENABLE_AI_REEVAL", True))

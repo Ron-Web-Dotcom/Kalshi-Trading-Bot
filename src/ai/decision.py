@@ -168,10 +168,10 @@ Rules:
             if side not in ("yes", "no"):
                 side = "yes"
 
-            # Reject low EV
-            if action == "BUY" and net_ev is not None and net_ev < 4.0:
+            # Reject low EV — 2¢ minimum for paper mode (enough to show real edge exists)
+            if action == "BUY" and net_ev is not None and net_ev < 2.0:
                 action = "HOLD"
-                reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < 4¢ threshold] " + reasoning
+                reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < 2¢ threshold] " + reasoning
 
             # Reject physically impossible EV given the market price
             if action == "BUY" and net_ev is not None:

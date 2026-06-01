@@ -458,6 +458,11 @@ class DiscordAlerter:
         paper_pnl: float,
         paper: bool = True,
         closed_trades: Optional[List[Dict]] = None,
+        win_rate: float = 0.0,
+        total_wins: int = 0,
+        total_losses: int = 0,
+        total_pnl: float = 0.0,
+        total_closed: int = 0,
     ) -> None:
         """Send hourly scan summary — bot heartbeat + top market candidates."""
         now_utc  = datetime.now(timezone.utc)
@@ -484,7 +489,25 @@ class DiscordAlerter:
         else:
             watching_value = "_No candidates above threshold_"
 
+        # Win rate display
+        if total_closed == 0:
+            record_str = "No trades yet — building track record..."
+            wr_emoji   = "🆕"
+        else:
+            wr_emoji   = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
+            all_pnl_sign = "+" if total_pnl >= 0 else ""
+            record_str = (
+                f"**{win_rate:.0f}% win rate** — "
+                f"{total_wins}W / {total_losses}L / {total_closed} total | "
+                f"All-time PnL: **${all_pnl_sign}{total_pnl:.2f}**"
+            )
+
         fields = [
+            {
+                "name":   f"{wr_emoji} Bot Track Record (Can I Trust It?)",
+                "value":  record_str,
+                "inline": False,
+            },
             {
                 "name":   "Markets Scanned",
                 "value":  f"{kalshi_count} Kalshi + {poly_count} Polymarket = **{markets_scanned} total**",
@@ -492,7 +515,7 @@ class DiscordAlerter:
             },
             {
                 "name":   "Open Positions",
-                "value":  f"{open_positions} | Paper PnL: **${pnl_sign}{paper_pnl:.2f}**",
+                "value":  f"{open_positions} | Today's PnL: **${pnl_sign}{paper_pnl:.2f}**",
                 "inline": False,
             },
             {
