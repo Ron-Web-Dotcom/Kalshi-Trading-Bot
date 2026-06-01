@@ -1,32 +1,19 @@
 [Unit]
 Description=Kalshi AI Trading Bot
-Documentation=https://github.com/Ron-Web-Dotcom/Kalshi-Trading-Bot
 After=network-online.target
 Wants=network-online.target
-# Restart if the process dies for any reason
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
 [Service]
 Type=simple
-User=kalshi
-Group=kalshi
-WorkingDirectory=/opt/kalshi-bot
+User=root
+WorkingDirectory=/root/trading-bot
 Environment="PYTHONUNBUFFERED=1"
-EnvironmentFile=/opt/kalshi-bot/.env
-ExecStart=/opt/kalshi-bot/.venv/bin/python /opt/kalshi-bot/bot.py
-
-# Restart policy — always restart unless manually stopped
+EnvironmentFile=/root/trading-bot/.env
+ExecStart=/root/trading-bot/venv/bin/python /root/trading-bot/bot.py
 Restart=always
 RestartSec=15
-
-# Resource limits
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ReadWritePaths=/opt/kalshi-bot
-
-# Logging — all output goes to journald
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=kalshi-bot
