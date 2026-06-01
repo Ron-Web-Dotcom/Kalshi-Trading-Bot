@@ -252,18 +252,42 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             )
             return results
 
-        # ── 6. Fetch Polymarket candidates ────────────────────────────────────────
+        # ── 6. Fetch Polymarket candidates + store in DB ──────────────────────────
         poly_markets = []
         if poly_enabled:
             try:
-                poly_markets = await poly_client.get_markets(limit=200)
-                # Filter to reasonable volume and price range
+                raw_poly = await poly_client.get_markets(limit=200)
+                now_ts   = __import__("datetime").datetime.now(
+                    __import__("datetime").timezone.utc).isoformat()
+
+                # Persist Polymarket markets to DB so heartbeat can count them
+                for pm in raw_poly:
+                    try:
+                        await db.execute("""
+                            INSERT OR REPLACE INTO markets
+                            (ticker, title, category, status, yes_bid, yes_ask,
+                             no_bid, no_ask, volume, open_interest, close_time,
+                             last_price, fetched_at, platform)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        """, (
+                            pm["ticker"], pm.get("title","")[:200],
+                            pm.get("category",""), "open",
+                            pm.get("yes_bid",0), pm.get("yes_ask",0),
+                            pm.get("no_bid",0),  pm.get("no_ask",0),
+                            pm.get("volume",0),  0,
+                            pm.get("close_time",""), pm.get("yes_ask",0),
+                            now_ts, "polymarket",
+                        ))
+                    except Exception:
+                        pass
+
                 poly_markets = [
-                    m for m in poly_markets
+                    m for m in raw_poly
                     if m.get("volume", 0) >= min_vol
                     and 5 < m.get("yes_ask", 0) < 95
                 ][:max_scan]
-                logger.info("Polymarket: %d tradeable markets loaded", len(poly_markets))
+                logger.info("Polymarket: %d markets stored, %d tradeable",
+                            len(raw_poly), len(poly_markets))
             except Exception as pe:
                 logger.warning("Polymarket market load failed: %s", pe)
                 poly_markets = []
