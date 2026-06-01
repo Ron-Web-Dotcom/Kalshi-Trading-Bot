@@ -31,7 +31,7 @@ def test_risk_defaults():
     assert s.trading.max_drawdown_pct == 15.0
     assert s.trading.arbitrage_threshold_pct == 5.0
     assert s.trading.kelly_fraction == 0.25
-    assert s.trading.min_confidence_to_trade == 0.45
+    assert s.trading.min_confidence_to_trade == 0.35
 
 
 def test_ai_defaults():
