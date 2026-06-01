@@ -43,15 +43,58 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
 
     engine = AIDecisionEngine(db=db)
     decision = await engine.decide(market, signals)
+
+    ticker    = market.get("ticker", "?")
+    conf      = decision.confidence
+    action    = decision.action
+    side      = decision.side or "yes"
+    net_ev    = decision.net_ev
+    true_prob = decision.true_prob
+    min_conf  = settings.trading.min_ai_confidence
+
+    ev_str = f" EV={net_ev:+.1f}¢" if net_ev is not None else ""
+    tp_str = f" P(YES)={true_prob:.0f}%" if true_prob is not None else ""
+
     if engine.should_trade(decision):
+        logger.info(
+            "✅ TRADE SIGNAL  %-30s  %s/%-3s  conf=%d%%  %s%s  %s",
+            ticker, action, side.upper(), conf, tp_str, ev_str, decision.reasoning[:80],
+        )
         return {
-            "ticker":     market.get("ticker"),
-            "action":     decision.action,
-            "side":       decision.side,
-            "confidence": decision.confidence,
+            "ticker":     ticker,
+            "action":     action,
+            "side":       side,
+            "confidence": conf,
             "reasoning":  decision.reasoning,
             "model":      decision.model,
-            "true_prob":  decision.true_prob,
-            "net_ev":     decision.net_ev,
+            "true_prob":  true_prob,
+            "net_ev":     net_ev,
         }
+
+    # Log every HOLD with the reason so you can see what score each market got
+    if conf >= min_conf * 0.6:
+        # Close to threshold — worth highlighting
+        logger.info(
+            "🟡 NEAR-MISS      %-30s  HOLD/%-3s  conf=%d%%  (need %d%%)%s%s  %s",
+            ticker, side.upper(), conf, min_conf, tp_str, ev_str, decision.reasoning[:80],
+        )
+        # Send to Discord so you can see what almost traded
+        try:
+            from src.alerts.discord import DiscordAlerter
+            from src.config.settings import settings as _s
+            discord = DiscordAlerter()
+            await discord.near_miss(
+                ticker=ticker, side=side,
+                confidence=conf, min_confidence=min_conf,
+                net_ev=net_ev, true_prob=true_prob,
+                reasoning=decision.reasoning,
+                paper=not _s.trading.live_trading_enabled,
+            )
+        except Exception:
+            pass
+    else:
+        logger.debug(
+            "⬜ HOLD           %-30s  conf=%d%%  (need %d%%)%s%s  %s",
+            ticker, conf, min_conf, tp_str, ev_str, decision.reasoning[:80],
+        )
     return None
