@@ -122,6 +122,23 @@ class DatabaseManager:
                         pnl REAL DEFAULT 0,
                         ai_cost REAL DEFAULT 0
                     );
+
+                    CREATE TABLE IF NOT EXISTS audit_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        event_type TEXT,
+                        ticker TEXT,
+                        platform TEXT,
+                        side TEXT,
+                        price_cents REAL,
+                        size_usd REAL,
+                        confidence REAL,
+                        net_ev REAL,
+                        reason TEXT,
+                        result TEXT,
+                        pnl REAL,
+                        operator TEXT DEFAULT 'bot',
+                        logged_at TEXT
+                    );
                 """)
                 await db.commit()
                 # Idempotent migrations for existing databases

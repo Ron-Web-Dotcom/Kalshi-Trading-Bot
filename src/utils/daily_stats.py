@@ -25,6 +25,7 @@ class DailyStats:
         self.top_opportunities: List[Dict] = []
         self.poly_matches: int = 0
         self.suspicious_matches: List[Dict] = []
+        self.consecutive_losses: int = 0
 
     # ── Recording methods ──────────────────────────────────────────────────
 
@@ -74,6 +75,15 @@ class DailyStats:
         """Add n to the running markets_scanned total."""
         self.markets_scanned += n
 
+    def record_loss(self) -> None:
+        """Increment consecutive_losses counter."""
+        self.consecutive_losses += 1
+        logger.debug("Consecutive losses: %d", self.consecutive_losses)
+
+    def record_win(self) -> None:
+        """Reset consecutive_losses to 0."""
+        self.consecutive_losses = 0
+
     def record_poly_match(
         self,
         ticker: str,
@@ -119,6 +129,7 @@ class DailyStats:
         self.top_opportunities = []
         self.poly_matches = 0
         self.suspicious_matches = []
+        self.consecutive_losses = 0
         logger.info("Daily stats reset for new day.")
 
     def snapshot(self) -> Dict:

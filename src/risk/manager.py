@@ -135,6 +135,59 @@ class RiskManager:
         fractional = kelly * self.cfg.kelly_fraction
         return self.clamp_size(fractional * portfolio_value)
 
+    async def check_daily_loss_lockout(self, db) -> tuple:
+        """
+        Returns (locked_out, reason).
+        locked_out=True means stop trading.
+
+        Checks:
+          1. Sum of PnL from positions closed today — if loss > max_daily_loss_usd → lockout
+          2. Last N closed positions ordered by closed_at DESC — if all N are losses → lockout
+        """
+        from src.config.settings import settings
+        max_loss = settings.trading.max_daily_loss_usd
+        max_streak = settings.trading.max_consecutive_losses
+
+        if db is None:
+            return False, ""
+
+        # Check 1: daily loss total
+        try:
+            today = __import__("datetime").date.today().isoformat()
+            row = await db.fetchone(
+                "SELECT COALESCE(SUM(pnl), 0) AS total_pnl FROM positions "
+                "WHERE status='closed' AND closed_at >= ?",
+                (today + "T00:00:00",),
+            )
+            total_pnl = float((row or {}).get("total_pnl", 0) or 0)
+            daily_loss = abs(total_pnl) if total_pnl < 0 else 0
+            if daily_loss >= max_loss:
+                return (
+                    True,
+                    f"Daily loss limit ${max_loss:.2f} reached (lost ${daily_loss:.2f}) — locked out until midnight",
+                )
+        except Exception as e:
+            logger.warning("check_daily_loss_lockout: error checking daily loss: %s", e)
+
+        # Check 2: consecutive loss streak
+        try:
+            rows = await db.fetchall(
+                "SELECT pnl FROM positions WHERE status='closed' AND pnl IS NOT NULL "
+                "ORDER BY closed_at DESC LIMIT ?",
+                (max_streak,),
+            )
+            if rows and len(rows) >= max_streak:
+                all_losses = all((r.get("pnl") or 0) < 0 for r in rows)
+                if all_losses:
+                    return (
+                        True,
+                        f"{max_streak} consecutive losses — cooling down",
+                    )
+        except Exception as e:
+            logger.warning("check_daily_loss_lockout: error checking streak: %s", e)
+
+        return False, ""
+
     def dollars_to_contracts(self, dollars: float, price_cents: float) -> int:
         """Convert dollar amount to number of contracts at given price (cents)."""
         if price_cents <= 0:

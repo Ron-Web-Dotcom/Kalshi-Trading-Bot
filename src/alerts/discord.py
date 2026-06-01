@@ -72,7 +72,8 @@ class DiscordAlerter:
         return ok
 
     async def startup_banner(self, mode: str, balance: Optional[float] = None,
-                              poly_enabled: bool = False) -> None:
+                              poly_enabled: bool = False,
+                              health_results: Optional[Dict] = None) -> None:
         """Send bot startup notification."""
         from src.config.settings import settings
         poly_on = poly_enabled or settings.polymarket.enabled
@@ -84,6 +85,26 @@ class DiscordAlerter:
         ]
         if balance is not None:
             fields.append({"name": "Account Balance", "value": f"${balance:.2f}", "inline": True})
+
+        # Service health status table
+        if health_results:
+            lines = []
+            for name, result in health_results.items():
+                if result.ok:
+                    latency = result.latency_ms
+                    slow = latency > 2000
+                    icon = "⚠️" if slow else "✅"
+                    note = f" (slow)" if slow else ""
+                    lines.append(f"{icon} {name:<12} — {latency:.0f}ms{note}")
+                else:
+                    lines.append(f"❌ {name:<12} — FAILED ({result.message[:60]})")
+            if lines:
+                fields.append({
+                    "name": "🔧 Service Health",
+                    "value": "```\n" + "\n".join(lines) + "\n```",
+                    "inline": False,
+                })
+
         payload = self._embed(
             title=f"🚀 Kalshi + Polymarket Bot Started — {mode} MODE",
             description=f"Bot is online and scanning markets on {platforms}.",

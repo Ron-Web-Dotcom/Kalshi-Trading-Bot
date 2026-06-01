@@ -81,6 +81,15 @@ class TradingBot:
             logger.info(line)
 
     async def startup(self):
+        # Run health check before startup banner
+        health = {}
+        try:
+            from src.utils.health_check import HealthChecker
+            checker = HealthChecker()
+            health = await checker.run_all()
+        except Exception as _he:
+            logger.warning("Health check failed: %s", _he)
+
         self._print_startup_banner()
         logger.info("Initializing database...")
         await self.db.initialize()
@@ -108,6 +117,7 @@ class TradingBot:
             await discord.startup_banner(
                 mode="LIVE" if self.live_mode else "PAPER",
                 balance=balance,
+                health_results=health,
             )
         except Exception:
             pass
