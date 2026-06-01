@@ -559,6 +559,122 @@ class DiscordAlerter:
         )
         await self._post(payload)
 
+    async def midnight_daily_summary(
+        self,
+        date: str,
+        snap: dict,
+        wins: int,
+        losses: int,
+        total_closed: int,
+        alltime_pnl: float,
+        today_pnl: float,
+        open_positions: int,
+        closed_today: list,
+        paper: bool = True,
+    ) -> None:
+        """Midnight daily report — full day recap posted to Discord."""
+        mode_tag  = "📝 PAPER" if paper else "💰 LIVE"
+        pnl_sign  = "+" if today_pnl >= 0 else ""
+        all_sign  = "+" if alltime_pnl >= 0 else ""
+        color     = 0x00FF7F if today_pnl >= 0 else 0xFF4444
+        win_rate  = (wins / total_closed * 100) if total_closed > 0 else 0.0
+        wr_emoji  = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴" if total_closed > 0 else "🆕"
+        err_count = len(snap.get("errors", []))
+
+        fields = [
+            {
+                "name":  "🤖 Bot Status",
+                "value": (
+                    f"Uptime: **{snap.get('uptime','?')}** | Mode: {mode_tag}\n"
+                    f"Running 24/7 — scanning Kalshi + Polymarket continuously."
+                ),
+                "inline": False,
+            },
+            {
+                "name":  "📊 Today's Activity",
+                "value": (
+                    f"Markets scanned: **{snap.get('markets_scanned', 0):,}**\n"
+                    f"AI signals generated: **{snap.get('signals_generated', 0)}** (BUY recommendations before risk gates)\n"
+                    f"Trades executed: **{snap.get('trades_executed', 0)}**\n"
+                    f"Trades skipped: **{snap.get('trades_skipped', 0)}** (risk / profit gate / duplicate)"
+                ),
+                "inline": False,
+            },
+            {
+                "name":  "💰 Performance",
+                "value": (
+                    f"Today's PnL: **${pnl_sign}{today_pnl:.2f}**\n"
+                    f"All-time PnL: **${all_sign}{alltime_pnl:.2f}**\n"
+                    f"{wr_emoji} Win rate: **{win_rate:.0f}%** ({wins}W / {losses}L / {total_closed} total)\n"
+                    f"Open positions: **{open_positions}**"
+                ),
+                "inline": False,
+            },
+            {
+                "name":  "🔗 Polymarket ↔ Kalshi Matching",
+                "value": (
+                    f"Matched pairs today: **{snap.get('poly_matches', 0)}**\n"
+                    f"Suspicious / low-confidence matches flagged: **{len(snap.get('suspicious_matches', []))}**"
+                    + (
+                        "\n⚠️ Flagged: " + ", ".join(
+                            f"`{m['ticker']}` (jaccard={m['jaccard']:.2f})"
+                            for m in snap.get("suspicious_matches", [])[:5]
+                        ) if snap.get("suspicious_matches") else ""
+                    )
+                ),
+                "inline": False,
+            },
+        ]
+
+        # Top opportunities
+        top_opps = snap.get("top_opportunities", [])
+        if top_opps:
+            lines = []
+            for i, o in enumerate(top_opps[:3], 1):
+                ev_str = f" EV={o['net_ev']:+.1f}¢" if o.get("net_ev") is not None else ""
+                lines.append(
+                    f"{i}. `{o['ticker']}` {(o.get('side') or '').upper()} — "
+                    f"conf={o.get('confidence',0):.0f}%{ev_str}\n"
+                    f"   _{(o.get('reasoning') or '')[:100]}_"
+                )
+            fields.append({"name": "🏆 Top Opportunities Today", "value": "\n".join(lines), "inline": False})
+        else:
+            fields.append({"name": "🏆 Top Opportunities Today", "value": "_Nothing cleared all criteria — cash held._", "inline": False})
+
+        # Closed trades today
+        if closed_today:
+            lines = []
+            for t in closed_today[:8]:
+                t_pnl = t.get("pnl") or 0
+                icon  = "✅" if t_pnl >= 0 else "❌"
+                sign  = "+" if t_pnl >= 0 else ""
+                why   = t.get("close_reason", "")
+                label = (
+                    "resolved"     if why.startswith("resolved")    else
+                    "stop-loss"    if why.startswith("stop_loss")   else
+                    "take-profit"  if why.startswith("take_profit") else
+                    "AI opted out" if why.startswith("ai_reeval")   else "closed"
+                )
+                lines.append(f"{icon} `{t.get('ticker','')}` {(t.get('side') or '').upper()} **${sign}{t_pnl:.2f}** — {label}")
+            fields.append({"name": "📋 Closed Trades Today", "value": "\n".join(lines), "inline": False})
+
+        # Errors
+        if err_count:
+            recent = snap.get("errors", [])[-3:]
+            err_lines = [f"• {msg}" for _, msg in recent]
+            fields.append({"name": f"⚠️ Errors ({err_count} total)", "value": "\n".join(err_lines)[:400], "inline": False})
+
+        payload = self._embed(
+            title=f"📊 {mode_tag} Daily Report — {date}",
+            description=(
+                f"End-of-day summary for **{date}**. "
+                f"Bot ran for **{snap.get('uptime','?')}** scanning prediction markets 24/7."
+            ),
+            color=color,
+            fields=fields,
+        )
+        await self._post(payload)
+
     async def trade_review(
         self,
         ticker: str,
@@ -657,6 +773,157 @@ class DiscordAlerter:
         payload = self._embed(
             title=f"🔍 Trade Advisor — {ticker} [{platform_tag}]",
             description=desc,
+            color=color,
+            fields=fields,
+        )
+        await self._post(payload)
+
+    async def midnight_daily_summary(
+        self,
+        date: str,
+        stats: Dict,
+        paper: bool = True,
+        wins: int = 0,
+        losses: int = 0,
+        today_pnl: float = 0.0,
+        all_time_pnl: float = 0.0,
+        open_positions: int = 0,
+        closed_trades: Optional[List[Dict]] = None,
+    ) -> None:
+        """
+        Post the midnight daily report to Discord.
+
+        Parameters
+        ----------
+        date            : ISO date string, e.g. "2026-06-01"
+        stats           : snapshot dict from DailyStats.snapshot()
+        paper           : True if bot is in paper-trading mode
+        wins / losses   : today's win/loss count from the DB
+        today_pnl       : today's realised PnL in dollars
+        all_time_pnl    : all-time cumulative PnL in dollars
+        open_positions  : count of positions still open at midnight
+        closed_trades   : list of closed position dicts (ticker, side, pnl, close_reason)
+        """
+        mode_tag  = "📝 Paper (no real money)" if paper else "💰 LIVE"
+        color     = 0x00FF00 if today_pnl >= 0 else 0xFF4444
+        pnl_sign  = "+" if today_pnl >= 0 else ""
+        at_sign   = "+" if all_time_pnl >= 0 else ""
+
+        total_decided = wins + losses
+        win_rate = (wins / total_decided * 100) if total_decided > 0 else 0.0
+
+        # ── Section 1: Bot Status ──────────────────────────────────────────
+        status_val = (
+            f"Running for **{stats.get('uptime', 'unknown')}**\n"
+            f"Mode: **{mode_tag}**"
+        )
+
+        # ── Section 2: Activity ───────────────────────────────────────────
+        activity_val = (
+            f"Markets scanned today: **{stats.get('markets_scanned', 0):,}**\n"
+            f"AI signals generated: **{stats.get('signals_generated', 0)}** "
+            f"(these are candidates before safety checks)\n"
+            f"Trades actually placed: **{stats.get('trades_executed', 0)}**\n"
+            f"Trades skipped by safety rules: **{stats.get('trades_skipped', 0)}**"
+        )
+
+        # ── Section 3: Performance ────────────────────────────────────────
+        if total_decided == 0:
+            perf_val = "No completed trades yet — the bot is still building its track record."
+        else:
+            wr_emoji = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
+            perf_val = (
+                f"{wr_emoji} Win rate: **{win_rate:.0f}%** — {wins} wins / {losses} losses\n"
+                f"Today's profit or loss: **${pnl_sign}{today_pnl:.2f}**\n"
+                f"All-time total: **${at_sign}{all_time_pnl:.2f}**"
+            )
+
+        # ── Section 4: Polymarket Matching ────────────────────────────────
+        suspicious_list = stats.get("suspicious_matches", [])
+        poly_val = (
+            f"Kalshi↔Polymarket pairs matched: **{stats.get('poly_matches', 0)}**\n"
+            f"Suspicious matches flagged for review: **{len(suspicious_list)}**"
+        )
+        if suspicious_list:
+            sample = suspicious_list[:3]
+            lines  = [
+                f"  ⚠️ `{s['ticker']}` — jaccard={s['jaccard']:.2f} edge={s['net_edge']:+.1f}¢"
+                for s in sample
+            ]
+            poly_val += "\n" + "\n".join(lines)
+
+        # ── Section 5: Top Opportunities ─────────────────────────────────
+        top_opps = stats.get("top_opportunities", [])
+        if top_opps:
+            opp_lines = []
+            for i, opp in enumerate(top_opps[:3], 1):
+                ev_str = f"{opp['net_ev']:+.1f}¢" if opp.get("net_ev") is not None else "n/a"
+                reason_short = (opp.get("reasoning") or "")[:80]
+                opp_lines.append(
+                    f"**{i}.** `{opp['ticker']}` — BUY {opp.get('side','?').upper()} | "
+                    f"score={opp.get('score', 0):.2f} conf={opp.get('confidence', 0):.0f}% "
+                    f"EV={ev_str}\n    _{reason_short}_"
+                )
+            top_val = "\n".join(opp_lines)
+        else:
+            top_val = "No notable opportunities found today."
+
+        # ── Section 6: Errors ─────────────────────────────────────────────
+        error_list = stats.get("errors", [])
+        if not error_list:
+            error_val = "No errors — clean run ✅"
+        else:
+            err_count = len(error_list)
+            last_three = error_list[-3:]
+            err_lines  = [f"• {ts[:19]} — {msg[:80]}" for ts, msg in last_three]
+            error_val  = f"{err_count} error(s) today. Last {len(last_three)}:\n" + "\n".join(err_lines)
+
+        # ── Section 7: Closed Trades ──────────────────────────────────────
+        def _plain_reason(why: str) -> str:
+            if why.startswith("resolved"):
+                result = why.split(":")[-1].strip()
+                return f"market resolved {result.upper()}" if result else "market resolved"
+            if why.startswith("stop_loss"):
+                pct = why.split(":")[-1].strip() if ":" in why else ""
+                return f"stop-loss hit ({pct})" if pct else "stop-loss hit"
+            if why.startswith("take_profit"):
+                pct = why.split(":")[-1].strip() if ":" in why else ""
+                return f"took profit ({pct})" if pct else "took profit"
+            if why.startswith("ai_reeval"):
+                return "AI decided to exit early"
+            return why or "closed"
+
+        if closed_trades:
+            trade_lines = []
+            for t in (closed_trades or [])[:10]:
+                t_pnl  = t.get("pnl", 0) or 0
+                sign   = "+" if t_pnl >= 0 else ""
+                icon   = "✅" if t_pnl >= 0 else "❌"
+                reason = _plain_reason(t.get("close_reason", ""))
+                trade_lines.append(
+                    f"{icon} `{t.get('ticker','')}` {(t.get('side') or '').upper()} — "
+                    f"**${sign}{t_pnl:.2f}** — {reason}"
+                )
+            closed_val = "\n".join(trade_lines) or "None"
+        else:
+            closed_val = "No trades were closed today."
+
+        fields = [
+            {"name": "🤖 Bot Status",            "value": status_val,   "inline": False},
+            {"name": "📈 Activity",               "value": activity_val, "inline": False},
+            {"name": "💰 Performance",            "value": perf_val,     "inline": False},
+            {"name": "🔗 Polymarket Matching",    "value": poly_val,     "inline": False},
+            {"name": "🏆 Top Opportunities Today","value": top_val,      "inline": False},
+            {"name": "⚠️ Errors",                 "value": error_val,    "inline": False},
+            {"name": "📋 Closed Trades Today",    "value": closed_val,   "inline": False},
+        ]
+
+        payload = self._embed(
+            title=f"📊 Daily Report — {date}",
+            description=(
+                f"Here's what the bot did today. "
+                f"{'This is a simulation — no real money was used.' if paper else 'This involved REAL money.'}"
+            ),
             color=color,
             fields=fields,
         )

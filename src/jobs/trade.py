@@ -103,6 +103,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             logger.warning("No markets in DB (run ingest first) — cycle skipped")
             return results
         logger.info("Markets loaded: %d available (volume ≥ %g)", len(markets), min_vol)
+        from src.utils.daily_stats import stats as daily_stats
+        daily_stats.record_markets_scanned(len(markets))
 
         market_map = {m["ticker"]: m for m in markets}
 
@@ -134,6 +136,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             if not market:
                 logger.warning("SKIP arb %s — not in cached markets", ticker)
                 results.skipped += 1
+                daily_stats.record_skip("not_in_cached_markets")
                 continue
 
             if src == "internal_arb":
@@ -156,6 +159,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                             ticker, side, reason,
                         )
                         results.skipped += 1
+                        daily_stats.record_skip(f"risk_gate:{reason}")
                         continue
                     rec = await kalshi_trader.execute(
                         ticker=ticker, action="BUY", side=side,
@@ -171,6 +175,11 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         results.total_positions += 1
                         results.total_capital_used += rec.get("total_cost", 0)
                         results.arb_trades += 1
+                        daily_stats.record_trade(
+                            ticker=ticker, side=side, confidence=99.0,
+                            net_ev=net, score=1.0,
+                            reasoning=f"Internal arb: YES+NO={yes_p+no_p:.0f}¢ net={net:.1f}¢",
+                        )
                         if discord.cfg.alert_on_signal:
                             await discord.arb_signal(
                                 ticker=ticker, signal_type="internal_arb",
@@ -191,6 +200,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         "SKIP cross-arb %s | Price %.0f¢ out of range", ticker, price
                     )
                     results.skipped += 1
+                    daily_stats.record_skip("price_out_of_range")
                     continue
 
                 logger.info(
@@ -207,6 +217,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 if not allowed:
                     logger.info("SKIP cross-arb %s | Reason: %s", ticker, reason)
                     results.skipped += 1
+                    daily_stats.record_skip(f"risk_gate:{reason}")
                     continue
 
                 rec = await kalshi_trader.execute(
@@ -224,6 +235,14 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     results.total_positions += 1
                     results.total_capital_used += rec.get("total_cost", 0)
                     results.arb_trades += 1
+                    daily_stats.record_trade(
+                        ticker=ticker, side=side, confidence=95.0,
+                        net_ev=net, score=0.9,
+                        reasoning=(
+                            f"Cross-market arb: Kalshi={sig['kalshi_price']:.0f}¢ "
+                            f"vs Poly={sig['poly_price']:.0f}¢ net={net:.1f}¢"
+                        ),
+                    )
                     if discord.cfg.alert_on_signal:
                         await discord.arb_signal(
                             ticker=ticker, signal_type="cross_market_arb",
@@ -352,6 +371,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     roi_pct or 0, min_abs, min_roi,
                 )
                 results.skipped += 1
+                daily_stats.record_skip("profit_gate")
             else:
                 daily_loss_db = await risk.get_daily_loss_from_db()
                 allowed, reason = risk.check_trade(
@@ -362,6 +382,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 if not allowed:
                     logger.info("Best opportunity BLOCKED by risk gate: %s", reason)
                     results.skipped += 1
+                    daily_stats.record_skip(f"risk_gate:{reason}")
                 else:
                     poly_str = ""
                     if poly_comp:
@@ -424,6 +445,11 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
     except Exception as e:
         logger.error("Trade job crashed: %s", e, exc_info=True)
+        try:
+            from src.utils.daily_stats import stats as daily_stats
+            daily_stats.record_error(str(e)[:200])
+        except Exception:
+            pass
         try:
             from src.config.settings import settings as _s
             _err = str(e)[:500]

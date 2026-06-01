@@ -60,6 +60,12 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
             "✅ TRADE SIGNAL  %-30s  %s/%-3s  conf=%d%%  %s%s  %s",
             ticker, action, side.upper(), conf, tp_str, ev_str, decision.reasoning[:80],
         )
+        # Record signal in daily stats tracker
+        try:
+            from src.utils.daily_stats import stats as daily_stats
+            daily_stats.record_signal(ticker, conf, net_ev, action)
+        except Exception:
+            pass
         return {
             "ticker":     ticker,
             "action":     action,
