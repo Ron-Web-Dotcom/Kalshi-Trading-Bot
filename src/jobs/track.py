@@ -121,6 +121,14 @@ async def run_tracking(db_manager) -> None:
                         (pnl, ticker, side, ticker, side)
                     )
                     risk.record_trade(ticker, pnl)
+                    try:
+                        from src.utils.daily_stats import stats as daily_stats
+                        if pnl >= 0:
+                            daily_stats.record_win()
+                        else:
+                            daily_stats.record_loss()
+                    except Exception:
+                        pass
                     closed += 1
                     sign    = "+" if pnl >= 0 else ""
                     trigger = (

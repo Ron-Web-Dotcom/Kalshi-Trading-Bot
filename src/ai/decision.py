@@ -40,7 +40,95 @@ class AIDecisionEngine:
             self._client = anthropic.AsyncAnthropic(api_key=self.cfg.anthropic_api_key)
         return self._client
 
-    def _build_prompt(self, market: Dict, signals: List[Dict], context: str = "") -> str:
+    async def _build_bot_context(self) -> str:
+        """Build a self-awareness block — bot's own track record, positions, risk state."""
+        try:
+            from src.utils.daily_stats import stats as daily_stats
+            from src.config.settings import settings
+
+            snap    = daily_stats.snapshot()
+            lines   = ["=== BOT SELF-AWARENESS ==="]
+
+            # Win rate and track record
+            total   = snap.get("trades_executed", 0)
+            if self.db:
+                try:
+                    wl = await self.db.fetchone(
+                        "SELECT COUNT(*) as total, "
+                        "SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
+                        "SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
+                        "COALESCE(SUM(pnl),0) as total_pnl "
+                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL"
+                    ) or {}
+                    total_closed = wl.get("total", 0) or 0
+                    wins         = wl.get("wins",  0) or 0
+                    total_pnl    = wl.get("total_pnl", 0.0) or 0.0
+                    win_rate     = (wins / total_closed * 100) if total_closed > 0 else 0.0
+                    lines.append(
+                        f"Track record: {total_closed} trades closed | "
+                        f"Win rate: {win_rate:.0f}% | All-time PnL: ${total_pnl:+.2f}"
+                    )
+                    if total_closed == 0:
+                        lines.append("Status: No completed trades yet — this is an early decision.")
+
+                    # Recent last 5 closed trades
+                    recent = await self.db.fetchall(
+                        "SELECT ticker, side, pnl, close_reason, avg_price, current_price "
+                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL "
+                        "ORDER BY closed_at DESC LIMIT 5"
+                    ) or []
+                    if recent:
+                        lines.append("Last 5 closed trades:")
+                        for r in recent:
+                            outcome = "WIN" if (r.get("pnl") or 0) > 0 else "LOSS"
+                            lines.append(
+                                f"  {outcome} | {r.get('ticker','')} {(r.get('side') or '').upper()} "
+                                f"| entry={r.get('avg_price',0):.0f}¢ exit={r.get('current_price',0):.0f}¢ "
+                                f"| PnL=${r.get('pnl',0):+.2f} | reason={r.get('close_reason','')}"
+                            )
+
+                    # Current open positions
+                    open_pos = await self.db.fetchall(
+                        "SELECT ticker, side, avg_price, contracts, pnl "
+                        "FROM positions WHERE status='open'"
+                    ) or []
+                    if open_pos:
+                        lines.append(f"Currently open positions ({len(open_pos)}):")
+                        for p in open_pos:
+                            lines.append(
+                                f"  {p.get('ticker','')} {(p.get('side') or '').upper()} "
+                                f"| entry={p.get('avg_price',0):.0f}¢ | {p.get('contracts',0)} contracts "
+                                f"| unrealised PnL=${p.get('pnl') or 0:+.2f}"
+                            )
+                    else:
+                        lines.append("Currently open positions: None")
+
+                except Exception:
+                    pass
+
+            # Daily stats
+            lines.append(
+                f"Today: {snap.get('markets_scanned',0):,} markets scanned | "
+                f"{snap.get('signals_generated',0)} BUY signals | "
+                f"{snap.get('trades_executed',0)} trades placed | "
+                f"{snap.get('trades_skipped',0)} skipped"
+            )
+
+            # Consecutive losses warning
+            consec = snap.get("consecutive_losses", 0)
+            max_consec = settings.trading.max_consecutive_losses
+            if consec > 0:
+                lines.append(
+                    f"⚠️ Consecutive losses: {consec} (lockout triggers at {max_consec}) — "
+                    f"{'be cautious' if consec >= max_consec // 2 else 'within normal range'}"
+                )
+
+            lines.append("=== END BOT SELF-AWARENESS ===")
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
+    def _build_prompt(self, market: Dict, signals: List[Dict], context: str = "", bot_context: str = "") -> str:
         ticker        = market.get("ticker", "")
         title         = market.get("title", "")
         yes_ask       = market.get("yes_ask", 0)
@@ -77,6 +165,7 @@ class AIDecisionEngine:
         spread         = yes_ask + no_ask - 100
         liquidity      = "LOW" if volume < 100 else "HIGH" if volume > 10000 else "MEDIUM"
         context_block  = f"\n\n--- REAL-WORLD CONTEXT ---\n{context}\n--- END CONTEXT ---" if context else ""
+        bot_block      = f"\n\n{bot_context}" if bot_context else ""
 
         return f"""You are an expert quantitative prediction market trader. Your ONLY goal is to find bets where your estimated true probability beats the market price by enough to profit after fees.
 
@@ -93,7 +182,7 @@ Spread:  {spread:.0f}¢  |  Volume: {volume:,}  |  Liquidity: {liquidity}
 === EXPECTED VALUE on Kalshi (per contract, after 2% fee) ===
 BUY YES @ {yes_ask:.0f}¢ → win {yes_ev_if_true:.1f}¢ if YES  |  lose {yes_ask:.0f}¢ if NO  |  break-even P(YES) = {yes_ask/98*100:.1f}%
 BUY NO  @ {no_ask:.0f}¢ → win {no_ev_if_true:.1f}¢ if NO   |  lose {no_ask:.0f}¢ if YES |  break-even P(NO)  = {no_ask/98*100:.1f}%
-{arb_text}{context_block}
+{arb_text}{context_block}{bot_block}
 
 === YOUR TASK ===
 Step 1 — Use the real-world context AND the Polymarket cross-reference (if present) to estimate TRUE P(YES).
@@ -132,7 +221,10 @@ Rules:
         except Exception:
             context = ""
 
-        prompt = self._build_prompt(market, signals, context)
+        # Build bot self-awareness context — let AI know its own state
+        bot_context = await self._build_bot_context()
+
+        prompt = self._build_prompt(market, signals, context, bot_context)
         try:
             client = self._get_client()
             response = await client.messages.create(
