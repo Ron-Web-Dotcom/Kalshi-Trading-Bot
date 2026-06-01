@@ -231,6 +231,14 @@ class TradingBot:
                         for r in (candidates_rows or [])
                     ]
 
+                    # Today's closed trades with outcomes
+                    closed_rows = await self.db.fetchall(
+                        "SELECT ticker, side, pnl, close_reason FROM positions "
+                        "WHERE status='closed' AND closed_at >= ? ORDER BY closed_at DESC LIMIT 10",
+                        (today + "T00:00:00",)
+                    )
+                    closed_trades = [dict(r) for r in (closed_rows or [])]
+
                     await discord.hourly_heartbeat(
                         markets_scanned=markets_total,
                         kalshi_count=kalshi_count,
@@ -239,6 +247,7 @@ class TradingBot:
                         open_positions=open_n,
                         paper_pnl=paper_pnl,
                         paper=not settings.trading.live_trading_enabled,
+                        closed_trades=closed_trades,
                     )
                 except Exception as e:
                     logger.error("Hourly heartbeat error: %s", e)
