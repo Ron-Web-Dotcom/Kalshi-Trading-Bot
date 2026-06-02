@@ -341,8 +341,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
                 poly_markets = [
                     m for m in raw_poly
-                    if m.get("volume", 0) >= min_vol
-                    and 5 < m.get("yes_ask", 0) < 95
+                    if m.get("yes_ask", 0) > 1
                 ][:max_scan]
                 logger.info("Polymarket: %d markets stored, %d tradeable",
                             len(raw_poly), len(poly_markets))
@@ -360,8 +359,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             m for m in markets
             if m.get("ticker") not in arb_tickers
             and m.get("ticker") not in open_tickers
-            and 5 < m.get("yes_ask", 0) < 95
-            and m.get("volume", 0) >= min_vol
+            and m.get("yes_ask", 0) > 1
         ][:max_scan]
 
         logger.info(
