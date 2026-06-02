@@ -126,8 +126,8 @@ class PolymarketTradingClient:
             else:
                 return None
 
-            # Filter: only include markets with tradeable prices (2-98¢)
-            if not (2 < yes_price < 98):
+            # Filter: skip markets with no volume and no price data at all
+            if yes_price == 0 and no_price == 0:
                 return None
 
             # Volume — Gamma returns in USDC as string or float
