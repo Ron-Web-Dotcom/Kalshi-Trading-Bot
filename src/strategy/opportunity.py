@@ -134,7 +134,10 @@ class OpportunityHunter:
             # Basic sanity
             if yes_ask <= 5 or yes_ask >= 95:
                 continue
-            if volume < 100:
+            # Use lower volume threshold — Polymarket volumes are much larger
+            platform = market.get("platform", "kalshi")
+            min_vol = 10 if platform == "polymarket" else 50
+            if volume < min_vol:
                 continue
 
             poly_comp = poly_by_ticker.get(ticker)
@@ -179,9 +182,14 @@ class OpportunityHunter:
                 }
 
         logger.info(
-            "Hunt complete: evaluated=%d skipped=%d | best_score=%.3f",
-            evaluated, skipped_score, best_score,
+            "Hunt complete: evaluated=%d skipped(low score)=%d | best_score=%.3f (need %.3f)",
+            evaluated, skipped_score, best_score, min_score,
         )
+        if evaluated == 0:
+            logger.warning(
+                "No candidates were evaluated — all filtered out before AI. "
+                "Check volume filter, price range (5-95¢), and candidate list size."
+            )
 
         if best_result and best_score >= min_score:
             m = best_result["market"]

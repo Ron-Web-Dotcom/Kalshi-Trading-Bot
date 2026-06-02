@@ -137,7 +137,7 @@ class AlertsConfig:
     discord_webhook_url: str = field(default_factory=lambda: _env("DISCORD_WEBHOOK_URL"))
     discord_enabled: bool = field(default_factory=lambda: bool(_env("DISCORD_WEBHOOK_URL")))
     alert_on_trade: bool = field(default_factory=lambda: _env_bool("ALERT_ON_TRADE", True))
-    alert_on_signal: bool = field(default_factory=lambda: _env_bool("ALERT_ON_SIGNAL", False))
+    alert_on_signal: bool = field(default_factory=lambda: _env_bool("ALERT_ON_SIGNAL", True))
     alert_on_error: bool = field(default_factory=lambda: _env_bool("ALERT_ON_ERROR", True))
 
 
