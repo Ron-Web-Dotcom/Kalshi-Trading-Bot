@@ -234,7 +234,10 @@ Rules:
                 temperature=self.cfg.temperature,
                 messages=[{"role": "user", "content": prompt}],
             )
-            raw = response.content[0].text.strip()
+            raw = response.content[0].text.strip() if response.content else ""
+            if not raw:
+                logger.warning("AI returned empty response for %s — using rule-based fallback", ticker)
+                return self._rule_based_decision(market, signals)
             # Strip markdown fences if model wraps JSON
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
@@ -347,10 +350,11 @@ Rules:
                     ticker=ticker,
                 )
 
-        # Low volume = low confidence
+        # Low volume — skip but don't hard-block; let AI have the final word
         if volume < 100:
-            return AIDecision(action="HOLD", confidence=30.0,
-                              reasoning="Insufficient volume", model="rule_based", ticker=ticker)
+            return AIDecision(action="HOLD", confidence=40.0,
+                              reasoning="Insufficient volume for confident assessment",
+                              model="rule_based", ticker=ticker)
 
         # Extreme mispricing
         if yes_ask < 5 or yes_ask > 95:
