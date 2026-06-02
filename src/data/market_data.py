@@ -49,7 +49,7 @@ class MarketDataFetcher:
                 "ticker":        ticker,
                 "title":         m.get("title", "")[:200],
                 "category":      m.get("category", ""),
-                "status":        m.get("status", ""),
+                "status":        m.get("status", "open"),  # default open — we only fetch open markets
                 "yes_bid":       float(yes_bid),
                 "yes_ask":       float(yes_ask),
                 "no_bid":        float(no_bid),
@@ -126,18 +126,14 @@ class MarketDataFetcher:
         rows = await self.db.fetchall(query, params)
 
         if not rows:
-            # Fallback: no fresh data — use whatever is in DB (covers first startup)
+            # Fallback: no fresh data — use whatever is in DB, no volume filter
             logger.warning(
                 "No markets fresher than %d min — falling back to all cached markets",
                 max_age_minutes,
             )
-            fallback_query = "SELECT * FROM markets WHERE status='open'"
-            fallback_params: tuple = ()
-            if min_volume > 0:
-                fallback_query += " AND volume >= ?"
-                fallback_params = (min_volume,)
-            fallback_query += " ORDER BY volume DESC"
-            rows = await self.db.fetchall(fallback_query, fallback_params)
+            rows = await self.db.fetchall(
+                "SELECT * FROM markets WHERE status='open' OR status='' ORDER BY volume DESC"
+            )
 
         return rows
 
