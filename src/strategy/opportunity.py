@@ -131,10 +131,9 @@ class OpportunityHunter:
             no_ask  = market.get("no_ask",  0)
             volume  = market.get("volume",  0)
 
-            # Basic sanity
-            if yes_ask <= 5 or yes_ask >= 95:
+            # Skip markets with extreme prices (no edge possible) or no readable title
+            if yes_ask <= 1 or yes_ask >= 99:
                 continue
-            # Skip markets with no readable title (e.g. raw 0x... hex conditionIds stored as title)
             title = market.get("title", "")
             if not title or len(title) < 10 or title.startswith("0x"):
                 continue
