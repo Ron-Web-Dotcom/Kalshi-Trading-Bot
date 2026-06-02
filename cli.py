@@ -66,30 +66,12 @@ def cmd_run(args: argparse.Namespace) -> None:
             print("\nTrading bot stopped by user.")
         return
 
-    # DEFAULT: AI directional strategy with disciplined settings active.
-    # Despite earlier README copy, this is a single-model OpenRouter call
-    # per decision (with a fallback chain), not a parallel ensemble.
-    print("🤖  AI DIRECTIONAL MODE (default)")
-    print("   Single-model OpenRouter call per decision (fallback chain on error).")
-    print("   Category scoring + portfolio guardrails active.")
-    print("   Use --safe-compounder for conservative math-only mode.")
-    print("   Use --beast to run without guardrails (not recommended).")
-
-    from beast_mode_bot import BeastModeBot
-    from src.strategies.category_scorer import CategoryScorer
-    from src.strategies.portfolio_enforcer import PortfolioEnforcer
-
-    # Apply disciplined settings overrides
-    from src.config import settings as cfg
-    cfg.settings.trading.min_confidence_to_trade = 0.45  # LOOSENED from 0.65 (approved 2026-03-29)
-    cfg.settings.trading.max_position_size_pct = 3.0
-    cfg.settings.trading.kelly_fraction = 0.25
-    cfg.max_drawdown = 0.15
-    cfg.max_sector_exposure = 0.30
-
-    bot = BeastModeBot(live_mode=live_mode)
+    # DEFAULT: use main bot.py TradingBot (disciplined settings from .env)
+    print("Starting Kalshi + Polymarket AI trading bot (disciplined mode)...")
+    from bot import TradingBot
+    bot = TradingBot(live_mode=live_mode)
     try:
-        asyncio.run(bot.run())
+        asyncio.run(bot.run_loop())
     except KeyboardInterrupt:
         print("\nTrading bot stopped by user.")
 
@@ -148,101 +130,143 @@ def _run_safe_compounder(
 
 
 def cmd_dashboard(args: argparse.Namespace) -> None:
-    """Launch the Streamlit monitoring dashboard."""
-    import subprocess
+    """Launch the real-time monitoring dashboard."""
+    from src.utils.logging_setup import setup_logging
+    setup_logging(log_level="INFO")
 
-    # Prefer the dedicated dashboard launch script if it exists.
-    dashboard_script = Path(__file__).parent / "scripts" / "launch_dashboard.py"
-    beast_dashboard = Path(__file__).parent / "scripts" / "beast_mode_dashboard.py"
-
-    if dashboard_script.exists():
-        subprocess.run([sys.executable, str(dashboard_script)], check=False)
-    elif beast_dashboard.exists():
-        # Fall back to running the dashboard module directly.
-        from src.utils.logging_setup import setup_logging
-        from beast_mode_bot import BeastModeBot
-
-        setup_logging(log_level="INFO")
-        bot = BeastModeBot(live_mode=False, dashboard_mode=True)
+    # Try beast_mode_dashboard first (rich terminal UI), then bot dashboard mode
+    try:
+        from beast_mode_dashboard import BeastModeDashboard
+        async def _run():
+            d = BeastModeDashboard()
+            await d.db_manager.initialize()
+            await d.show_live_dashboard()
         try:
-            asyncio.run(bot.run())
+            asyncio.run(_run())
         except KeyboardInterrupt:
             print("\nDashboard stopped by user.")
-    else:
-        print("Error: No dashboard script found.")
+    except Exception as exc:
+        print(f"Dashboard error: {exc}")
         sys.exit(1)
 
 
 def cmd_status(args: argparse.Namespace) -> None:
-    """Show current portfolio status: balance, positions, and P&L."""
+    """Show portfolio status — DB paper stats + live Kalshi balance (if reachable)."""
 
     async def _status() -> None:
-        from src.clients.kalshi_client import KalshiClient
+        from src.utils.database import DatabaseManager
+        from src.config.settings import settings
 
-        client = KalshiClient()
+        db = DatabaseManager()
+        await db.initialize()
+
+        # ── Paper trade stats from local DB (always available) ───────────────
+        stats = await db.fetchone("""
+            SELECT
+                COUNT(*)                                           AS total,
+                SUM(CASE WHEN pnl > 0  THEN 1 ELSE 0 END)         AS wins,
+                SUM(CASE WHEN pnl < 0  THEN 1 ELSE 0 END)         AS losses,
+                SUM(CASE WHEN pnl IS NULL THEN 1 ELSE 0 END)       AS open_count,
+                SUM(COALESCE(pnl, 0))                              AS total_pnl,
+                SUM(COALESCE(total_cost, 0))                       AS total_cost,
+                SUM(COALESCE(fee, 0))                              AS total_fees,
+                AVG(ai_confidence)                                 AS avg_conf
+            FROM trade_logs WHERE paper_trade=1
+        """) or {}
+
+        total     = stats.get("total") or 0
+        wins      = stats.get("wins")  or 0
+        losses    = stats.get("losses") or 0
+        open_c    = stats.get("open_count") or 0
+        total_pnl = stats.get("total_pnl")  or 0.0
+        total_cost = stats.get("total_cost") or 0.0
+        total_fees = stats.get("total_fees") or 0.0
+        avg_conf  = stats.get("avg_conf") or 0.0
+        settled   = wins + losses
+        win_rate  = (wins / settled * 100) if settled > 0 else 0.0
+
+        # Open positions
+        positions = await db.fetchall(
+            "SELECT ticker, side, contracts, avg_price, current_price, pnl "
+            "FROM positions WHERE status='open' ORDER BY pnl DESC"
+        )
+
+        # Last 5 closed trades
+        last5 = await db.fetchall("""
+            SELECT ticker, action, side, price, contracts, total_cost, pnl,
+                   signal_source, executed_at
+            FROM trade_logs WHERE paper_trade=1 AND pnl IS NOT NULL
+            ORDER BY executed_at DESC LIMIT 5
+        """)
+
+        # Markets cached count
+        mkt_count = (await db.fetchone("SELECT COUNT(*) AS n FROM markets") or {}).get("n", 0)
+
+        W = 62
+        sep = "═" * W
+        thin = "─" * W
+
+        print(f"\n╔{sep}╗")
+        print(f"║{'  KALSHI BOT — PAPER TRADING STATUS':^{W}}║")
+        print(f"╠{sep}╣")
+        mode = "PAPER (safe)" if not settings.trading.live_trading_enabled else "⚠ LIVE"
+        print(f"║  Mode            : {mode:<{W-20}}║")
+        print(f"║  Markets cached  : {mkt_count:<{W-20}}║")
+        print(f"╠{sep}╣")
+        print(f"║{'  PAPER TRADE PERFORMANCE':^{W}}║")
+        print(f"╠{sep}╣")
+        pnl_str = f"{'+'if total_pnl>=0 else ''}${total_pnl:.2f}"
+        print(f"║  Total trades    : {total:<5}  (open: {open_c}  settled: {settled}){'':<5}║")
+        print(f"║  Win / Loss      : {wins} / {losses:<{W-22}}║")
+        print(f"║  Win rate        : {win_rate:.1f}%{'':<{W-22}}║")
+        print(f"║  Total PnL       : {pnl_str:<{W-20}}║")
+        print(f"║  Total capital   : ${total_cost:.2f}  fees: ${total_fees:.2f}{'':<{W-34}}║")
+        print(f"║  Avg AI conf     : {avg_conf:.0f}%{'':<{W-22}}║")
+        print(f"╠{sep}╣")
+
+        if positions:
+            print(f"║  {'OPEN POSITIONS':^{W-2}}║")
+            print(f"║  {'TICKER':<28} {'SIDE':<4} {'CTR':>4} {'ENTRY':>6} {'CUR':>6} {'PnL':>8}  ║")
+            print(f"║  {thin[:-2]}  ║")
+            for p in positions[:10]:
+                pnl_v  = p.get("pnl") or 0.0
+                cur    = p.get("current_price") or p.get("avg_price") or 0
+                pstr   = f"${pnl_v:+.2f}"
+                print(f"║  {(p['ticker'] or '')[:28]:<28} {p['side']:<4} "
+                      f"{p['contracts']:>4} {p['avg_price']:>5.0f}¢ {cur:>5.0f}¢ {pstr:>8}  ║")
+        else:
+            print(f"║  No open positions.{'':<{W-21}}║")
+
+        print(f"╠{sep}╣")
+        if last5:
+            print(f"║  {'LAST 5 SETTLED TRADES':^{W-2}}║")
+            print(f"║  {'TICKER':<26} {'ACT':<4} {'SIDE':<4} {'PRICE':>6} {'PnL':>8} {'SOURCE':<10}  ║")
+            print(f"║  {thin[:-2]}  ║")
+            for t in last5:
+                pnl_v = t.get("pnl") or 0.0
+                src   = (t.get("signal_source") or "")[:10]
+                print(f"║  {(t['ticker'] or '')[:26]:<26} {t['action']:<4} {t['side']:<4} "
+                      f"{t['price']:>5.0f}¢ ${pnl_v:>+7.2f} {src:<10}  ║")
+        else:
+            print(f"║  No settled trades yet.{'':<{W-25}}║")
+
+        # Try live API balance (graceful fallback)
+        print(f"╠{sep}╣")
         try:
-            # Fetch balance
-            balance_resp = await client.get_balance()
-            balance_cents = balance_resp.get("balance", 0)
-            balance_usd = balance_cents / 100.0
-
-            # Fetch positions — Kalshi API v2 returns event_positions and market_positions
-            portfolio_value_cents = balance_resp.get("portfolio_value", 0)
-            portfolio_value_usd = portfolio_value_cents / 100.0
-
-            positions_resp = await client.get_positions()
-            event_positions = positions_resp.get("event_positions", [])
-            active_positions = [
-                p for p in event_positions
-                if float(p.get("event_exposure_dollars", "0")) > 0
-            ]
-
-            # Display
-            print("=" * 56)
-            print("  PORTFOLIO STATUS")
-            print("=" * 56)
-            print(f"  Available Cash:     ${balance_usd:>10,.2f}")
-            print(f"  Position Value:     ${portfolio_value_usd:>10,.2f}")
-            print(f"  Total Portfolio:    ${balance_usd + portfolio_value_usd:>10,.2f}")
-            print(f"  Active Positions:   {len(active_positions):>10}")
-
-            total_exposure = 0.0
-            total_realized_pnl = 0.0
-            total_fees = 0.0
-
-            if active_positions:
-                print()
-                print(f"  {'Event':<30} {'Exposure':>10} {'Cost':>10} {'P&L':>10} {'Fees':>8}")
-                print(f"  {'-'*30} {'-'*10} {'-'*10} {'-'*10} {'-'*8}")
-
-                for pos in active_positions:
-                    ticker = pos.get("event_ticker", "???")
-                    exposure = float(pos.get("event_exposure_dollars", "0"))
-                    cost = float(pos.get("total_cost_dollars", "0"))
-                    pnl = float(pos.get("realized_pnl_dollars", "0"))
-                    fees = float(pos.get("fees_paid_dollars", "0"))
-                    total_exposure += exposure
-                    total_realized_pnl += pnl
-                    total_fees += fees
-                    print(
-                        f"  {ticker:<30} ${exposure:>8.2f} ${cost:>8.2f} "
-                        f"${pnl:>8.2f} ${fees:>6.2f}"
-                    )
-
-                print()
-                print(f"  Total Exposure:     ${total_exposure:>10,.2f}")
-                print(f"  Total Realized P&L: ${total_realized_pnl:>10,.2f}")
-                print(f"  Total Fees Paid:    ${total_fees:>10,.2f}")
-
-            print("=" * 56)
-        finally:
+            from src.clients.kalshi_client import KalshiClient
+            client = KalshiClient()
+            bal_resp = await client.get_balance()
             await client.close()
+            cash  = (bal_resp.get("balance") or 0) / 100
+            port  = (bal_resp.get("portfolio_value") or 0) / 100
+            print(f"║  KALSHI ACCOUNT (live)                                        ║")
+            print(f"║  Cash: ${cash:,.2f}   Portfolio value: ${port:,.2f}{'':<{W-45}}║")
+        except Exception:
+            print(f"║  Kalshi API: offline (paper stats above from local DB){'':<{W-55}}║")
 
-    try:
-        asyncio.run(_status())
-    except Exception as exc:
-        print(f"Error fetching status: {exc}")
-        sys.exit(1)
+        print(f"╚{sep}╝\n")
+
+    asyncio.run(_status())
 
 
 def cmd_scores(args: argparse.Namespace) -> None:
@@ -304,21 +328,21 @@ def cmd_history(args: argparse.Namespace) -> None:
                 print(f"  Avg per trade: ${(pnl/total):.2f}")
             print()
 
-            # Category breakdown
+            # Source breakdown (signal_source = strategy equivalent)
             cursor = await db.execute("""
                 SELECT
-                    strategy as category,
+                    signal_source as category,
                     COUNT(*) as trades,
                     SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins,
-                    SUM(pnl) as total_pnl
+                    SUM(COALESCE(pnl, 0)) as total_pnl
                 FROM trade_logs
-                GROUP BY strategy
+                GROUP BY signal_source
                 ORDER BY total_pnl DESC
             """)
             cats = await cursor.fetchall()
 
             if cats:
-                print(f"  {'Category':<22} {'Trades':>7} {'WR':>6} {'P&L':>10}")
+                print(f"  {'Source':<22} {'Trades':>7} {'WR':>6} {'P&L':>10}")
                 print(f"  {'-'*22} {'-'*7} {'-'*6} {'-'*10}")
                 for row in cats:
                     cat = row["category"] or "unknown"
@@ -329,36 +353,27 @@ def cmd_history(args: argparse.Namespace) -> None:
                     print(f"  {cat:<22} {t:>7} {wr:>6} ${p:>9.2f}")
                 print()
 
-            # Recent trades
+            # Recent trades (uses actual schema column names)
             cursor = await db.execute(f"""
-                SELECT market_id, side, entry_price, exit_price, quantity, pnl,
-                       entry_timestamp, strategy
+                SELECT ticker, action, side, price, contracts,
+                       COALESCE(pnl, 0) as pnl, executed_at, signal_source
                 FROM trade_logs
-                ORDER BY entry_timestamp DESC
+                ORDER BY executed_at DESC
                 LIMIT {limit}
             """)
             trades = await cursor.fetchall()
 
             if trades:
                 print(f"  Recent {limit} trades:")
-                print(f"  {'Market':<28} {'Side':>4} {'Entry':>6} {'Exit':>6} {'Qty':>4} {'P&L':>8} {'Category'}")
-                print(f"  {'-'*28} {'-'*4} {'-'*6} {'-'*6} {'-'*4} {'-'*8} {'-'*12}")
+                print(f"  {'Market':<28} {'Act':>4} {'Side':>4} {'Price':>6} {'Qty':>4} {'P&L':>8}  Source")
+                print(f"  {'-'*28} {'-'*4} {'-'*4} {'-'*6} {'-'*4} {'-'*8}  {'-'*12}")
                 for t in trades:
-                    ts = (t["entry_timestamp"] or "")[:10]
-                    cat = t["strategy"] or ""
+                    source = (t["signal_source"] or "")[:12]
+                    pnl = t["pnl"] or 0.0
                     print(
-                        f"  {t['market_id'][:28]:<28} {t['side']:>4} "
-                        f"{t['entry_price']:>6.2f} {t['exit_price']:>6.2f} "
-                        f"{t['quantity']:>4} ${t['pnl']:>7.2f}  {cat}"
+                        f"  {t['ticker'][:28]:<28} {t['action']:>4} {t['side']:>4} "
+                        f"{t['price']:>6.0f}¢ {t['contracts']:>4} ${pnl:>7.2f}  {source}"
                     )
-
-            # Blocked trades summary
-            cursor2 = await db.execute("""
-                SELECT COUNT(*) FROM blocked_trades
-            """)
-            r2 = await cursor2.fetchone()
-            if r2 and r2[0]:
-                print(f"\n  ⛔ {r2[0]} trades blocked by portfolio enforcer (use 'python cli.py health' for details)")
 
             print("=" * 70)
 
@@ -543,8 +558,8 @@ def cmd_health(args: argparse.Namespace) -> None:
     load_dotenv()
 
     for var, placeholder in (
-        ("KALSHI_API_KEY", "your_kalshi_api_key_here"),
-        ("OPENROUTER_API_KEY", "your_openrouter_api_key_here"),
+        ("KALSHI_API_KEY_ID", "your-key-id-uuid-here"),
+        ("ANTHROPIC_API_KEY", "your_anthropic_api_key_here"),
     ):
         val = os.getenv(var, "")
         if val and val not in ("", placeholder):
@@ -597,11 +612,13 @@ def cmd_health(args: argparse.Namespace) -> None:
     except Exception as exc:
         fail("Database initialization", str(exc))
 
-    # 5. Python version
-    if sys.version_info >= (3, 12):
-        ok("Python version", f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+    # 5. Python version (3.10+ required; 3.12+ recommended)
+    vi = sys.version_info
+    ver_str = f"{vi.major}.{vi.minor}.{vi.micro}"
+    if vi >= (3, 10):
+        ok("Python version", ver_str + (" (3.12+ recommended)" if vi < (3, 12) else ""))
     else:
-        fail("Python version", f"requires >=3.12, found {sys.version}")
+        fail("Python version", f"requires >=3.10, found {ver_str}")
 
     # Summary
     print()
@@ -615,6 +632,246 @@ def cmd_health(args: argparse.Namespace) -> None:
 
     if checks_failed:
         sys.exit(1)
+
+
+def cmd_test_discord(args: argparse.Namespace) -> None:
+    """Send a test alert to Discord webhook."""
+    from src.alerts.discord import DiscordAlerter
+    from src.config.settings import settings
+
+    webhook = settings.alerts.discord_webhook_url
+    if not webhook:
+        print("DISCORD_WEBHOOK_URL is not set in .env")
+        print("Add it: DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR/WEBHOOK")
+        sys.exit(1)
+
+    print(f"Sending test alert to webhook (last 10 chars: ...{webhook[-10:]})")
+
+    async def _run():
+        discord = DiscordAlerter()
+        mode = "LIVE" if settings.trading.live_trading_enabled else "PAPER"
+        ok = await discord.test_alert(mode=mode)
+        if ok:
+            print("✅  Test alert delivered — check your Discord channel")
+        else:
+            print("❌  Delivery failed — check the webhook URL and try again")
+            sys.exit(1)
+
+    asyncio.run(_run())
+
+
+def cmd_review(args: argparse.Namespace) -> None:
+    """Analyze a trade the user is considering and post results to Discord."""
+
+    ticker   = args.ticker
+    side     = args.side.lower()
+    price    = float(args.price)
+    platform = args.platform.lower()
+    size_usd = float(args.size)
+    record   = getattr(args, "record", False)
+
+    if side not in ("yes", "no"):
+        print("Error: --side must be 'yes' or 'no'.")
+        sys.exit(1)
+    if not (0 < price <= 100):
+        print("Error: --price must be between 0 and 100 (cents).")
+        sys.exit(1)
+
+    async def _run() -> None:
+        from src.data.context_builder import build_market_context
+        from src.ai.decision import AIDecisionEngine
+
+        # ── Build a market dict from inputs ──────────────────────────────────
+        # Try to enrich from the local DB first.
+        market: dict = {
+            "ticker":    ticker,
+            "title":     ticker,
+            "yes_ask":   price if side == "yes" else (100 - price),
+            "no_ask":    price if side == "no"  else (100 - price),
+            "yes_bid":   max(price - 2, 1),
+            "no_bid":    max((100 - price) - 2, 1),
+            "volume":    0,
+            "open_interest": 0,
+            "close_time": "unknown",
+            "platform":  platform,
+        }
+
+        try:
+            from src.utils.database import DatabaseManager
+            db = DatabaseManager()
+            await db.initialize()
+            row = await db.fetchone("SELECT * FROM markets WHERE ticker=?", (ticker,))
+            if row:
+                market.update({k: v for k, v in row.items() if v is not None})
+        except Exception:
+            pass  # DB not available — use constructed market
+
+        # ── Fetch real-world context ──────────────────────────────────────────
+        print(f"\n🔍 Reviewing trade: {side.upper()} {ticker} @ {price:.0f}¢ on {platform}")
+        print("  Fetching real-world context…")
+        try:
+            context = await build_market_context(market)
+        except Exception as exc:
+            context = f"(context unavailable: {exc})"
+            print(f"  Warning: context fetch failed — {exc}")
+
+        # ── AI decision ───────────────────────────────────────────────────────
+        print("  Calling AI decision engine…")
+        engine = AIDecisionEngine()
+        try:
+            decision = await engine.decide(market, [])
+        except Exception as exc:
+            print(f"  Error: AI decision failed — {exc}")
+            sys.exit(1)
+
+        ai_action     = decision.action.upper()        # BUY / HOLD
+        ai_side       = (decision.side or "yes").lower()
+        ai_confidence = decision.confidence
+        true_prob     = decision.true_prob or 0.0
+        net_ev        = decision.net_ev or 0.0
+        reasoning     = decision.reasoning or ""
+
+        # Correct price for AI's recommended side
+        correct_price = market.get("yes_ask", price) if ai_side == "yes" else market.get("no_ask", 100 - price)
+
+        # ── Verdict logic ─────────────────────────────────────────────────────
+        same_side = (ai_side == side)
+
+        if ai_action == "BUY" and same_side:
+            if net_ev >= 4 and ai_confidence >= 70:
+                verdict = "STRONG_BUY"
+            elif net_ev >= 0:
+                verdict = "GOOD_TRADE"
+            else:
+                verdict = "BAD_TRADE"
+        elif ai_action == "BUY" and not same_side:
+            verdict = "WRONG_SIDE"
+        elif net_ev < 0:
+            verdict = "BAD_TRADE"
+        else:
+            verdict = "BAD_TRADE" if ai_action in ("HOLD", "PASS") else "PASS"
+
+        # ── Terminal output ───────────────────────────────────────────────────
+        ICONS = {
+            "STRONG_BUY": "✅",
+            "GOOD_TRADE": "✅",
+            "WRONG_SIDE": "⚠️ ",
+            "BAD_TRADE":  "❌",
+            "PASS":       "💤",
+        }
+        icon = ICONS.get(verdict, "❓")
+        context_snippet = (context or "")[:300]
+
+        print()
+        print("=" * 62)
+        print(f"  TRADE ADVISOR RESULT")
+        print("=" * 62)
+        print(f"  Ticker    : {ticker}")
+        print(f"  Platform  : {platform}")
+        print(f"  Your trade: {side.upper()} @ {price:.0f}¢  (${size_usd:.2f} at risk)")
+        print(f"  Verdict   : {icon} {verdict}")
+        print(f"  AI side   : {ai_side.upper()}  (action={ai_action})")
+        print(f"  AI true p : {true_prob:.0f}%  (market implies {price:.0f}%)")
+        print(f"  Net EV    : {net_ev:.1f}¢/contract")
+        print(f"  Confidence: {ai_confidence:.0f}%")
+        if verdict == "WRONG_SIDE":
+            print(f"  ✅ Flip to : BUY {ai_side.upper()} @ {correct_price:.0f}¢")
+        print()
+        print(f"  Context   : {context_snippet}")
+        print()
+        print(f"  Reasoning : {reasoning[:400]}")
+        print("=" * 62)
+
+        # ── Discord alert ─────────────────────────────────────────────────────
+        try:
+            from src.alerts.discord import DiscordAlerter
+            discord = DiscordAlerter()
+            await discord.trade_review(
+                ticker=ticker,
+                platform=platform,
+                intended_side=side,
+                intended_price=price,
+                size_usd=size_usd,
+                verdict=verdict,
+                ai_side=ai_side,
+                ai_confidence=ai_confidence,
+                true_prob=true_prob,
+                net_ev=net_ev,
+                reasoning=reasoning,
+                context_snippet=context_snippet,
+                correct_price=correct_price,
+            )
+            print("  Discord alert posted.")
+        except Exception as exc:
+            print(f"  Discord alert failed: {exc}")
+
+        # ── Record position if --record and verdict is positive ───────────────
+        if record and verdict in ("STRONG_BUY", "GOOD_TRADE", "WRONG_SIDE"):
+            record_side = side  # always record the user's original side
+            try:
+                from src.utils.database import DatabaseManager
+                from datetime import datetime, timezone
+                db = DatabaseManager()
+                await db.initialize()
+                now = datetime.now(timezone.utc).isoformat()
+                contracts = max(1, int(size_usd / price * 100))
+                await db.execute(
+                    """
+                    INSERT INTO positions
+                        (ticker, side, contracts, avg_price, current_price, pnl,
+                         status, opened_at, close_reason)
+                    VALUES (?, ?, ?, ?, ?, 0, 'open', ?, ?)
+                    """,
+                    (
+                        ticker,
+                        record_side,
+                        contracts,
+                        price,
+                        price,
+                        now,
+                        f"manual:{platform}",
+                    ),
+                )
+                # Also write to trade_logs so history shows it
+                await db.execute(
+                    """
+                    INSERT INTO trade_logs
+                        (ticker, action, side, contracts, price, total_cost, fee,
+                         paper_trade, ai_confidence, ai_reasoning, signal_source,
+                         pnl, executed_at)
+                    VALUES (?, 'BUY', ?, ?, ?, ?, 0, 1, ?, ?, 'manual', NULL, ?)
+                    """,
+                    (
+                        ticker,
+                        record_side,
+                        contracts,
+                        price,
+                        size_usd,
+                        ai_confidence,
+                        reasoning[:500],
+                        now,
+                    ),
+                )
+                print(f"  Position recorded ({contracts} contracts) — bot will track it.")
+            except Exception as exc:
+                print(f"  Warning: could not record position — {exc}")
+
+    asyncio.run(_run())
+
+
+def cmd_live_check(args: argparse.Namespace) -> None:
+    """Run live trading pre-flight checks."""
+    from src.execution.preflight import run_preflight, print_preflight_report
+
+    print("Running pre-flight checks for live trading...")
+
+    async def _run():
+        passed, results, balance = await run_preflight(verbose=True)
+        print_preflight_report(results, passed, balance)
+        if not passed:
+            sys.exit(1)
+
+    asyncio.run(_run())
 
 
 # ---------------------------------------------------------------------------
@@ -637,6 +894,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  python cli.py history                  Show trade history + category breakdown\n"
             "  python cli.py status                   Check portfolio balance and positions\n"
             "  python cli.py health                   Verify all connections and config\n"
+            "  python cli.py review --ticker KXBTCD-25MAY2600 --side yes --price 45  Analyze a trade\n"
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -779,6 +1037,75 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the interactive 'CLOSE ALL' confirmation (dangerous)",
     )
     p_close.set_defaults(func=cmd_close_all)
+
+    # --- test-discord ---
+    p_discord = subparsers.add_parser(
+        "test-discord",
+        help="Send a test message to your Discord webhook",
+        description="Verifies DISCORD_WEBHOOK_URL is correct by delivering a test embed.",
+    )
+    p_discord.set_defaults(func=cmd_test_discord)
+
+    # --- review ---
+    p_review = subparsers.add_parser(
+        "review",
+        help="Analyze a trade you're considering and get AI verdict + Discord alert",
+        description=(
+            "Submit any trade idea (Kalshi or Polymarket) and get a real-time AI "
+            "analysis: good/bad, correct side, true probability vs market price, "
+            "expected value, and a Discord embed with real-world data."
+        ),
+    )
+    p_review.add_argument(
+        "--ticker",
+        required=True,
+        help="Market ticker (e.g. KXBTCD-25MAY2600) or question text",
+    )
+    p_review.add_argument(
+        "--side",
+        required=True,
+        choices=["yes", "no"],
+        help="Side you intend to buy: yes or no",
+    )
+    p_review.add_argument(
+        "--price",
+        required=True,
+        type=float,
+        help="Price in cents (0–100) you plan to enter at",
+    )
+    p_review.add_argument(
+        "--platform",
+        default="kalshi",
+        choices=["kalshi", "polymarket"],
+        help="Platform the market is on (default: kalshi)",
+    )
+    p_review.add_argument(
+        "--size",
+        default=10.0,
+        type=float,
+        help="Dollars you plan to risk (default: 10.0)",
+    )
+    p_review.add_argument(
+        "--record",
+        action="store_true",
+        help=(
+            "Record the position to the DB so the bot tracks it for "
+            "stop-loss, take-profit, and AI re-evaluation (signal_source='manual')"
+        ),
+    )
+    p_review.set_defaults(func=cmd_review)
+
+    # --- live-check ---
+    p_live = subparsers.add_parser(
+        "live-check",
+        help="Run pre-flight safety checks before enabling live trading",
+        description=(
+            "Verifies all requirements for live trading: API keys, Kalshi "
+            "connectivity, account balance, paper trade history, Discord alerts, "
+            "and .env settings. Fix every FAIL before setting LIVE_TRADING_ENABLED=true."
+        ),
+    )
+    p_live.set_defaults(func=cmd_live_check)
 
     return parser
 

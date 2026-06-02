@@ -8,7 +8,7 @@ version = "2.0.0"
 description = "Multi-model AI trading bot for Kalshi prediction markets"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 authors = [
     {name = "Kalshi AI Trading Bot Contributors"},
 ]
@@ -105,3 +105,4 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

@@ -1,0 +1,202 @@
+"""Kalshi API v2 client — RSA-signed auth with simple API key fallback."""
+
+import asyncio
+import base64
+import hashlib
+import hmac
+import json
+import logging
+import time
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode
+
+import httpx
+
+logger = logging.getLogger("trading.kalshi_client")
+
+
+def _load_private_key(pem_text: str):
+    """Load RSA private key from PEM string for request signing."""
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+    key = serialization.load_pem_private_key(pem_text.encode(), password=None)
+    return key
+
+
+class KalshiClient:
+    """
+    Async Kalshi API v2 client.
+
+    Auth priority:
+      1. RSA private key (KALSHI_API_KEY_ID + KALSHI_PRIVATE_KEY_PEM/PATH)
+      2. Simple API key header fallback (KALSHI_API_KEY)
+    """
+
+    def __init__(self):
+        from src.config.settings import settings
+        self.cfg = settings.kalshi
+        self._client: Optional[httpx.AsyncClient] = None
+        self._private_key = None
+        self._last_request_time = 0.0
+        self._min_interval = 1.0 / max(self.cfg.rate_limit_per_second, 1)
+
+        if self.cfg.api_key_id and (self.cfg.private_key_pem or self.cfg.private_key_path):
+            try:
+                pem = self.cfg.private_key_pem
+                if not pem and self.cfg.private_key_path:
+                    with open(self.cfg.private_key_path) as f:
+                        pem = f.read()
+                self._private_key = _load_private_key(pem)
+                logger.info("Kalshi auth: RSA key loaded")
+            except Exception as e:
+                logger.warning(f"RSA key load failed ({e}), falling back to API key auth")
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                base_url=self.cfg.base_url,
+                timeout=self.cfg.timeout,
+            )
+        return self._client
+
+    def _sign_request(self, method: str, path: str, body: str = "") -> Dict[str, str]:
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import padding
+        ts = str(int(time.time() * 1000))
+        msg = ts + method.upper() + path + body
+        sig = self._private_key.sign(msg.encode(), padding.PKCS1v15(), hashes.SHA256())
+        return {
+            "KALSHI-ACCESS-KEY": self.cfg.api_key_id,
+            "KALSHI-ACCESS-SIGNATURE": base64.b64encode(sig).decode(),
+            "KALSHI-ACCESS-TIMESTAMP": ts,
+        }
+
+    def _build_headers(self, method: str = "GET", path: str = "/", body: str = "") -> Dict[str, str]:
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if self._private_key and self.cfg.api_key_id:
+            headers.update(self._sign_request(method, path, body))
+        elif self.cfg.api_key:
+            headers["Authorization"] = f"Bearer {self.cfg.api_key}"
+        return headers
+
+    async def _rate_limit(self):
+        elapsed = time.monotonic() - self._last_request_time
+        if elapsed < self._min_interval:
+            await asyncio.sleep(self._min_interval - elapsed)
+        self._last_request_time = time.monotonic()
+
+    async def _request(self, method: str, path: str, params: Optional[Dict] = None,
+                       body: Optional[Dict] = None, retries: int = 3) -> Any:
+        await self._rate_limit()
+        client = await self._get_client()
+        body_str = json.dumps(body) if body else ""
+        headers = self._build_headers(method, path, body_str)
+
+        for attempt in range(retries):
+            try:
+                resp = await client.request(
+                    method, path, params=params,
+                    content=body_str.encode() if body_str else None,
+                    headers=headers
+                )
+                if resp.status_code == 429:
+                    wait = 2 ** attempt
+                    logger.warning(f"Rate limited, waiting {wait}s")
+                    await asyncio.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+            except httpx.HTTPStatusError as e:
+                if attempt == retries - 1:
+                    _safe = e.response.text[:200]
+                    if self.cfg.api_key_id:
+                        _safe = _safe.replace(self.cfg.api_key_id, "[KEY_ID]")
+                    logger.error("HTTP %d on %s %s: %s", e.response.status_code, method, path, _safe)
+                    raise
+                await asyncio.sleep(2 ** attempt)
+            except Exception as e:
+                if attempt == retries - 1:
+                    logger.error(f"Request failed {method} {path}: {e}")
+                    raise
+                await asyncio.sleep(2 ** attempt)
+
+    # ── Market data ───────────────────────────────────────────────────────────
+
+    async def get_markets(self, limit: int = 200, cursor: str = "", status: str = "open") -> Dict:
+        params: Dict[str, Any] = {"limit": limit, "status": status}
+        if cursor:
+            params["cursor"] = cursor
+        return await self._request("GET", "/markets", params=params)
+
+    async def get_all_markets(self, status: str = "open") -> List[Dict]:
+        markets = []
+        cursor = ""
+        while True:
+            data = await self.get_markets(limit=200, cursor=cursor, status=status)
+            batch = data.get("markets", [])
+            markets.extend(batch)
+            cursor = data.get("cursor", "")
+            if not cursor or not batch:
+                break
+            await asyncio.sleep(0.5)
+        return markets
+
+    async def get_market(self, ticker: str) -> Dict:
+        return await self._request("GET", f"/markets/{ticker}")
+
+    async def get_market_orderbook(self, ticker: str, depth: int = 10) -> Dict:
+        return await self._request("GET", f"/markets/{ticker}/orderbook", params={"depth": depth})
+
+    # ── Portfolio ─────────────────────────────────────────────────────────────
+
+    async def get_balance(self) -> Dict:
+        return await self._request("GET", "/portfolio/balance")
+
+    async def get_positions(self) -> Dict:
+        return await self._request("GET", "/portfolio/positions")
+
+    async def get_orders(self, status: str = "") -> Dict:
+        params = {}
+        if status:
+            params["status"] = status
+        return await self._request("GET", "/portfolio/orders", params=params)
+
+    async def create_order(self, ticker: str, side: str, action: str,
+                           count: int, price: int,
+                           order_type: str = "limit",
+                           time_in_force: str = "gtc") -> Dict:
+        body = {
+            "ticker": ticker,
+            "side": side,
+            "action": action,
+            "count": count,
+            "type": order_type,
+            "yes_price": price if side == "yes" else (100 - price),
+            "no_price": price if side == "no" else (100 - price),
+            "time_in_force": time_in_force,
+            "client_order_id": f"bot_{int(time.time() * 1000)}",
+        }
+        return await self._request("POST", "/portfolio/orders", body=body)
+
+    async def cancel_order(self, order_id: str) -> Dict:
+        return await self._request("DELETE", f"/portfolio/orders/{order_id}")
+
+    # ── Aliases for backward-compat with cli.py ──────────────────────────────
+
+    async def get_orderbook(self, ticker: str, depth: int = 10) -> Dict:
+        return await self.get_market_orderbook(ticker, depth)
+
+    async def place_order(self, ticker: str, side: str, action: str,
+                          count: int, type_: str = "limit",
+                          yes_price: int = 0, no_price: int = 0,
+                          client_order_id: str = "") -> Dict:
+        price = yes_price if side == "yes" else no_price
+        return await self.create_order(
+            ticker=ticker, side=side, action=action,
+            count=count, price=price, order_type=type_
+        )
+
+    async def close(self) -> None:
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()

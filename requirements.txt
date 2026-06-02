@@ -1,66 +1,43 @@
-# Core HTTP and async libraries
-httpx==0.27.0
-aiohttp==3.9.1
-requests==2.31.0
+# ============================================================
+# Kalshi AI Trading Bot — Production Dependencies
+# All pinned to latest stable as of 2026-05-29
+# ============================================================
 
-# Database
-aiosqlite==0.19.0
+# HTTP client (async, used for all API calls)
+httpx==0.28.1
 
-# Crypto libraries for API authentication
-cryptography==42.0.0
-pycryptodome==3.20.0
+# Async SQLite database
+aiosqlite==0.22.1
 
-# OpenRouter/OpenAI client
-openai==1.51.2
-anthropic
+# Kalshi RSA request signing
+cryptography==48.0.0
 
-# Data handling and analysis - updated for Python 3.13 compatibility
-pandas>=2.0.0
-numpy>=1.24.0
-scipy>=1.12.0       # For portfolio optimization (Python 3.13 compatible)
+# Anthropic Claude SDK (AI decision engine)
+anthropic==0.105.2
 
-# Environment variables
-python-dotenv==1.0.0
+# Data handling
+pandas==3.0.3
+numpy==2.4.6
 
-# Pydantic and data validation
-# Using a version compatible with Python 3.13
-pydantic==2.8.2
-pydantic-settings
+# Environment config
+python-dotenv==1.2.2
 
-# Logging and monitoring
-structlog==23.2.0
+# Settings validation
+pydantic==2.13.4
+pydantic-settings==2.14.1
 
-# Type hints - compatible with openai requirements
-typing-extensions>=4.11
+# YAML config support
+pyyaml==6.0.3
 
-# Date/time handling
-python-dateutil==2.8.2
-pytz==2023.3
+# Date/time
+python-dateutil==2.9.0.post0
+pytz==2026.2
 
-# Rate limiting
-ratelimit==2.2.1
+# Type hints
+typing-extensions==4.15.0
 
-# Configuration management
-pyyaml==6.0.1
-
-# Error tracking and monitoring
-sentry-sdk==1.39.2
-
-# xAI Grok API client
-xai_sdk>=1.0.0
-
-# WebSocket streaming
-websockets>=12.0
-
-# News & sentiment pipeline
-feedparser>=6.0.0
-
-# Testing (optional)
-pytest==7.4.3
-pytest-asyncio==0.21.1
-
-# Development tools
-black==23.12.1
-isort==5.13.2
-uvicorn
-json-repair
+# ── Dev / Test (not needed on VPS) ───────────────────────────
+pytest==9.0.3
+pytest-asyncio==1.4.0
+black==26.5.1
+isort==8.0.1

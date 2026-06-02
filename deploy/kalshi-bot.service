@@ -1,0 +1,22 @@
+[Unit]
+Description=Kalshi AI Trading Bot
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/trading-bot
+Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=/root/trading-bot/.env
+ExecStart=/root/trading-bot/venv/bin/python /root/trading-bot/bot.py
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kalshi-bot
+
+[Install]
+WantedBy=multi-user.target
