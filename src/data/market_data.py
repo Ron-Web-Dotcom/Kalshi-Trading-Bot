@@ -44,7 +44,7 @@ class MarketDataFetcher:
                 ticker,
                 (m.get("title", "") or "")[:200],
                 m.get("category", ""),
-                m.get("status", "open"),
+                "open",  # force 'open' — Kalshi API may return 'active' or other values
                 float(m.get("yes_bid") or 0),
                 float(m.get("yes_ask") or 0),
                 float(m.get("no_bid")  or 0),

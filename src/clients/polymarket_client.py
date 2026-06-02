@@ -136,6 +136,7 @@ class PolymarketTradingClient:
             token_ids = m.get("clobTokenIds") or m.get("tokenIds") or []
 
             # Accept any available identifier as ticker
+            # Gamma API (limited endpoint) may not have conditionId/id — use description hash or outcomes
             ticker = str(
                 m.get("conditionId")
                 or m.get("id")
@@ -144,13 +145,19 @@ class PolymarketTradingClient:
                 or ""
             ).strip()
             if not ticker:
-                return None
+                # Last resort: hash the question text
+                question = m.get("question") or m.get("description") or m.get("title") or ""
+                if question:
+                    import hashlib
+                    ticker = "poly_" + hashlib.md5(question.encode()).hexdigest()[:12]
+                else:
+                    return None
 
             return {
                 "platform":      "polymarket",
                 "ticker":        ticker,
                 "slug":          m.get("slug", ""),
-                "title":         m.get("question", "") or m.get("title", ""),
+                "title":         m.get("question") or m.get("description") or m.get("title", ""),
                 "category":      (m.get("category") or m.get("groupItemTitle") or "").lower(),
                 "yes_ask":       round(yes_price, 1),
                 "no_ask":        round(no_price,  1),
