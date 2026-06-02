@@ -374,7 +374,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             markets      = kalshi_candidates,
             arb_signals  = all_signals,
             poly_comps   = ext_comps,
-            min_score    = 0.05,
+            min_score    = 0.01,   # paper mode: low bar to see the bot in action
             poly_markets = poly_markets,
         )
 

@@ -50,9 +50,9 @@ def score_opportunity(
     if net_ev <= 0 or confidence <= 0:
         return 0.0
 
-    ev_score         = min(net_ev / 10.0, 1.0)       # caps at 10¢ EV (was 20¢ — too hard)
+    ev_score         = min(net_ev / 10.0, 1.0)       # caps at 10¢ EV
     confidence_score = confidence / 100.0
-    liquidity_score  = min(volume / 1000.0, 1.0)    # caps at 1k volume (was 10k — too hard)
+    liquidity_score  = min(volume / 100.0, 1.0)     # caps at 100 volume — paper mode
     data_quality     = 1.0 if poly_comp else 0.85   # solo Kalshi still scores well
 
     base_score = ev_score * confidence_score * data_quality * liquidity_score

@@ -365,7 +365,7 @@ class DiscordAlerter:
 
     async def no_opportunity(self, markets_scanned: int, paper: bool = True) -> None:
         """Alert when the bot scans everything and finds nothing worth trading."""
-        if not self.cfg.alert_on_signal:
+        if not self.cfg.alert_on_trade and not self.cfg.alert_on_signal:
             return
         mode_tag = "📝 PAPER" if paper else "💰 LIVE"
         payload  = self._embed(
