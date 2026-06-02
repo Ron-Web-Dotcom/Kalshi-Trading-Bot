@@ -486,6 +486,7 @@ class DiscordAlerter:
         total_losses: int = 0,
         total_pnl: float = 0.0,
         total_closed: int = 0,
+        best_pick: Optional[Dict] = None,
     ) -> None:
         """Send hourly scan summary — bot heartbeat + top market candidates."""
         now_utc  = datetime.now(timezone.utc)
@@ -552,6 +553,27 @@ class DiscordAlerter:
                 "inline": False,
             },
         ]
+
+        # Best Pick of the Day — highest-confidence AI evaluation even if not traded
+        if best_pick:
+            bp_action = best_pick.get("action", "HOLD")
+            bp_conf   = best_pick.get("confidence", 0)
+            bp_ev     = best_pick.get("net_ev")
+            bp_ev_str = f" | EV {bp_ev:+.1f}¢" if bp_ev is not None else ""
+            bp_side   = (best_pick.get("side") or "yes").upper()
+            bp_reason = (best_pick.get("reasoning") or "")[:250]
+            bp_title  = (best_pick.get("title") or best_pick.get("ticker", "?"))[:80]
+            bp_ticker = best_pick.get("ticker", "?")
+            traded_note = "" if bp_action == "BUY" else "\n_Not traded — shown for visibility only._"
+            fields.insert(-1, {
+                "name": "🧠 Best Pick of the Day (Highest AI Confidence)",
+                "value": (
+                    f"**{bp_ticker}** — BUY {bp_side} | Confidence: **{bp_conf:.0f}%**{bp_ev_str}\n"
+                    f"_{bp_title}_\n\n"
+                    f"{bp_reason}{traded_note}"
+                ),
+                "inline": False,
+            })
 
         # Show today's trade results if any
         if closed_trades:

@@ -55,6 +55,22 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
     ev_str = f" EV={net_ev:+.1f}¢" if net_ev is not None else ""
     tp_str = f" P(YES)={true_prob:.0f}%" if true_prob is not None else ""
 
+    # Record EVERY evaluation (BUY or HOLD) so best_pick() works
+    try:
+        from src.utils.daily_stats import stats as daily_stats
+        daily_stats.record_evaluation(
+            ticker=ticker,
+            action=action,
+            side=side,
+            confidence=conf,
+            net_ev=net_ev,
+            true_prob=true_prob,
+            reasoning=decision.reasoning,
+            title=market.get("title", ""),
+        )
+    except Exception:
+        pass
+
     if engine.should_trade(decision):
         logger.info(
             "✅ TRADE SIGNAL  %-30s  %s/%-3s  conf=%d%%  %s%s  %s",

@@ -23,11 +23,45 @@ class DailyStats:
         self.trades_skipped: int = 0
         self.errors: List[Tuple[datetime, str]] = []
         self.top_opportunities: List[Dict] = []
+        self.all_evaluations: List[Dict] = []   # every AI evaluation including HOLDs
         self.poly_matches: int = 0
         self.suspicious_matches: List[Dict] = []
         self.consecutive_losses: int = 0
+        self.consecutive_losses: int = 0
 
     # ── Recording methods ──────────────────────────────────────────────────
+
+    def record_evaluation(
+        self,
+        ticker: str,
+        action: str,
+        side: str,
+        confidence: float,
+        net_ev: Optional[float],
+        true_prob: Optional[float],
+        reasoning: str,
+        title: str = "",
+    ) -> None:
+        """Record every AI evaluation — BUY or HOLD — to find best pick of the day."""
+        entry = {
+            "ticker":     ticker,
+            "title":      title,
+            "action":     action,
+            "side":       side,
+            "confidence": confidence,
+            "net_ev":     net_ev,
+            "true_prob":  true_prob,
+            "reasoning":  reasoning,
+            "evaluated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self.all_evaluations.append(entry)
+        # Keep top 20 by confidence
+        self.all_evaluations.sort(key=lambda x: x["confidence"], reverse=True)
+        self.all_evaluations = self.all_evaluations[:20]
+
+    def best_pick(self) -> Optional[Dict]:
+        """Return the highest-confidence evaluation of the day."""
+        return self.all_evaluations[0] if self.all_evaluations else None
 
     def record_signal(self, ticker: str, confidence: float, net_ev: Optional[float], action: str) -> None:
         """Increment signals_generated if action is BUY."""
