@@ -236,7 +236,7 @@ Rules:
             )
             raw = response.content[0].text.strip() if response.content else ""
             if not raw:
-                logger.warning("AI returned empty response for %s — using rule-based fallback", ticker)
+                logger.debug("AI returned empty response for %s — rule-based fallback", ticker)
                 return self._rule_based_decision(market, signals)
             # Strip markdown fences if model wraps JSON
             if raw.startswith("```"):
@@ -324,7 +324,7 @@ Rules:
             return decision
 
         except json.JSONDecodeError as e:
-            logger.warning(f"AI response parse error for {ticker}: {e}")
+            logger.debug("AI response parse error for %s: %s", ticker, e)
             return self._rule_based_decision(market, signals)
         except Exception as e:
             logger.error(f"AI decision error for {ticker}: {e}")
