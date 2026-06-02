@@ -134,10 +134,8 @@ class OpportunityHunter:
             # Basic sanity
             if yes_ask <= 5 or yes_ask >= 95:
                 continue
-            # Use lower volume threshold — Polymarket volumes are much larger
             platform = market.get("platform", "kalshi")
-            min_vol = 10 if platform == "polymarket" else 50
-            if volume < min_vol:
+            if volume < 10:
                 continue
 
             poly_comp = poly_by_ticker.get(ticker)

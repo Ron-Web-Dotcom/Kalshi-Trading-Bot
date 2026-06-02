@@ -21,7 +21,6 @@ from src.utils.database import DatabaseManager
 from src.jobs.ingest import run_ingestion
 from src.jobs.trade import run_trading_job
 from src.jobs.track import run_tracking
-from src.jobs.evaluate import run_evaluation
 from src.config.settings import settings
 
 logger = get_trading_logger("main")
@@ -161,15 +160,6 @@ class TradingBot:
                 except Exception as e:
                     logger.error("Track error: %s", e)
                 await asyncio.sleep(TRACK_INTERVAL)
-
-        async def eval_loop():
-            await asyncio.sleep(EVAL_INTERVAL)
-            while not self._shutdown.is_set():
-                try:
-                    await run_evaluation(db=self.db)
-                except Exception as e:
-                    logger.error("Eval error: %s", e)
-                await asyncio.sleep(EVAL_INTERVAL)
 
         async def trade_loop():
             while not self._shutdown.is_set():
@@ -356,7 +346,6 @@ class TradingBot:
         tasks = [
             asyncio.create_task(ingest_loop(),           name="ingest"),
             asyncio.create_task(track_loop(),            name="track"),
-            asyncio.create_task(eval_loop(),             name="eval"),
             asyncio.create_task(trade_loop(),            name="trade"),
             asyncio.create_task(hourly_heartbeat_loop(), name="hourly_heartbeat"),
             asyncio.create_task(daily_summary_loop(),    name="daily_summary"),

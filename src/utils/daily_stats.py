@@ -176,9 +176,10 @@ class DailyStats:
             "trades_executed":   self.trades_executed,
             "trades_skipped":    self.trades_skipped,
             "errors":            [(ts.isoformat(), msg) for ts, msg in self.errors],
-            "top_opportunities": list(self.top_opportunities),
-            "poly_matches":      self.poly_matches,
+            "top_opportunities":  list(self.top_opportunities),
+            "poly_matches":       self.poly_matches,
             "suspicious_matches": list(self.suspicious_matches),
+            "consecutive_losses": self.consecutive_losses,
         }
 
 
