@@ -228,7 +228,6 @@ Rules:
         prompt = self._build_prompt(market, signals, context, bot_context)
         try:
             client = self._get_client()
-            logger.info("Calling AI for %s (yes_ask=%.0f¢)", ticker, market.get("yes_ask", 0))
             response = await client.messages.create(
                 model=self.cfg.model,
                 max_tokens=self.cfg.max_tokens,
@@ -236,7 +235,6 @@ Rules:
                 messages=[{"role": "user", "content": prompt}],
             )
             raw = response.content[0].text.strip() if response.content else ""
-            logger.info("AI raw response for %s: %s", ticker, raw[:120])
             if not raw:
                 logger.warning("AI returned empty response for %s — rule-based fallback", ticker)
                 return self._rule_based_decision(market, signals)
