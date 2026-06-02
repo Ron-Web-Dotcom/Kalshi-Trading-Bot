@@ -185,8 +185,8 @@ class OpportunityHunter:
         )
         if evaluated == 0:
             logger.warning(
-                "No candidates were evaluated — all filtered out before AI. "
-                "Check volume filter, price range (5-95¢), and candidate list size."
+                "No candidates were evaluated — all %d passed to hunt had score=0 or were skipped.",
+                len(all_candidates),
             )
 
         if best_result and best_score >= min_score:

@@ -100,28 +100,34 @@ class PolymarketTradingClient:
 
     def _parse_market(self, m: Dict) -> Optional[Dict]:
         """Parse one Gamma API market object into our standard format."""
+        import json as _json
         try:
-            # Price can be in outcomePrices (list) or bestBid/bestAsk
-            prices = m.get("outcomePrices") or []
-            if len(prices) >= 2:
+            # outcomePrices may be a real list OR a JSON-encoded string
+            raw_prices = m.get("outcomePrices") or []
+            if isinstance(raw_prices, str):
                 try:
-                    p0 = float(prices[0])
-                    p1 = float(prices[1])
-                    # Gamma returns 0-1 floats — multiply by 100 for cents
+                    raw_prices = _json.loads(raw_prices)
+                except Exception:
+                    raw_prices = []
+
+            yes_price, no_price = 0.0, 0.0
+            if len(raw_prices) >= 2:
+                try:
+                    p0 = float(raw_prices[0])
+                    p1 = float(raw_prices[1])
                     yes_price = p0 * 100 if p0 <= 1.0 else p0
                     no_price  = p1 * 100 if p1 <= 1.0 else p1
                 except (TypeError, ValueError):
-                    return None
-            elif m.get("bestBid") or m.get("bestAsk"):
-                yes_price = float(m.get("bestAsk") or m.get("bestBid") or 0)
-                yes_price = yes_price * 100 if yes_price <= 1.0 else yes_price
-                no_price  = 100 - yes_price
-                if yes_price == 0:
-                    return None
-            else:
-                return None
+                    pass
 
-            # Filter: skip markets with no volume and no price data at all
+            # Fallback to bestBid/bestAsk
+            if yes_price == 0:
+                bid = m.get("bestBid") or 0
+                ask = m.get("bestAsk") or 0
+                val = float(ask or bid or 0)
+                yes_price = val * 100 if val <= 1.0 else val
+                no_price  = 100 - yes_price
+
             if yes_price == 0 and no_price == 0:
                 return None
 
