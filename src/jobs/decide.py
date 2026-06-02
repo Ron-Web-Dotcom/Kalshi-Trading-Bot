@@ -95,25 +95,32 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
 
     # Log every HOLD with the reason so you can see what score each market got
     if conf >= min_conf * 0.6:
-        # Close to threshold — worth highlighting
         logger.info(
             "🟡 NEAR-MISS      %-30s  HOLD/%-3s  conf=%d%%  (need %d%%)%s%s  %s",
             ticker, side.upper(), conf, min_conf, tp_str, ev_str, decision.reasoning[:80],
         )
-        # Send to Discord so you can see what almost traded
-        try:
-            from src.alerts.discord import DiscordAlerter
-            from src.config.settings import settings as _s
-            discord = DiscordAlerter()
-            await discord.near_miss(
-                ticker=ticker, side=side,
-                confidence=conf, min_confidence=min_conf,
-                net_ev=net_ev, true_prob=true_prob,
-                reasoning=decision.reasoning,
-                paper=not _s.trading.live_trading_enabled,
-            )
-        except Exception:
-            pass
+        # Only send near-miss to Discord when AI gave a real opinion (not rule-based fallback)
+        _has_real_reasoning = (
+            decision.reasoning
+            and decision.model != "rule_based"
+            and "No clear edge" not in decision.reasoning
+            and "Insufficient volume" not in decision.reasoning
+            and net_ev is not None
+        )
+        if _has_real_reasoning:
+            try:
+                from src.alerts.discord import DiscordAlerter
+                from src.config.settings import settings as _s
+                discord = DiscordAlerter()
+                await discord.near_miss(
+                    ticker=ticker, side=side,
+                    confidence=conf, min_confidence=min_conf,
+                    net_ev=net_ev, true_prob=true_prob,
+                    reasoning=decision.reasoning,
+                    paper=not _s.trading.live_trading_enabled,
+                )
+            except Exception:
+                pass
     else:
         logger.debug(
             "⬜ HOLD           %-30s  conf=%d%%  (need %d%%)%s%s  %s",

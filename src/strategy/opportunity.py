@@ -134,8 +134,9 @@ class OpportunityHunter:
             # Basic sanity
             if yes_ask <= 5 or yes_ask >= 95:
                 continue
-            platform = market.get("platform", "kalshi")
-            if volume < 10:
+            # Skip markets with no readable title (e.g. raw 0x... hex conditionIds stored as title)
+            title = market.get("title", "")
+            if not title or len(title) < 10 or title.startswith("0x"):
                 continue
 
             poly_comp = poly_by_ticker.get(ticker)
