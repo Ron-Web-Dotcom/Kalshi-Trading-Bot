@@ -81,8 +81,20 @@ class PolymarketTradingClient:
                 if parsed:
                     markets.append(parsed)
 
+            if items and not markets:
+                # Log a sample so we can diagnose why everything is filtered
+                sample = items[0]
+                logger.warning(
+                    "Polymarket: 0 tradeable from %d raw — sample market: "
+                    "outcomePrices=%s bestBid=%s bestAsk=%s active=%s",
+                    len(items),
+                    sample.get("outcomePrices"),
+                    sample.get("bestBid"),
+                    sample.get("bestAsk"),
+                    sample.get("active"),
+                )
             logger.info(
-                "Polymarket: %d tradeable markets (5¢<price<95¢) from %d raw",
+                "Polymarket: %d tradeable markets (2¢<price<98¢) from %d raw",
                 len(markets), len(items),
             )
             return markets
@@ -105,15 +117,17 @@ class PolymarketTradingClient:
                     no_price  = p1 * 100 if p1 <= 1.0 else p1
                 except (TypeError, ValueError):
                     return None
-            else:
-                # Fallback: use bestBid/bestAsk if available
-                yes_price = float(m.get("bestAsk") or m.get("lastTradePrice") or 0) * 100
+            elif m.get("bestBid") or m.get("bestAsk"):
+                yes_price = float(m.get("bestAsk") or m.get("bestBid") or 0)
+                yes_price = yes_price * 100 if yes_price <= 1.0 else yes_price
                 no_price  = 100 - yes_price
                 if yes_price == 0:
                     return None
+            else:
+                return None
 
-            # Filter: only trade markets with 5-95¢ prices
-            if not (5 < yes_price < 95):
+            # Filter: only include markets with tradeable prices (2-98¢)
+            if not (2 < yes_price < 98):
                 return None
 
             # Volume — Gamma returns in USDC as string or float

@@ -86,14 +86,11 @@ class MarketDataFetcher:
                 )
             logger.info("─" * 80)
 
-        # Mark any market not in this fresh batch as closed so stale rows don't get traded
-        fetched_tickers = [m.get("ticker") for m in markets if m.get("ticker")]
-        if fetched_tickers:
-            placeholders = ",".join("?" * len(fetched_tickers))
+        # Mark stale markets as closed using timestamp instead of NOT IN (avoids SQLite 999-param limit)
+        if markets:
             await self.db.execute(
-                f"UPDATE markets SET status='closed' WHERE status='open' "
-                f"AND ticker NOT IN ({placeholders})",
-                tuple(fetched_tickers),
+                "UPDATE markets SET status='closed' WHERE status='open' AND fetched_at < ? AND platform='kalshi'",
+                (now,)
             )
 
         logger.info(
