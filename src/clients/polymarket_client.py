@@ -53,60 +53,43 @@ class PolymarketTradingClient:
         Fetch active Polymarket markets from the public Gamma API.
         Returns list of normalised market dicts ready for the opportunity hunter.
         """
-        logger.info("Polymarket: fetching markets from Gamma API...")
-        markets = []
+        logger.info("Polymarket: fetching markets from Gamma API (limit=%d)...", limit)
+        try:
+            r = await self._client().get(
+                f"{GAMMA_BASE}/markets",
+                params={"active": "true", "closed": "false", "limit": limit},
+            )
+            if r.status_code != 200:
+                logger.warning(
+                    "Polymarket Gamma API HTTP %d — %s",
+                    r.status_code, r.text[:200],
+                )
+                return []
 
-        # Paginate through results in batches of 100
-        offset = 0
-        batch  = 100
-        while len(markets) < limit:
-            try:
-                url = f"{GAMMA_BASE}/markets"
-                params = {
-                    "active":  "true",
-                    "closed":  "false",
-                    "limit":   min(batch, limit - len(markets)),
-                    "offset":  offset,
-                }
-                r = await self._client().get(url, params=params)
+            raw = r.json()
+            if isinstance(raw, dict):
+                items = raw.get("data") or raw.get("markets") or []
+            elif isinstance(raw, list):
+                items = raw
+            else:
+                logger.warning("Polymarket: unexpected response type %s", type(raw))
+                return []
 
-                if r.status_code != 200:
-                    logger.warning(
-                        "Polymarket Gamma API returned HTTP %d — %s",
-                        r.status_code, r.text[:200],
-                    )
-                    break
+            markets = []
+            for m in items:
+                parsed = self._parse_market(m)
+                if parsed:
+                    markets.append(parsed)
 
-                raw = r.json()
-                if isinstance(raw, dict):
-                    items = raw.get("data") or raw.get("markets") or []
-                elif isinstance(raw, list):
-                    items = raw
-                else:
-                    logger.warning("Polymarket: unexpected response type %s", type(raw))
-                    break
+            logger.info(
+                "Polymarket: %d tradeable markets (5¢<price<95¢) from %d raw",
+                len(markets), len(items),
+            )
+            return markets
 
-                if not items:
-                    break  # no more pages
-
-                for m in items:
-                    parsed = self._parse_market(m)
-                    if parsed:
-                        markets.append(parsed)
-
-                offset += len(items)
-                if len(items) < batch:
-                    break  # last page
-
-            except Exception as e:
-                logger.warning("Polymarket fetch error (offset=%d): %s", offset, e)
-                break
-
-        logger.info(
-            "Polymarket: %d tradeable markets fetched (5¢ < price < 95¢)",
-            len(markets),
-        )
-        return markets
+        except Exception as e:
+            logger.warning("Polymarket fetch failed: %s", e)
+            return []
 
     def _parse_market(self, m: Dict) -> Optional[Dict]:
         """Parse one Gamma API market object into our standard format."""
