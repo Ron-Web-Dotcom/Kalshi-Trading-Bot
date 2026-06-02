@@ -188,8 +188,8 @@ BUY NO  @ {no_ask:.0f}¢ → win {no_ev_if_true:.1f}¢ if NO   |  lose {no_ask:.
 Step 1 — Use the real-world context AND the Polymarket cross-reference (if present) to estimate TRUE P(YES).
          Polymarket having a significantly different price is a strong signal one platform is wrong.
 Step 2 — Compute net EV = (your_true_prob/100 - kalshi_price/100) × 98¢  for the better side.
-Step 3 — BUY only if: |net_ev| > 4¢  AND  volume ≥ 100  AND  price between 5–95¢  AND  context supports it.
-Step 4 — HOLD if context is thin or the edge is marginal. Cash is a valid position.
+Step 3 — BUY if: |net_ev| > 1¢  AND  price between 5–95¢  AND  your true_prob clearly differs from market price.
+Step 4 — HOLD if context contradicts your estimate or you genuinely have no edge. If edge exists, BUY.
 
 Respond ONLY with this exact JSON (no markdown):
 {{
@@ -206,7 +206,8 @@ Rules:
 - Polymarket price divergence is a useful signal but not sufficient alone — check the real-world data.
 - confidence = certainty in your probability, not excitement about the trade
 - confidence ≥ {self.trading_cfg.min_ai_confidence:.0f} required to place a trade
-- HOLD is almost always safer than a weakly-supported BUY"""
+- This is PAPER trading — no real money. If you see any edge, take it so we can evaluate your reasoning.
+- HOLD only when you genuinely see no edge or context directly contradicts the bet"""
 
     async def decide(self, market: Dict, signals: List[Dict] = []) -> AIDecision:
         ticker = market.get("ticker", "UNKNOWN")
@@ -260,10 +261,10 @@ Rules:
             if side not in ("yes", "no"):
                 side = "yes"
 
-            # Reject low EV — 2¢ minimum for paper mode (enough to show real edge exists)
-            if action == "BUY" and net_ev is not None and net_ev < 2.0:
+            # Reject negative EV — must show at least a tiny positive edge
+            if action == "BUY" and net_ev is not None and net_ev < 0.5:
                 action = "HOLD"
-                reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < 2¢ threshold] " + reasoning
+                reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < 0.5¢ minimum] " + reasoning
 
             # Reject physically impossible EV given the market price
             if action == "BUY" and net_ev is not None:
