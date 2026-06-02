@@ -102,28 +102,15 @@ class MarketDataFetcher:
 
     async def get_cached_markets(self, min_volume: float = 0,
                                   max_age_minutes: int = 15) -> List[Dict]:
-        """Return markets from DB fresher than max_age_minutes. Prices in cents.
-        Falls back to any available markets if none are fresh (e.g. first startup)."""
-        from datetime import timedelta
-        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).isoformat()
-        query  = "SELECT * FROM markets WHERE status='open' AND fetched_at >= ?"
-        params: tuple = (cutoff,)
+        """Return open markets from DB. Prices in cents."""
+        query  = "SELECT * FROM markets WHERE status='open' OR status=''"
+        params: tuple = ()
         if min_volume > 0:
             query  += " AND volume >= ?"
             params += (min_volume,)
         query += " ORDER BY volume DESC"
         rows = await self.db.fetchall(query, params)
-
-        if not rows:
-            # Fallback: no fresh data — use whatever is in DB, no volume filter
-            logger.warning(
-                "No markets fresher than %d min — falling back to all cached markets",
-                max_age_minutes,
-            )
-            rows = await self.db.fetchall(
-                "SELECT * FROM markets WHERE status='open' OR status='' ORDER BY volume DESC"
-            )
-
+        logger.info("get_cached_markets: %d rows (min_vol=%g)", len(rows), min_volume)
         return rows
 
     async def run_continuous(self, interval_seconds: int = 300):
