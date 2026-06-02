@@ -379,10 +379,16 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         )
 
         if not best:
+            # Only post "no opportunity" once per hour — not every 60s cycle (too spammy)
             try:
-                await discord.no_opportunity(
-                    markets_scanned=len(kalshi_candidates) + len(poly_markets), paper=not live_mode
-                )
+                import time as _time
+                _now = _time.time()
+                _last = getattr(run_trading_job, "_last_no_opp_ts", 0)
+                if _now - _last >= 3600:
+                    run_trading_job._last_no_opp_ts = _now
+                    await discord.no_opportunity(
+                        markets_scanned=len(kalshi_candidates) + len(poly_markets), paper=not live_mode
+                    )
             except Exception:
                 pass
 

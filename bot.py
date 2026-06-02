@@ -182,10 +182,8 @@ class TradingBot:
         async def hourly_heartbeat_loop():
             """Send an hourly heartbeat to Discord with scan stats and top candidates."""
             from src.alerts.discord import DiscordAlerter
-            # Wait until the top of the next hour before first send
-            now = datetime.now(timezone.utc)
-            seconds_until_next_hour = 3600 - (now.minute * 60 + now.second)
-            await asyncio.sleep(seconds_until_next_hour)
+            # Fire first heartbeat quickly after startup so user sees immediate status
+            await asyncio.sleep(90)
             while not self._shutdown.is_set():
                 try:
                     discord = DiscordAlerter()

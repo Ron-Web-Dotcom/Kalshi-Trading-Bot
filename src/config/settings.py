@@ -77,7 +77,7 @@ class TradingConfig:
     # Cycle limits (configurable without code changes)
     max_trades_per_cycle: int = field(default_factory=lambda: _env_int("MAX_TRADES_PER_CYCLE", 3))
     max_trades_per_day: int   = field(default_factory=lambda: _env_int("MAX_TRADES_PER_DAY", 10))
-    max_markets_to_scan: int  = field(default_factory=lambda: _env_int("MAX_MARKETS_TO_SCAN", 200))
+    max_markets_to_scan: int  = field(default_factory=lambda: _env_int("MAX_MARKETS_TO_SCAN", 8))
     min_market_volume: float  = field(default_factory=lambda: _env_float("MIN_MARKET_VOLUME", 10.0))
 
     # Kelly criterion

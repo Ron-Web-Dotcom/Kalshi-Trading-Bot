@@ -121,7 +121,7 @@ class PolymarketTradingClient:
                     "_yes_token":  token_ids[0] if len(token_ids) > 0 else None,
                     "_no_token":   token_ids[1] if len(token_ids) > 1 else None,
                 })
-            logger.debug("Polymarket: fetched %d tradeable markets", len(markets))
+            logger.info("Polymarket: fetched %d tradeable markets (raw=%d)", len(markets), len(raw))
             return markets
         except Exception as e:
             logger.warning("Polymarket market fetch failed: %s", e)
