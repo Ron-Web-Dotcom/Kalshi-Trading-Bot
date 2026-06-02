@@ -38,16 +38,10 @@ async def run_ingestion(db_manager, market_queue: Optional[asyncio.Queue] = None
             logger.info("━━━ POLYMARKET INGEST START ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             raw_poly = await poly.get_markets(limit=500)
             now_ts   = datetime.now(timezone.utc).isoformat()
-            stored   = 0
+            rows = []
             for pm in raw_poly:
                 try:
-                    await db_manager.execute("""
-                        INSERT OR REPLACE INTO markets
-                        (ticker, title, category, status, yes_bid, yes_ask,
-                         no_bid, no_ask, volume, open_interest, close_time,
-                         last_price, fetched_at, platform)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                    """, (
+                    rows.append((
                         pm["ticker"], pm.get("title", "")[:200],
                         pm.get("category", ""), "open",
                         pm.get("yes_bid", 0), pm.get("yes_ask", 0),
@@ -56,9 +50,17 @@ async def run_ingestion(db_manager, market_queue: Optional[asyncio.Queue] = None
                         pm.get("close_time", ""), pm.get("yes_ask", 0),
                         now_ts, "polymarket",
                     ))
-                    stored += 1
                 except Exception:
                     pass
+            if rows:
+                await db_manager.executemany("""
+                    INSERT OR REPLACE INTO markets
+                    (ticker, title, category, status, yes_bid, yes_ask,
+                     no_bid, no_ask, volume, open_interest, close_time,
+                     last_price, fetched_at, platform)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, rows)
+            stored = len(rows)
             logger.info("Fetched %d Polymarket markets (%d stored)", len(raw_poly), stored)
             total += stored
         except Exception as e:

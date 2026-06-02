@@ -92,8 +92,7 @@ class DiscordAlerter:
             for name, result in health_results.items():
                 if result.ok:
                     latency = result.latency_ms
-                    # AI API calls are naturally slower — use a higher threshold
-                    slow_threshold = 5000 if name == "AI" else 3000
+                    slow_threshold = 8000
                     slow = latency > slow_threshold
                     icon = "⚠️" if slow else "✅"
                     note = " (slow)" if slow else ""

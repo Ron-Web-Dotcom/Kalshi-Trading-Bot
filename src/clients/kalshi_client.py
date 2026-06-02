@@ -129,18 +129,23 @@ class KalshiClient:
             params["cursor"] = cursor
         return await self._request("GET", "/markets", params=params)
 
-    async def get_all_markets(self, status: str = "open") -> List[Dict]:
+    async def get_all_markets(self, status: str = "open", max_markets: int = 1000) -> List[Dict]:
+        """Fetch up to max_markets from Kalshi, sorted by volume desc."""
         markets = []
         cursor = ""
-        while True:
+        while len(markets) < max_markets:
             data = await self.get_markets(limit=200, cursor=cursor, status=status)
             batch = data.get("markets", [])
+            if not batch:
+                break
             markets.extend(batch)
             cursor = data.get("cursor", "")
-            if not cursor or not batch:
+            if not cursor:
                 break
-            await asyncio.sleep(0.5)
-        return markets
+            await asyncio.sleep(0.2)
+        # Sort by volume desc so we keep the most liquid markets
+        markets.sort(key=lambda m: m.get("volume", 0) or 0, reverse=True)
+        return markets[:max_markets]
 
     async def get_market(self, ticker: str) -> Dict:
         return await self._request("GET", f"/markets/{ticker}")

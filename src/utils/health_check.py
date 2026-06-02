@@ -9,7 +9,7 @@ import httpx
 
 logger = logging.getLogger("trading.health_check")
 
-_SLOW_MS = 2000  # latency above this is flagged as slow
+_SLOW_MS = 8000  # latency above this is flagged as slow
 
 
 @dataclass

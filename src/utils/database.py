@@ -162,6 +162,12 @@ class DatabaseManager:
             await db.execute(query, params)
             await db.commit()
 
+    async def executemany(self, query: str, params_list: list) -> None:
+        """Batch execute — much faster than looping execute() for bulk inserts."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.executemany(query, params_list)
+            await db.commit()
+
     async def fetchall(self, query: str, params: tuple = ()) -> List[Dict]:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
