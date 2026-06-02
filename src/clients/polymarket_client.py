@@ -82,19 +82,14 @@ class PolymarketTradingClient:
                     markets.append(parsed)
 
             if items and not markets:
-                # Log a sample so we can diagnose why everything is filtered
                 sample = items[0]
                 logger.warning(
-                    "Polymarket: 0 tradeable from %d raw — sample market: "
-                    "outcomePrices=%s bestBid=%s bestAsk=%s active=%s",
+                    "Polymarket: 0 tradeable from %d raw — sample keys: %s",
                     len(items),
-                    sample.get("outcomePrices"),
-                    sample.get("bestBid"),
-                    sample.get("bestAsk"),
-                    sample.get("active"),
+                    list(sample.keys())[:15],
                 )
             logger.info(
-                "Polymarket: %d tradeable markets (2¢<price<98¢) from %d raw",
+                "Polymarket: %d tradeable markets from %d raw",
                 len(markets), len(items),
             )
             return markets
@@ -140,11 +135,14 @@ class PolymarketTradingClient:
             # Token IDs for live order placement
             token_ids = m.get("clobTokenIds") or m.get("tokenIds") or []
 
-            ticker = (
+            # Accept any available identifier as ticker
+            ticker = str(
                 m.get("conditionId")
                 or m.get("id")
-                or m.get("marketMakerAddress", "")
-            )
+                or m.get("slug")
+                or m.get("marketMakerAddress")
+                or ""
+            ).strip()
             if not ticker:
                 return None
 
