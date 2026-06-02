@@ -99,13 +99,13 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
             "🟡 NEAR-MISS      %-30s  HOLD/%-3s  conf=%d%%  (need %d%%)%s%s  %s",
             ticker, side.upper(), conf, min_conf, tp_str, ev_str, decision.reasoning[:80],
         )
-        # Only send near-miss to Discord when AI gave a real opinion (not rule-based fallback)
+        # Only Discord-alert near-miss when AI wanted to BUY but confidence fell short.
+        # Plain HOLD decisions (AI saw no edge) are not near-misses — just log them.
         _has_real_reasoning = (
-            decision.reasoning
+            action == "BUY"
             and decision.model != "rule_based"
-            and "No clear edge" not in decision.reasoning
-            and "Insufficient volume" not in decision.reasoning
             and net_ev is not None
+            and net_ev > 0
         )
         if _has_real_reasoning:
             try:
