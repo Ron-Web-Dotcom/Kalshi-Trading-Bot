@@ -264,8 +264,6 @@ Rules:
             if side not in ("yes", "no"):
                 side = "yes"
 
-            # Reject low EV
-            if action == "BUY" and net_ev is not None and net_ev < 4.0:
             # Reject negative EV — must show at least a tiny positive edge
             if action == "BUY" and net_ev is not None and net_ev < 0.5:
                 action = "HOLD"
