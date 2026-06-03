@@ -238,6 +238,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                                 net_edge=net,
                                 kalshi_price=yes_p,
                                 poly_price=no_p,
+                                market_title=market.get("title", "") or market.get("question", ""),
                             )
 
             else:
@@ -308,6 +309,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                             side=side,
                             kalshi_price=sig["kalshi_price"],
                             poly_price=sig["poly_price"],
+                            market_title=market.get("title", "") or market.get("question", ""),
                         )
 
         # ── 5. Daily trade gate — sit out if already traded today ────────────────
