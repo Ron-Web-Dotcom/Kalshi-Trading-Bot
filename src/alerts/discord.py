@@ -652,22 +652,30 @@ class DiscordAlerter:
                 "inline": False,
             })
 
-        # Best Pick of the Day — highest AI confidence evaluation, either platform
+        # Best Pick of the Day — one from Kalshi, one from Polymarket (fair slot each)
         if best_pick:
-            bp_plat  = "🟣 Polymarket" if best_pick.get("platform") == "polymarket" else "🟦 Kalshi"
-            bp_title = self._display_ticker(best_pick.get("ticker", ""), best_pick.get("title", "") or "")
-            bp_side  = (best_pick.get("side") or "YES").upper()
-            bp_conf  = best_pick.get("confidence", 0)
-            bp_ev    = best_pick.get("net_ev")
-            bp_ev_str = f" | EV **{bp_ev:+.1f}¢**" if bp_ev is not None else ""
-            bp_reason = (best_pick.get("reasoning") or "")[:120]
+            from src.utils.daily_stats import stats as _ds
+            picks = _ds.best_pick_by_platform()
+            pick_lines = []
+            for plat_key, icon, label in [("kalshi", "🟦", "Kalshi"), ("polymarket", "🟣", "Polymarket")]:
+                p = picks.get(plat_key)
+                if not p:
+                    pick_lines.append(f"{icon} **{label}** — _No evaluation yet_")
+                    continue
+                title   = self._display_ticker(p.get("ticker", ""), p.get("title", "") or "")
+                side    = (p.get("side") or "YES").upper()
+                conf    = p.get("confidence", 0)
+                ev      = p.get("net_ev")
+                ev_str  = f" | EV **{ev:+.1f}¢**" if ev is not None else ""
+                reason  = (p.get("reasoning") or "")[:100]
+                pick_lines.append(
+                    f"{icon} **{label}** — {title}\n"
+                    f"BUY **{side}** | Conf: **{conf:.0f}%**{ev_str}\n"
+                    f"_{reason}_"
+                )
             fields.insert(-1, {
-                "name":  "🧠 Best Pick of the Day (Highest AI Confidence)",
-                "value": (
-                    f"{bp_plat} — **{bp_title}**\n"
-                    f"BUY **{bp_side}** | Confidence: **{bp_conf:.0f}%**{bp_ev_str}\n"
-                    f"_{bp_reason}_"
-                ),
+                "name":  "🧠 Best Pick of the Day",
+                "value": "\n\n".join(pick_lines),
                 "inline": False,
             })
 
