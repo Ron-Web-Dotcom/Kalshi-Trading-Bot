@@ -93,7 +93,7 @@ class MarketDataFetcher:
         # Mark stale markets as closed using timestamp instead of NOT IN (avoids SQLite 999-param limit)
         if markets:
             await self.db.execute(
-                "UPDATE markets SET status='closed' WHERE status='open' AND fetched_at < ? AND platform='kalshi'",
+                "UPDATE markets SET status='closed' WHERE status='open' AND fetched_at < ? AND (platform='kalshi' OR platform IS NULL)",
                 (now,)
             )
 

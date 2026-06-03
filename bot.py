@@ -199,18 +199,18 @@ class TradingBot:
                     discord = DiscordAlerter()
                     today = datetime.now(timezone.utc).date().isoformat()
 
-                    # Total markets in DB
+                    # Open markets in DB (per-cycle snapshot, not cumulative)
                     mkt_row = await self.db.fetchone(
-                        "SELECT COUNT(*) as n FROM markets"
+                        "SELECT COUNT(*) as n FROM markets WHERE status='open' OR status=''"
                     )
                     markets_total = (mkt_row or {}).get("n", 0)
 
                     # Kalshi vs Polymarket split
                     kal_row = await self.db.fetchone(
-                        "SELECT COUNT(*) as n FROM markets WHERE platform='kalshi' OR platform IS NULL"
+                        "SELECT COUNT(*) as n FROM markets WHERE (platform='kalshi' OR platform IS NULL) AND (status='open' OR status='')"
                     )
                     poly_row = await self.db.fetchone(
-                        "SELECT COUNT(*) as n FROM markets WHERE platform='polymarket'"
+                        "SELECT COUNT(*) as n FROM markets WHERE platform='polymarket' AND (status='open' OR status='')"
                     )
                     kalshi_count = (kal_row or {}).get("n", 0)
                     poly_count   = (poly_row or {}).get("n", 0)
@@ -269,12 +269,15 @@ class TradingBot:
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform FROM markets "
                         "WHERE (yes_ask > 1 AND yes_ask < 99) "
                         "AND (platform='kalshi' OR platform IS NULL) "
+                        "AND (status='open' OR status='') "
                         "AND volume > 0 ORDER BY volume DESC LIMIT 2"
                     )
                     poly_cand = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform FROM markets "
                         "WHERE (yes_ask > 1 AND yes_ask < 99) "
-                        "AND platform='polymarket' ORDER BY volume DESC LIMIT 2"
+                        "AND platform='polymarket' "
+                        "AND (status='open' OR status='') "
+                        "ORDER BY volume DESC LIMIT 2"
                     )
                     top_candidates = _cand_rows(kal_cand) + _cand_rows(poly_cand)
 
