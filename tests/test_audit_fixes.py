@@ -71,6 +71,7 @@ def test_bug01_decide_budget_gate_no_nameerror(monkeypatch):
     settings.trading.daily_ai_budget = 10.0
 
     result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         decide.make_decision_for_market(
             {"ticker": "TEST", "yes_ask": 50, "no_ask": 50, "volume": 1000},
             [],
@@ -201,6 +202,7 @@ def test_bug09_paper_trader_allows_yes_and_no_on_same_ticker():
         assert call_count == 2
 
     asyncio.get_event_loop().run_until_complete(_run())
+    asyncio.run(_run())
 
 
 # ---------------------------------------------------------------------------

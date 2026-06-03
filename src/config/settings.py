@@ -75,21 +75,21 @@ class TradingConfig:
     avoid_overtrading_minutes: int = field(default_factory=lambda: _env_int("OVERTRADE_COOLDOWN_MINUTES", 5))
 
     # Cycle limits (configurable without code changes)
-    max_trades_per_cycle: int = field(default_factory=lambda: _env_int("MAX_TRADES_PER_CYCLE", 1))
-    max_trades_per_day: int   = field(default_factory=lambda: _env_int("MAX_TRADES_PER_DAY", 1))
-    max_markets_to_scan: int  = field(default_factory=lambda: _env_int("MAX_MARKETS_TO_SCAN", 50))
-    min_market_volume: float  = field(default_factory=lambda: _env_float("MIN_MARKET_VOLUME", 100.0))
+    max_trades_per_cycle: int = field(default_factory=lambda: _env_int("MAX_TRADES_PER_CYCLE", 3))
+    max_trades_per_day: int   = field(default_factory=lambda: _env_int("MAX_TRADES_PER_DAY", 10))
+    max_markets_to_scan: int  = field(default_factory=lambda: _env_int("MAX_MARKETS_TO_SCAN", 8))
+    min_market_volume: float  = field(default_factory=lambda: _env_float("MIN_MARKET_VOLUME", 0.0))
 
     # Kelly criterion
     kelly_fraction: float = field(default_factory=lambda: _env_float("KELLY_FRACTION", 0.25))
 
-    # AI thresholds
-    min_ai_confidence: float = field(default_factory=lambda: _env_float("MIN_AI_CONFIDENCE", 70.0))
-    min_confidence_to_trade: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE_TO_TRADE", 0.45))
+    # AI thresholds — paper mode: trade more to gather data, real-world reasoning required
+    min_ai_confidence: float = field(default_factory=lambda: _env_float("MIN_AI_CONFIDENCE", 50.0))
+    min_confidence_to_trade: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE_TO_TRADE", 0.35))
 
-    # Minimum profit requirements — only trade when expected gain clears BOTH bars
-    min_profit_roi_pct: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ROI_PCT", 1.0))
-    min_profit_abs_usd: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ABS_USD", 5.0))
+    # Minimum profit requirements — paper mode: just need any positive edge
+    min_profit_roi_pct: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ROI_PCT", 0.01))
+    min_profit_abs_usd: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ABS_USD", 0.01))
 
     # AI position re-evaluation — check open positions against fresh data each cycle
     enable_ai_reeval: bool  = field(default_factory=lambda: _env_bool("ENABLE_AI_REEVAL", True))
@@ -106,6 +106,12 @@ class TradingConfig:
     scale_up_factor: float = field(default_factory=lambda: _env_float("SCALE_UP_FACTOR", 1.25))
     scale_down_loss_milestone: float = field(default_factory=lambda: _env_float("SCALE_DOWN_MILESTONE", 25.0))
     scale_down_factor: float = field(default_factory=lambda: _env_float("SCALE_DOWN_FACTOR", 0.8))
+
+    # Production safety features
+    kill_switch_enabled: bool = field(default_factory=lambda: _env_bool("KILL_SWITCH_ENABLED", True))
+    max_daily_loss_usd: float = field(default_factory=lambda: _env_float("MAX_DAILY_LOSS_USD", 50.0))
+    max_consecutive_losses: int = field(default_factory=lambda: _env_int("MAX_CONSECUTIVE_LOSSES", 5))
+    max_open_positions: int = field(default_factory=lambda: _env_int("MAX_OPEN_POSITIONS", 10))
 
 
 @dataclass
@@ -131,7 +137,7 @@ class AlertsConfig:
     discord_webhook_url: str = field(default_factory=lambda: _env("DISCORD_WEBHOOK_URL"))
     discord_enabled: bool = field(default_factory=lambda: bool(_env("DISCORD_WEBHOOK_URL")))
     alert_on_trade: bool = field(default_factory=lambda: _env_bool("ALERT_ON_TRADE", True))
-    alert_on_signal: bool = field(default_factory=lambda: _env_bool("ALERT_ON_SIGNAL", False))
+    alert_on_signal: bool = field(default_factory=lambda: _env_bool("ALERT_ON_SIGNAL", True))
     alert_on_error: bool = field(default_factory=lambda: _env_bool("ALERT_ON_ERROR", True))
 
 

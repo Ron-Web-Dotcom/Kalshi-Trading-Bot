@@ -50,10 +50,10 @@ def score_opportunity(
     if net_ev <= 0 or confidence <= 0:
         return 0.0
 
-    ev_score         = min(net_ev / 20.0, 1.0)
+    ev_score         = min(net_ev / 10.0, 1.0)
     confidence_score = confidence / 100.0
-    liquidity_score  = min(volume / 10000.0, 1.0)
-    data_quality     = 1.0 if poly_comp else 0.7
+    liquidity_score  = max(min(volume / 100.0, 1.0), 0.1)  # floor at 0.1 so zero-volume markets still score
+    data_quality     = 1.0 if poly_comp else 0.85
 
     base_score = ev_score * confidence_score * data_quality * liquidity_score
 
@@ -131,10 +131,11 @@ class OpportunityHunter:
             no_ask  = market.get("no_ask",  0)
             volume  = market.get("volume",  0)
 
-            # Basic sanity
-            if yes_ask <= 5 or yes_ask >= 95:
+            # Skip markets with extreme prices (no edge possible) or no readable title
+            if yes_ask <= 1 or yes_ask >= 99:
                 continue
-            if volume < 100:
+            title = market.get("title", "")
+            if not title or len(title) < 10 or title.startswith("0x"):
                 continue
 
             poly_comp = poly_by_ticker.get(ticker)
@@ -179,9 +180,14 @@ class OpportunityHunter:
                 }
 
         logger.info(
-            "Hunt complete: evaluated=%d skipped=%d | best_score=%.3f",
-            evaluated, skipped_score, best_score,
+            "Hunt complete: evaluated=%d skipped(low score)=%d | best_score=%.3f (need %.3f)",
+            evaluated, skipped_score, best_score, min_score,
         )
+        if evaluated == 0:
+            logger.warning(
+                "No candidates were evaluated — all %d passed to hunt had score=0 or were skipped.",
+                len(all_candidates),
+            )
 
         if best_result and best_score >= min_score:
             m = best_result["market"]

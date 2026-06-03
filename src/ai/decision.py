@@ -40,7 +40,95 @@ class AIDecisionEngine:
             self._client = anthropic.AsyncAnthropic(api_key=self.cfg.anthropic_api_key)
         return self._client
 
-    def _build_prompt(self, market: Dict, signals: List[Dict], context: str = "") -> str:
+    async def _build_bot_context(self) -> str:
+        """Build a self-awareness block — bot's own track record, positions, risk state."""
+        try:
+            from src.utils.daily_stats import stats as daily_stats
+            from src.config.settings import settings
+
+            snap    = daily_stats.snapshot()
+            lines   = ["=== BOT SELF-AWARENESS ==="]
+
+            # Win rate and track record
+            total   = snap.get("trades_executed", 0)
+            if self.db:
+                try:
+                    wl = await self.db.fetchone(
+                        "SELECT COUNT(*) as total, "
+                        "SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
+                        "SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
+                        "COALESCE(SUM(pnl),0) as total_pnl "
+                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL"
+                    ) or {}
+                    total_closed = wl.get("total", 0) or 0
+                    wins         = wl.get("wins",  0) or 0
+                    total_pnl    = wl.get("total_pnl", 0.0) or 0.0
+                    win_rate     = (wins / total_closed * 100) if total_closed > 0 else 0.0
+                    lines.append(
+                        f"Track record: {total_closed} trades closed | "
+                        f"Win rate: {win_rate:.0f}% | All-time PnL: ${total_pnl:+.2f}"
+                    )
+                    if total_closed == 0:
+                        lines.append("Status: No completed trades yet — this is an early decision.")
+
+                    # Recent last 5 closed trades
+                    recent = await self.db.fetchall(
+                        "SELECT ticker, side, pnl, close_reason, avg_price, current_price "
+                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL "
+                        "ORDER BY closed_at DESC LIMIT 5"
+                    ) or []
+                    if recent:
+                        lines.append("Last 5 closed trades:")
+                        for r in recent:
+                            outcome = "WIN" if (r.get("pnl") or 0) > 0 else "LOSS"
+                            lines.append(
+                                f"  {outcome} | {r.get('ticker','')} {(r.get('side') or '').upper()} "
+                                f"| entry={r.get('avg_price',0):.0f}¢ exit={r.get('current_price',0):.0f}¢ "
+                                f"| PnL=${r.get('pnl',0):+.2f} | reason={r.get('close_reason','')}"
+                            )
+
+                    # Current open positions
+                    open_pos = await self.db.fetchall(
+                        "SELECT ticker, side, avg_price, contracts, pnl "
+                        "FROM positions WHERE status='open'"
+                    ) or []
+                    if open_pos:
+                        lines.append(f"Currently open positions ({len(open_pos)}):")
+                        for p in open_pos:
+                            lines.append(
+                                f"  {p.get('ticker','')} {(p.get('side') or '').upper()} "
+                                f"| entry={p.get('avg_price',0):.0f}¢ | {p.get('contracts',0)} contracts "
+                                f"| unrealised PnL=${p.get('pnl') or 0:+.2f}"
+                            )
+                    else:
+                        lines.append("Currently open positions: None")
+
+                except Exception:
+                    pass
+
+            # Daily stats
+            lines.append(
+                f"Today: {snap.get('markets_scanned',0):,} markets scanned | "
+                f"{snap.get('signals_generated',0)} BUY signals | "
+                f"{snap.get('trades_executed',0)} trades placed | "
+                f"{snap.get('trades_skipped',0)} skipped"
+            )
+
+            # Consecutive losses warning
+            consec = snap.get("consecutive_losses", 0)
+            max_consec = settings.trading.max_consecutive_losses
+            if consec > 0:
+                lines.append(
+                    f"⚠️ Consecutive losses: {consec} (lockout triggers at {max_consec}) — "
+                    f"{'be cautious' if consec >= max_consec // 2 else 'within normal range'}"
+                )
+
+            lines.append("=== END BOT SELF-AWARENESS ===")
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
+    def _build_prompt(self, market: Dict, signals: List[Dict], context: str = "", bot_context: str = "") -> str:
         ticker        = market.get("ticker", "")
         title         = market.get("title", "")
         yes_ask       = market.get("yes_ask", 0)
@@ -77,6 +165,7 @@ class AIDecisionEngine:
         spread         = yes_ask + no_ask - 100
         liquidity      = "LOW" if volume < 100 else "HIGH" if volume > 10000 else "MEDIUM"
         context_block  = f"\n\n--- REAL-WORLD CONTEXT ---\n{context}\n--- END CONTEXT ---" if context else ""
+        bot_block      = f"\n\n{bot_context}" if bot_context else ""
 
         return f"""You are an expert quantitative prediction market trader. Your ONLY goal is to find bets where your estimated true probability beats the market price by enough to profit after fees.
 
@@ -93,14 +182,14 @@ Spread:  {spread:.0f}¢  |  Volume: {volume:,}  |  Liquidity: {liquidity}
 === EXPECTED VALUE on Kalshi (per contract, after 2% fee) ===
 BUY YES @ {yes_ask:.0f}¢ → win {yes_ev_if_true:.1f}¢ if YES  |  lose {yes_ask:.0f}¢ if NO  |  break-even P(YES) = {yes_ask/98*100:.1f}%
 BUY NO  @ {no_ask:.0f}¢ → win {no_ev_if_true:.1f}¢ if NO   |  lose {no_ask:.0f}¢ if YES |  break-even P(NO)  = {no_ask/98*100:.1f}%
-{arb_text}{context_block}
+{arb_text}{context_block}{bot_block}
 
 === YOUR TASK ===
 Step 1 — Use the real-world context AND the Polymarket cross-reference (if present) to estimate TRUE P(YES).
          Polymarket having a significantly different price is a strong signal one platform is wrong.
 Step 2 — Compute net EV = (your_true_prob/100 - kalshi_price/100) × 98¢  for the better side.
-Step 3 — BUY only if: |net_ev| > 4¢  AND  volume ≥ 100  AND  price between 5–95¢  AND  context supports it.
-Step 4 — HOLD if context is thin or the edge is marginal. Cash is a valid position.
+Step 3 — BUY if: |net_ev| > 1¢  AND  price between 5–95¢  AND  your true_prob clearly differs from market price.
+Step 4 — HOLD if context contradicts your estimate or you genuinely have no edge. If edge exists, BUY.
 
 Respond ONLY with this exact JSON (no markdown):
 {{
@@ -117,7 +206,8 @@ Rules:
 - Polymarket price divergence is a useful signal but not sufficient alone — check the real-world data.
 - confidence = certainty in your probability, not excitement about the trade
 - confidence ≥ {self.trading_cfg.min_ai_confidence:.0f} required to place a trade
-- HOLD is almost always safer than a weakly-supported BUY"""
+- This is PAPER trading — no real money. If you see any edge, take it so we can evaluate your reasoning.
+- HOLD only when you genuinely see no edge or context directly contradicts the bet"""
 
     async def decide(self, market: Dict, signals: List[Dict] = []) -> AIDecision:
         ticker = market.get("ticker", "UNKNOWN")
@@ -132,7 +222,10 @@ Rules:
         except Exception:
             context = ""
 
-        prompt = self._build_prompt(market, signals, context)
+        # Build bot self-awareness context — let AI know its own state
+        bot_context = await self._build_bot_context()
+
+        prompt = self._build_prompt(market, signals, context, bot_context)
         try:
             client = self._get_client()
             response = await client.messages.create(
@@ -141,7 +234,10 @@ Rules:
                 temperature=self.cfg.temperature,
                 messages=[{"role": "user", "content": prompt}],
             )
-            raw = response.content[0].text.strip()
+            raw = response.content[0].text.strip() if response.content else ""
+            if not raw:
+                logger.warning("AI returned empty response for %s — rule-based fallback", ticker)
+                return self._rule_based_decision(market, signals)
             # Strip markdown fences if model wraps JSON
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
@@ -170,8 +266,24 @@ Rules:
 
             # Reject low EV
             if action == "BUY" and net_ev is not None and net_ev < 4.0:
+            # Reject negative EV — must show at least a tiny positive edge
+            if action == "BUY" and net_ev is not None and net_ev < 0.5:
                 action = "HOLD"
-                reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < 4¢ threshold] " + reasoning
+                reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < 0.5¢ minimum] " + reasoning
+
+            # Reject physically impossible EV given the market price
+            if action == "BUY" and net_ev is not None:
+                _yes_ask = float(market.get("yes_ask", 50))
+                _no_ask  = float(market.get("no_ask", 50))
+                price_for_side = _yes_ask if side == "yes" else _no_ask
+                max_possible_ev = (100.0 - price_for_side) * 0.98
+                if net_ev > max_possible_ev + 1.0:
+                    logger.warning(
+                        "[AI SANITY] %s net_ev=%.1f¢ > physical max=%.1f¢ — downgrading to HOLD",
+                        ticker, net_ev, max_possible_ev,
+                    )
+                    action = "HOLD"
+                    reasoning = f"[Sanity: impossible EV {net_ev:.1f}¢ > max {max_possible_ev:.1f}¢] " + reasoning
 
             # Reject physically impossible EV given the market price
             if action == "BUY" and net_ev is not None:
@@ -228,7 +340,7 @@ Rules:
             return decision
 
         except json.JSONDecodeError as e:
-            logger.warning(f"AI response parse error for {ticker}: {e}")
+            logger.debug("AI response parse error for %s: %s", ticker, e)
             return self._rule_based_decision(market, signals)
         except Exception as e:
             logger.error(f"AI decision error for {ticker}: {e}")
@@ -254,10 +366,11 @@ Rules:
                     ticker=ticker,
                 )
 
-        # Low volume = low confidence
+        # Low volume — skip but don't hard-block; let AI have the final word
         if volume < 100:
-            return AIDecision(action="HOLD", confidence=30.0,
-                              reasoning="Insufficient volume", model="rule_based", ticker=ticker)
+            return AIDecision(action="HOLD", confidence=40.0,
+                              reasoning="Insufficient volume for confident assessment",
+                              model="rule_based", ticker=ticker)
 
         # Extreme mispricing
         if yes_ask < 5 or yes_ask > 95:

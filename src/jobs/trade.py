@@ -50,6 +50,16 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         db = DatabaseManager()
         await db.initialize()
 
+    results = TradingResults()
+
+    # ── Kill switch check (must be FIRST) ──────────────────────────────────
+    from src.utils.kill_switch import is_active as kill_switch_active
+    from src.utils.audit_log import auditor
+    if kill_switch_active():
+        logger.warning("KILL SWITCH ACTIVE — trading halted")
+        await auditor.log(db, "KILL_SWITCH", reason="kill switch active")
+        return results
+
     live_mode     = settings.trading.live_trading_enabled
     poly_enabled  = settings.polymarket.enabled
     max_trades    = settings.trading.max_trades_per_cycle
@@ -81,6 +91,24 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
     results           = TradingResults()
     trades_this_cycle = 0
 
+    # ── Daily loss lockout check ──────────────────────────────────────────
+    locked, lockout_reason = await risk.check_daily_loss_lockout(db)
+    if locked:
+        logger.warning("RISK LOCKOUT: %s", lockout_reason)
+        await discord.error_alert(lockout_reason, context="daily_loss_lockout")
+        await auditor.log(db, "LOCKOUT", reason=lockout_reason)
+        return results
+
+    # ── Max open positions check ──────────────────────────────────────────
+    open_count_row = await db.fetchone("SELECT COUNT(*) as n FROM positions WHERE status='open'")
+    open_count = (open_count_row or {}).get("n", 0)
+    if open_count >= settings.trading.max_open_positions:
+        logger.info(
+            "Max open positions (%d) reached — skipping new trades this cycle",
+            open_count,
+        )
+        return results
+
     mode_label = "LIVE" if live_mode else "PAPER"
     poly_label = "+POLY" if poly_enabled else ""
 
@@ -103,6 +131,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             logger.warning("No markets in DB (run ingest first) — cycle skipped")
             return results
         logger.info("Markets loaded: %d available (volume ≥ %g)", len(markets), min_vol)
+        from src.utils.daily_stats import stats as daily_stats
+        daily_stats.record_markets_scanned(len(markets))
 
         market_map = {m["ticker"]: m for m in markets}
 
@@ -134,6 +164,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             if not market:
                 logger.warning("SKIP arb %s — not in cached markets", ticker)
                 results.skipped += 1
+                daily_stats.record_skip("not_in_cached_markets")
                 continue
 
             if src == "internal_arb":
@@ -156,6 +187,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                             ticker, side, reason,
                         )
                         results.skipped += 1
+                        daily_stats.record_skip(f"risk_gate:{reason}")
                         continue
                     rec = await kalshi_trader.execute(
                         ticker=ticker, action="BUY", side=side,
@@ -171,6 +203,17 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         results.total_positions += 1
                         results.total_capital_used += rec.get("total_cost", 0)
                         results.arb_trades += 1
+                        daily_stats.record_trade(
+                            ticker=ticker, side=side, confidence=99.0,
+                            net_ev=net, score=1.0,
+                            reasoning=f"Internal arb: YES+NO={yes_p+no_p:.0f}¢ net={net:.1f}¢",
+                        )
+                        await auditor.log(
+                            db, "TRADE_PLACED", ticker=ticker, side=side,
+                            price_cents=price, size_usd=rec.get("total_cost", 0),
+                            confidence=99.0, net_ev=net,
+                            reason=f"Internal arb: YES+NO={yes_p+no_p:.0f}¢ net={net:.1f}¢",
+                        )
                         if discord.cfg.alert_on_signal:
                             await discord.arb_signal(
                                 ticker=ticker, signal_type="internal_arb",
@@ -191,6 +234,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         "SKIP cross-arb %s | Price %.0f¢ out of range", ticker, price
                     )
                     results.skipped += 1
+                    daily_stats.record_skip("price_out_of_range")
                     continue
 
                 logger.info(
@@ -207,6 +251,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 if not allowed:
                     logger.info("SKIP cross-arb %s | Reason: %s", ticker, reason)
                     results.skipped += 1
+                    daily_stats.record_skip(f"risk_gate:{reason}")
                     continue
 
                 rec = await kalshi_trader.execute(
@@ -224,6 +269,20 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     results.total_positions += 1
                     results.total_capital_used += rec.get("total_cost", 0)
                     results.arb_trades += 1
+                    daily_stats.record_trade(
+                        ticker=ticker, side=side, confidence=95.0,
+                        net_ev=net, score=0.9,
+                        reasoning=(
+                            f"Cross-market arb: Kalshi={sig['kalshi_price']:.0f}¢ "
+                            f"vs Poly={sig['poly_price']:.0f}¢ net={net:.1f}¢"
+                        ),
+                    )
+                    await auditor.log(
+                        db, "TRADE_PLACED", ticker=ticker, side=side,
+                        price_cents=price, size_usd=rec.get("total_cost", 0),
+                        confidence=95.0, net_ev=net,
+                        reason=f"Cross-market arb: Kalshi={sig['kalshi_price']:.0f}¢ vs Poly={sig['poly_price']:.0f}¢",
+                    )
                     if discord.cfg.alert_on_signal:
                         await discord.arb_signal(
                             ticker=ticker, signal_type="cross_market_arb",
@@ -252,18 +311,41 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             )
             return results
 
-        # ── 6. Fetch Polymarket candidates ────────────────────────────────────────
+        # ── 6. Fetch Polymarket candidates + store in DB ──────────────────────────
         poly_markets = []
         if poly_enabled:
             try:
-                poly_markets = await poly_client.get_markets(limit=200)
-                # Filter to reasonable volume and price range
+                raw_poly = await poly_client.get_markets(limit=200)
+                now_ts   = __import__("datetime").datetime.now(
+                    __import__("datetime").timezone.utc).isoformat()
+
+                # Persist Polymarket markets to DB so heartbeat can count them
+                for pm in raw_poly:
+                    try:
+                        await db.execute("""
+                            INSERT OR REPLACE INTO markets
+                            (ticker, title, category, status, yes_bid, yes_ask,
+                             no_bid, no_ask, volume, open_interest, close_time,
+                             last_price, fetched_at, platform)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        """, (
+                            pm["ticker"], pm.get("title","")[:200],
+                            pm.get("category",""), "open",
+                            pm.get("yes_bid",0), pm.get("yes_ask",0),
+                            pm.get("no_bid",0),  pm.get("no_ask",0),
+                            pm.get("volume",0),  0,
+                            pm.get("close_time",""), pm.get("yes_ask",0),
+                            now_ts, "polymarket",
+                        ))
+                    except Exception:
+                        pass
+
                 poly_markets = [
-                    m for m in poly_markets
-                    if m.get("volume", 0) >= min_vol
-                    and 5 < m.get("yes_ask", 0) < 95
+                    m for m in raw_poly
+                    if m.get("yes_ask", 0) > 1
                 ][:max_scan]
-                logger.info("Polymarket: %d tradeable markets loaded", len(poly_markets))
+                logger.info("Polymarket: %d markets stored, %d tradeable",
+                            len(raw_poly), len(poly_markets))
             except Exception as pe:
                 logger.warning("Polymarket market load failed: %s", pe)
                 poly_markets = []
@@ -280,6 +362,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             and m.get("ticker") not in open_tickers
             and 5 < m.get("yes_ask", 0) < 95
             and m.get("volume", 0) >= min_vol
+            and m.get("yes_ask", 0) > 1
         ][:max_scan]
 
         logger.info(
@@ -292,15 +375,21 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             markets      = kalshi_candidates,
             arb_signals  = all_signals,
             poly_comps   = ext_comps,
-            min_score    = 0.05,
+            min_score    = 0.01,   # paper mode: low bar to see the bot in action
             poly_markets = poly_markets,
         )
 
         if not best:
+            # Only post "no opportunity" once per hour — not every 60s cycle (too spammy)
             try:
-                await discord.no_opportunity(
-                    markets_scanned=len(kalshi_candidates) + len(poly_markets), paper=not live_mode
-                )
+                import time as _time
+                _now = _time.time()
+                _last = getattr(run_trading_job, "_last_no_opp_ts", 0)
+                if _now - _last >= 3600:
+                    run_trading_job._last_no_opp_ts = _now
+                    await discord.no_opportunity(
+                        markets_scanned=len(kalshi_candidates) + len(poly_markets), paper=not live_mode
+                    )
             except Exception:
                 pass
 
@@ -322,12 +411,19 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             min_abs = settings.trading.min_profit_abs_usd
 
             if exp_profit_usd is None or exp_profit_usd < min_abs or (roi_pct or 0) < min_roi:
-                logger.info(
-                    "Best opportunity SKIPPED — profit gate: %s (%.1f%% ROI) < min $%.2f / %.1f%%",
-                    f"${exp_profit_usd:.2f}" if exp_profit_usd is not None else "EV=null",
-                    roi_pct or 0, min_abs, min_roi,
+                skip_reason = (
+                    f"profit gate: {f'${exp_profit_usd:.2f}' if exp_profit_usd is not None else 'EV=null'} "
+                    f"({roi_pct or 0:.1f}% ROI) < min ${min_abs:.2f} / {min_roi:.1f}%"
                 )
+                logger.info("Best opportunity SKIPPED — %s", skip_reason)
                 results.skipped += 1
+                daily_stats.record_skip("profit_gate")
+                await auditor.log(
+                    db, "TRADE_SKIPPED", ticker=ticker, side=side,
+                    price_cents=price, size_usd=planned_size_usd,
+                    confidence=decision.get("confidence", 0), net_ev=net_ev,
+                    reason=skip_reason, result="SKIPPED",
+                )
             else:
                 daily_loss_db = await risk.get_daily_loss_from_db()
                 allowed, reason = risk.check_trade(
@@ -338,6 +434,13 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 if not allowed:
                     logger.info("Best opportunity BLOCKED by risk gate: %s", reason)
                     results.skipped += 1
+                    daily_stats.record_skip(f"risk_gate:{reason}")
+                    await auditor.log(
+                        db, "TRADE_SKIPPED", ticker=ticker, side=side,
+                        price_cents=price, size_usd=planned_size_usd,
+                        confidence=decision.get("confidence", 0), net_ev=net_ev,
+                        reason=f"risk_gate:{reason}", result="SKIPPED",
+                    )
                 else:
                     poly_str = ""
                     if poly_comp:
@@ -397,9 +500,22 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         results.total_positions += 1
                         results.total_capital_used += rec.get("total_cost", 0)
                         results.ai_trades += 1
+                        await auditor.log(
+                            db, "TRADE_PLACED", ticker=ticker, platform=platform,
+                            side=side, price_cents=price,
+                            size_usd=rec.get("total_cost", 0),
+                            confidence=decision.get("confidence", 0),
+                            net_ev=net_ev,
+                            reason=decision.get("reasoning", "")[:200],
+                        )
 
     except Exception as e:
         logger.error("Trade job crashed: %s", e, exc_info=True)
+        try:
+            from src.utils.daily_stats import stats as daily_stats
+            daily_stats.record_error(str(e)[:200])
+        except Exception:
+            pass
         try:
             from src.config.settings import settings as _s
             _err = str(e)[:500]

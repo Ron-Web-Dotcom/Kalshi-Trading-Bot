@@ -25,53 +25,45 @@ class MarketDataFetcher:
         We store them AS-IS (cents) so all downstream code works in cents.
         """
         logger.info("━━━ MARKET INGEST START ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        markets = await self.kalshi.get_all_markets(status="open")
-        logger.info(f"Fetched {len(markets)} open markets from Kalshi API")
+        # Cap at 1000 highest-volume markets — fetching 57k rows hangs the bot
+        markets = await self.kalshi.get_all_markets(status="open", max_markets=1000)
+        logger.info(f"Fetched {len(markets)} open markets from Kalshi API (capped at 1000 by volume)")
 
         now = datetime.now(timezone.utc).isoformat()
         stored = 0
         skipped = 0
 
+        # Batch insert for speed — one transaction instead of N round-trips
+        rows = []
         for m in markets:
             ticker = m.get("ticker", "")
             if not ticker:
                 skipped += 1
                 continue
+            rows.append((
+                ticker,
+                (m.get("title", "") or "")[:200],
+                m.get("category", ""),
+                "open",  # force 'open' — Kalshi API may return 'active' or other values
+                float(m.get("yes_bid") or 0),
+                float(m.get("yes_ask") or 0),
+                float(m.get("no_bid")  or 0),
+                float(m.get("no_ask")  or 0),
+                m.get("volume") or 0,
+                m.get("open_interest") or 0,
+                m.get("close_time", ""),
+                float(m.get("last_price") or 0),
+                now,
+            ))
 
-            # Prices are in cents (integers); keep them as cents
-            yes_bid = m.get("yes_bid") or 0
-            yes_ask = m.get("yes_ask") or 0
-            no_bid  = m.get("no_bid")  or 0
-            no_ask  = m.get("no_ask")  or 0
-            last_price = m.get("last_price") or 0
-
-            row = {
-                "ticker":        ticker,
-                "title":         m.get("title", "")[:200],
-                "category":      m.get("category", ""),
-                "status":        m.get("status", ""),
-                "yes_bid":       float(yes_bid),
-                "yes_ask":       float(yes_ask),
-                "no_bid":        float(no_bid),
-                "no_ask":        float(no_ask),
-                "volume":        m.get("volume") or 0,
-                "open_interest": m.get("open_interest") or 0,
-                "close_time":    m.get("close_time", ""),
-                "last_price":    float(last_price),
-                "fetched_at":    now,
-            }
-            await self.db.execute("""
+        if rows:
+            await self.db.executemany("""
                 INSERT OR REPLACE INTO markets
                 (ticker, title, category, status, yes_bid, yes_ask, no_bid, no_ask,
                  volume, open_interest, close_time, last_price, fetched_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, (
-                row["ticker"], row["title"], row["category"], row["status"],
-                row["yes_bid"], row["yes_ask"], row["no_bid"], row["no_ask"],
-                row["volume"], row["open_interest"], row["close_time"],
-                row["last_price"], row["fetched_at"],
-            ))
-            stored += 1
+            """, rows)
+            stored = len(rows)
 
         # Log a sample of top-volume markets for live visibility
         top = sorted(
@@ -102,6 +94,11 @@ class MarketDataFetcher:
                 f"UPDATE markets SET status='closed' WHERE status='open' "
                 f"AND ticker NOT IN ({placeholders})",
                 tuple(fetched_tickers),
+        # Mark stale markets as closed using timestamp instead of NOT IN (avoids SQLite 999-param limit)
+        if markets:
+            await self.db.execute(
+                "UPDATE markets SET status='closed' WHERE status='open' AND fetched_at < ? AND platform='kalshi'",
+                (now,)
             )
 
         logger.info(
@@ -119,6 +116,9 @@ class MarketDataFetcher:
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).isoformat()
         query  = "SELECT * FROM markets WHERE status='open' AND fetched_at >= ?"
         params: tuple = (cutoff,)
+        """Return open markets from DB. Prices in cents."""
+        query  = "SELECT * FROM markets WHERE status='open' OR status=''"
+        params: tuple = ()
         if min_volume > 0:
             query  += " AND volume >= ?"
             params += (min_volume,)
@@ -139,6 +139,7 @@ class MarketDataFetcher:
             fallback_query += " ORDER BY volume DESC"
             rows = await self.db.fetchall(fallback_query, fallback_params)
 
+        logger.info("get_cached_markets: %d rows (min_vol=%g)", len(rows), min_volume)
         return rows
 
     async def run_continuous(self, interval_seconds: int = 300):

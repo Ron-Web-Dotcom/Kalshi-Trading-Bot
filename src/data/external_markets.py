@@ -146,6 +146,8 @@ class ExternalMarketComparator:
         await self._ensure_poly()
         results = []
 
+        from src.utils.daily_stats import stats as daily_stats
+
         for km in kalshi_markets:
             ticker      = km.get("ticker", "")
             title       = km.get("title", "")
@@ -154,7 +156,7 @@ class ExternalMarketComparator:
             if not kalshi_yes or not kalshi_no:
                 continue
 
-            match = self._find_best_match(title, self._poly_cache)
+            match, best_jaccard, best_overlap = self._find_best_match(title, self._poly_cache)
             if not match:
                 continue
 
@@ -200,12 +202,35 @@ class ExternalMarketComparator:
             }
             results.append(comp)
 
-            if diff_pct >= 3.0 and net_edge > 0:
-                logger.info(
-                    "POLY MATCH %-28s | K_YES=%g¢ P_YES=%g¢ | "
-                    "Buy %s on Kalshi | net_edge=%.1f¢ | diff=%.1f%%",
-                    ticker, kalshi_yes, poly_yes,
-                    side.upper(), net_edge, diff_pct,
+            # Determine suspicion flags
+            suspicious = (
+                best_jaccard < 0.30
+                or best_overlap < 4
+                or abs(kalshi_yes - poly_yes) > 40
+            )
+
+            # Record in daily stats tracker
+            daily_stats.record_poly_match(
+                ticker=ticker,
+                jaccard=best_jaccard,
+                net_edge=net_edge,
+                suspicious=suspicious,
+            )
+
+            # Log EVERY match at INFO level; suspicious ones get an extra WARNING
+            conf_tag = "[LOW-CONF ⚠️]" if suspicious else "[GOOD]"
+            logger.info(
+                "MATCH  %-24s  ←→  %-30s | K_YES=%g¢ P_YES=%g¢"
+                " | jaccard=%.2f | net_edge=%+.1f¢  %s",
+                ticker, match["slug"] or match["question"][:30],
+                kalshi_yes, poly_yes, best_jaccard, net_edge, conf_tag,
+            )
+            if suspicious:
+                logger.warning(
+                    "[SUSPICIOUS MATCH] %s ←→ %s | jaccard=%.2f overlap=%d"
+                    " K_YES=%.0f¢ P_YES=%.0f¢ | Review before trading",
+                    ticker, match["slug"] or match["question"][:30],
+                    best_jaccard, best_overlap, kalshi_yes, poly_yes,
                 )
 
         results.sort(key=lambda x: x["net_edge_cents"], reverse=True)
@@ -216,15 +241,24 @@ class ExternalMarketComparator:
         )
         return results
 
-    def _find_best_match(self, kalshi_title: str, poly_markets: List[Dict]) -> Optional[Dict]:
-        """Find the Polymarket market most similar to a Kalshi question."""
-        best, best_jaccard = None, 0.0
+    def _find_best_match(
+        self, kalshi_title: str, poly_markets: List[Dict]
+    ) -> Tuple[Optional[Dict], float, int]:
+        """
+        Find the Polymarket market most similar to a Kalshi question.
+
+        Returns (match, best_jaccard, best_overlap).
+        match is None when no candidate clears the minimum thresholds.
+        """
+        best, best_jaccard, best_overlap = None, 0.0, 0
         for pm in poly_markets:
             overlap, jaccard = _keyword_overlap(kalshi_title, pm["question"])
             if overlap >= 3 and jaccard > best_jaccard:
-                best, best_jaccard = pm, jaccard
+                best, best_jaccard, best_overlap = pm, jaccard, overlap
         # Require at least 20% Jaccard similarity to avoid spurious matches
-        return best if best_jaccard >= 0.20 else None
+        if best_jaccard < 0.20:
+            return None, best_jaccard, best_overlap
+        return best, best_jaccard, best_overlap
 
     async def close(self):
         await self.polymarket.close()

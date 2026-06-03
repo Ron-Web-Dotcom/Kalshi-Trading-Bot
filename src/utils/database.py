@@ -122,6 +122,23 @@ class DatabaseManager:
                         pnl REAL DEFAULT 0,
                         ai_cost REAL DEFAULT 0
                     );
+
+                    CREATE TABLE IF NOT EXISTS audit_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        event_type TEXT,
+                        ticker TEXT,
+                        platform TEXT,
+                        side TEXT,
+                        price_cents REAL,
+                        size_usd REAL,
+                        confidence REAL,
+                        net_ev REAL,
+                        reason TEXT,
+                        result TEXT,
+                        pnl REAL,
+                        operator TEXT DEFAULT 'bot',
+                        logged_at TEXT
+                    );
                 """)
                 await db.commit()
                 # Idempotent migrations for existing databases
@@ -143,6 +160,12 @@ class DatabaseManager:
     async def execute(self, query: str, params: tuple = ()) -> None:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(query, params)
+            await db.commit()
+
+    async def executemany(self, query: str, params_list: list) -> None:
+        """Batch execute — much faster than looping execute() for bulk inserts."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.executemany(query, params_list)
             await db.commit()
 
     async def fetchall(self, query: str, params: tuple = ()) -> List[Dict]:

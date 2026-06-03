@@ -392,6 +392,27 @@ class DiscordAlerter:
         """Disabled — individual near-miss alerts replaced by hourly near_miss_digest."""
         return
 
+    async def near_miss(self, ticker: str, side: str, confidence: float,
+                        min_confidence: float, net_ev: Optional[float],
+                        true_prob: Optional[float], reasoning: str,
+                        paper: bool = True) -> None:
+        """Disabled — near-miss alerts create too much noise in paper mode."""
+        return
+        mode_tag = "📝 PAPER" if paper else "💰 LIVE"
+        ev_str   = f"{net_ev:+.1f}¢" if net_ev is not None else "n/a"
+        tp_str   = f"{true_prob:.0f}%" if true_prob is not None else "n/a"
+        gap      = min_confidence - confidence
+        payload  = self._embed(
+            title=f"🟡 {mode_tag} Near-Miss — {ticker}",
+            description=(
+                f"AI almost traded `{ticker}` ({side.upper()}) but confidence fell short.\n\n"
+                f"**Confidence:** {confidence:.0f}%  _(need {min_confidence:.0f}% — gap: {gap:.0f}%)_\n"
+                f"**Net EV:** {ev_str}  |  **P(YES):** {tp_str}\n\n"
+                f"_{reasoning[:300]}_"
+            ),
+            color=0xFFAA00,
+        )
+        await self._post(payload)
 
     async def near_miss_digest(self, paper: bool = True) -> None:
         """Send a single hourly near-miss digest — top BUY signals that fell short."""
@@ -406,6 +427,7 @@ class DiscordAlerter:
             tp_str = f" | P(YES)={nm['true_prob']:.0f}%" if nm.get("true_prob") is not None else ""
             plat   = "🟣 Polymarket" if nm.get("platform") == "polymarket" else "🟦 Kalshi"
             title  = self._display_ticker(nm.get("ticker", ""), nm.get("title", "") or "")[:70]
+            title  = (nm.get("title") or nm["ticker"])[:70]
             reason = (nm.get("reasoning") or "")[:150]
             lines.append(
                 f"**#{i} — {plat}**\n"
@@ -448,6 +470,7 @@ class DiscordAlerter:
             platform  = "🟣" if p.get("platform") == "polymarket" else "🟦"
             lines.append(
                 f"{icon} {platform} **{label}** | {side} | {contracts} contracts\n"
+                f"{icon} {platform} **{ticker[:20]}** | {side} | {contracts} contracts\n"
                 f"   Entry: **{avg_price:.0f}¢** → Now: **{cur_price:.0f}¢** "
                 f"({pct_sign}{pct:.1f}%) | PnL: **${pnl_sign}{pnl:.2f}**"
             )
@@ -555,6 +578,32 @@ class DiscordAlerter:
         pnl_sign = "+" if paper_pnl >= 0 else ""
         color    = 0x5865F2
 
+        """Send hourly scan summary — bot heartbeat + top market candidates."""
+        now_utc  = datetime.now(timezone.utc)
+        hhmm     = now_utc.strftime("%H:%M")
+        pnl_sign = "+" if paper_pnl >= 0 else ""
+        color    = 0x5865F2  # Discord blurple — neutral heartbeat colour
+
+        # Build watching field value
+        if top_candidates:
+            lines = []
+            for i, c in enumerate(top_candidates[:3], 1):
+                ticker   = c.get("ticker", "?")
+                title    = (c.get("title") or "")[:40]
+                yes_ask  = c.get("yes_ask", 0)
+                no_ask   = c.get("no_ask",  0)
+                volume   = c.get("volume",  0)
+                platform = c.get("platform", "kalshi")
+                plat_tag = "🟣" if platform == "polymarket" else "🟦"
+                lines.append(
+                    f"{i}. {plat_tag} `{ticker}` — {title}\n"
+                    f"   YES {yes_ask:.0f}¢ | NO {no_ask:.0f}¢ | vol {volume:,}"
+                )
+            watching_value = "\n".join(lines)
+        else:
+            watching_value = "_No candidates above threshold_"
+
+        # Win rate display
         if total_closed == 0:
             record_str = "No trades yet — building track record..."
             wr_emoji   = "🆕"
@@ -565,11 +614,18 @@ class DiscordAlerter:
                 f"**{win_rate:.0f}% win rate** — "
                 f"{total_wins}W / {total_losses}L / {total_closed} total | "
                 f"PnL: **${all_pnl_sign}{total_pnl:.2f}**"
+            wr_emoji   = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
+            all_pnl_sign = "+" if total_pnl >= 0 else ""
+            record_str = (
+                f"**{win_rate:.0f}% win rate** — "
+                f"{total_wins}W / {total_losses}L / {total_closed} total | "
+                f"All-time PnL: **${all_pnl_sign}{total_pnl:.2f}**"
             )
 
         fields = [
             {
                 "name":   f"{wr_emoji} Track Record",
+                "name":   f"{wr_emoji} Bot Track Record (Can I Trust It?)",
                 "value":  record_str,
                 "inline": False,
             },
@@ -589,6 +645,22 @@ class DiscordAlerter:
             },
             {
                 "name":   "⏱ Next Scan",
+                "name":   "Markets Scanned",
+                "value":  f"{kalshi_count} Kalshi + {poly_count} Polymarket = **{markets_scanned} total**",
+                "inline": False,
+            },
+            {
+                "name":   "Open Positions",
+                "value":  f"{open_positions} | Today's PnL: **${pnl_sign}{paper_pnl:.2f}**",
+                "inline": False,
+            },
+            {
+                "name":   "👀 Watching — Top Candidates",
+                "value":  watching_value,
+                "inline": False,
+            },
+            {
+                "name":   "Next Scan",
                 "value":  "in ~60s",
                 "inline": False,
             },
@@ -610,6 +682,48 @@ class DiscordAlerter:
             fields.insert(-1, {
                 "name":   "👀 Watching (Top 2 Kalshi + Top 2 Polymarket)",
                 "value":  watching,
+        # Near-Misses — top BUY signals that fell just short, deduplicated
+        try:
+            from src.utils.daily_stats import stats as _ds
+            near_misses = _ds.top_near_misses()
+            if near_misses:
+                nm_lines = []
+                for nm in near_misses:
+                    ev_str   = f" EV {nm['net_ev']:+.1f}¢" if nm.get("net_ev") is not None else ""
+                    tp_str   = f" P(YES)={nm['true_prob']:.0f}%" if nm.get("true_prob") is not None else ""
+                    title    = (nm.get("title") or nm["ticker"])[:60]
+                    platform = "🟣" if nm.get("platform") == "polymarket" else "🟦"
+                    nm_lines.append(
+                        f"{platform} **{nm['confidence']:.0f}% conf**{ev_str}{tp_str}\n"
+                        f"_{title}_\n"
+                        f"{(nm.get('reasoning') or '')[:120]}"
+                    )
+                fields.insert(-1, {
+                    "name":   "🟡 Today's Best Near-Misses (AI wanted BUY, conf fell short)",
+                    "value":  "\n\n".join(nm_lines)[:900],
+                    "inline": False,
+                })
+        except Exception:
+            pass
+
+        # Best Pick of the Day — highest-confidence AI evaluation even if not traded
+        if best_pick:
+            bp_action = best_pick.get("action", "HOLD")
+            bp_conf   = best_pick.get("confidence", 0)
+            bp_ev     = best_pick.get("net_ev")
+            bp_ev_str = f" | EV {bp_ev:+.1f}¢" if bp_ev is not None else ""
+            bp_side   = (best_pick.get("side") or "yes").upper()
+            bp_reason = (best_pick.get("reasoning") or "")[:250]
+            bp_title  = (best_pick.get("title") or best_pick.get("ticker", "?"))[:80]
+            bp_ticker = best_pick.get("ticker", "?")
+            traded_note = "" if bp_action == "BUY" else "\n_Not traded — shown for visibility only._"
+            fields.insert(-1, {
+                "name": "🧠 Best Pick of the Day (Highest AI Confidence)",
+                "value": (
+                    f"**{bp_ticker}** — BUY {bp_side} | Confidence: **{bp_conf:.0f}%**{bp_ev_str}\n"
+                    f"_{bp_title}_\n\n"
+                    f"{bp_reason}{traded_note}"
+                ),
                 "inline": False,
             })
 
@@ -629,6 +743,7 @@ class DiscordAlerter:
                 )
                 title = self._display_ticker(t.get("ticker", ""), t.get("title", "") or "")
                 lines.append(f"{icon} **{title}** {(t.get('side') or '').upper()} **${sign}{t_pnl:.2f}** — {label}")
+                lines.append(f"{icon} `{t.get('ticker','')}` {(t.get('side') or '').upper()} **${sign}{t_pnl:.2f}** — {label}")
             fields.insert(-1, {
                 "name":   "📋 Today's Trade Results",
                 "value":  "\n".join(lines),
