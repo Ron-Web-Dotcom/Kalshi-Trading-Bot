@@ -400,6 +400,73 @@ class DiscordAlerter:
         )
         await self._post(payload)
 
+    async def near_miss_digest(self, paper: bool = True) -> None:
+        """Send a single hourly near-miss digest — top BUY signals that fell short."""
+        from src.utils.daily_stats import stats as _ds
+        misses = _ds.top_near_misses()
+        if not misses:
+            return
+        mode_tag = "📝 PAPER" if paper else "💰 LIVE"
+        lines = []
+        for i, nm in enumerate(misses, 1):
+            ev_str = f" | EV {nm['net_ev']:+.1f}¢" if nm.get("net_ev") is not None else ""
+            tp_str = f" | P(YES)={nm['true_prob']:.0f}%" if nm.get("true_prob") is not None else ""
+            plat   = "🟣 Polymarket" if nm.get("platform") == "polymarket" else "🟦 Kalshi"
+            title  = (nm.get("title") or nm["ticker"])[:70]
+            reason = (nm.get("reasoning") or "")[:150]
+            lines.append(
+                f"**#{i} — {plat}**\n"
+                f"_{title}_\n"
+                f"Conf: **{nm['confidence']:.0f}%** (need 50%){ev_str}{tp_str}\n"
+                f"BUY **{nm['side'].upper()}** — _{reason}_"
+            )
+        payload = self._embed(
+            title=f"🟡 {mode_tag} Near-Miss Digest — Top Signals That Didn't Trade",
+            description=(
+                "AI found edge but confidence fell short. "
+                "These are the best opportunities missed this hour.\n\n"
+                + "\n\n─────────────────\n\n".join(lines)
+            ),
+            color=0xFFAA00,
+        )
+        await self._post(payload)
+
+    async def position_monitor(self, positions: list, paper: bool = True) -> None:
+        """Send hourly active position monitor — one message showing all open trades."""
+        if not positions:
+            return
+        mode_tag = "📝 PAPER" if paper else "💰 LIVE"
+        lines = []
+        total_pnl = 0.0
+        for p in positions:
+            ticker    = p.get("ticker", "?")
+            side      = (p.get("side") or "yes").upper()
+            contracts = p.get("contracts", 0)
+            avg_price = float(p.get("avg_price") or 0)
+            cur_price = float(p.get("current_price") or avg_price)
+            pnl       = float(p.get("pnl") or 0)
+            total_pnl += pnl
+            pnl_sign  = "+" if pnl >= 0 else ""
+            pct       = ((cur_price - avg_price) / avg_price * 100) if avg_price else 0
+            pct_sign  = "+" if pct >= 0 else ""
+            icon      = "📈" if pnl >= 0 else "📉"
+            platform  = "🟣" if p.get("platform") == "polymarket" else "🟦"
+            lines.append(
+                f"{icon} {platform} **{ticker[:20]}** | {side} | {contracts} contracts\n"
+                f"   Entry: **{avg_price:.0f}¢** → Now: **{cur_price:.0f}¢** "
+                f"({pct_sign}{pct:.1f}%) | PnL: **${pnl_sign}{pnl:.2f}**"
+            )
+        total_sign = "+" if total_pnl >= 0 else ""
+        payload = self._embed(
+            title=f"📊 {mode_tag} Active Position Monitor — {len(positions)} Open Trade(s)",
+            description=(
+                "\n\n".join(lines)
+                + f"\n\n**Total Unrealised PnL: ${total_sign}{total_pnl:.2f}**"
+            ),
+            color=0x00CC88 if total_pnl >= 0 else 0xFF4444,
+        )
+        await self._post(payload)
+
     async def ai_reeval_hold(self, ticker: str, side: str, pct_change: float,
                               reasoning: str, paper: bool = True) -> None:
         """Alert when AI re-evaluates a position and decides to HOLD (optional — only if ALERT_ON_SIGNAL)."""

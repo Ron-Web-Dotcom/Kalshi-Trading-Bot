@@ -272,6 +272,28 @@ class TradingBot:
                     )
                 except Exception as e:
                     logger.error("Hourly heartbeat error: %s", e)
+
+                # ── Near-miss digest (separate message) ───────────────────
+                try:
+                    await discord.near_miss_digest(
+                        paper=not settings.trading.live_trading_enabled
+                    )
+                except Exception:
+                    pass
+
+                # ── Active position monitor (separate message) ────────────
+                try:
+                    open_pos = await self.db.fetchall(
+                        "SELECT * FROM positions WHERE status='open' ORDER BY opened_at DESC"
+                    )
+                    if open_pos:
+                        await discord.position_monitor(
+                            positions=open_pos,
+                            paper=not settings.trading.live_trading_enabled,
+                        )
+                except Exception:
+                    pass
+
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
 
         async def daily_summary_loop():
