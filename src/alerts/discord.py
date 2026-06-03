@@ -382,9 +382,8 @@ class DiscordAlerter:
                         min_confidence: float, net_ev: Optional[float],
                         true_prob: Optional[float], reasoning: str,
                         paper: bool = True) -> None:
-        """Alert when AI almost pulls the trigger but confidence fell just short."""
-        if not self.cfg.alert_on_signal:
-            return
+        """Disabled — near-miss alerts create too much noise in paper mode."""
+        return
         mode_tag = "📝 PAPER" if paper else "💰 LIVE"
         ev_str   = f"{net_ev:+.1f}¢" if net_ev is not None else "n/a"
         tp_str   = f"{true_prob:.0f}%" if true_prob is not None else "n/a"
