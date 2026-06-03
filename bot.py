@@ -247,12 +247,13 @@ class TradingBot:
                         ]
                     kal_cand = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform FROM markets "
-                        "WHERE yes_ask > 5 AND yes_ask < 95 "
-                        "AND (platform='kalshi' OR platform IS NULL) ORDER BY volume DESC LIMIT 2"
+                        "WHERE (yes_ask > 1 AND yes_ask < 99) "
+                        "AND (platform='kalshi' OR platform IS NULL) "
+                        "AND volume > 0 ORDER BY volume DESC LIMIT 2"
                     )
                     poly_cand = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform FROM markets "
-                        "WHERE yes_ask > 5 AND yes_ask < 95 "
+                        "WHERE (yes_ask > 1 AND yes_ask < 99) "
                         "AND platform='polymarket' ORDER BY volume DESC LIMIT 2"
                     )
                     top_candidates = _cand_rows(kal_cand) + _cand_rows(poly_cand)
@@ -342,16 +343,20 @@ class TradingBot:
                     today       = datetime.now(timezone.utc).date().isoformat()
                     _paper_flag = 0 if settings.trading.live_trading_enabled else 1
 
-                    open_pos = await self.db.fetchall(
-                        "SELECT * FROM positions WHERE status='open' ORDER BY opened_at DESC"
+                    _pos_rows = await self.db.fetchall(
+                        "SELECT p.*, COALESCE(NULLIF(p.title,''), m.title, '') as display_title "
+                        "FROM positions p LEFT JOIN markets m ON p.ticker = m.ticker "
+                        "WHERE p.status='open' ORDER BY p.opened_at DESC"
                     )
-                    open_pos = [dict(r) for r in (open_pos or [])]
+                    open_pos = [
+                        {**dict(r), "title": r.get("display_title") or r.get("title") or ""}
+                        for r in (_pos_rows or [])
+                    ]
 
-                    new_pos = await self.db.fetchall(
-                        "SELECT * FROM positions WHERE status='open' AND opened_at >= ? ORDER BY opened_at DESC",
-                        (last_summary_at,)
-                    )
-                    new_pos = [dict(r) for r in (new_pos or [])]
+                    new_pos = [
+                        p for p in open_pos
+                        if (p.get("opened_at") or "") >= last_summary_at
+                    ]
 
                     pnl_row = await self.db.fetchone(
                         "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "

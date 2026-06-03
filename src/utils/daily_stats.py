@@ -62,14 +62,21 @@ class DailyStats:
         self.all_evaluations = self.all_evaluations[:20]
 
     def best_pick(self) -> Optional[Dict]:
-        """Return the highest-confidence evaluation of the day (any platform)."""
+        """Return the highest-confidence BUY with positive EV today (any platform)."""
+        for e in self.all_evaluations:
+            if e.get("action", "").upper() == "BUY" and (e.get("net_ev") or 0) > 0:
+                return e
         return self.all_evaluations[0] if self.all_evaluations else None
 
     def best_pick_by_platform(self) -> Dict[str, Optional[Dict]]:
-        """Return the best pick per platform — Kalshi and Polymarket each get a fair slot."""
-        kal  = next((e for e in self.all_evaluations if e.get("platform", "kalshi") != "polymarket"), None)
-        poly = next((e for e in self.all_evaluations if e.get("platform") == "polymarket"), None)
-        return {"kalshi": kal, "polymarket": poly}
+        """Return best BUY+positive-EV pick per platform — fair slot for Kalshi and Polymarket."""
+        def _best(evals):
+            # Prefer BUY with positive EV; fall back to highest confidence
+            buys = [e for e in evals if e.get("action","").upper() == "BUY" and (e.get("net_ev") or 0) > 0]
+            return buys[0] if buys else (evals[0] if evals else None)
+        kal_evals  = [e for e in self.all_evaluations if e.get("platform", "kalshi") != "polymarket"]
+        poly_evals = [e for e in self.all_evaluations if e.get("platform") == "polymarket"]
+        return {"kalshi": _best(kal_evals), "polymarket": _best(poly_evals)}
 
     def record_near_miss(
         self,
