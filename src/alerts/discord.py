@@ -414,7 +414,6 @@ class DiscordAlerter:
             platform  = "🟣" if p.get("platform") == "polymarket" else "🟦"
             lines.append(
                 f"{icon} {platform} **{label}** | {side} | {contracts} contracts\n"
-                f"{icon} {platform} **{ticker[:20]}** | {side} | {contracts} contracts\n"
                 f"   Entry: **{avg_price:.0f}¢** → Now: **{cur_price:.0f}¢** "
                 f"({pct_sign}{pct:.1f}%) | PnL: **${pnl_sign}{pnl:.2f}**"
             )
