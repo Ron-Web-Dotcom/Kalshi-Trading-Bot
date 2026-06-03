@@ -27,11 +27,13 @@ class RiskManager:
         if not self.db:
             return self._daily_loss
         try:
+            from src.config.settings import settings
+            paper_flag = 0 if settings.trading.live_trading_enabled else 1
             today = date.today().isoformat()
             row = await self.db.fetchone(
                 "SELECT COALESCE(SUM(ABS(pnl)),0) AS loss FROM trade_logs "
-                "WHERE pnl < 0 AND executed_at >= ?",
-                (today + "T00:00:00",)
+                "WHERE pnl < 0 AND paper_trade=? AND executed_at >= ?",
+                (paper_flag, today + "T00:00:00",)
             )
             return float((row or {}).get("loss", 0))
         except Exception:
@@ -151,13 +153,16 @@ class RiskManager:
         if db is None:
             return False, ""
 
-        # Check 1: daily loss total
+        # Check 1: daily loss total — join trade_logs to filter by paper/live flag
         try:
+            paper_flag = 0 if settings.trading.live_trading_enabled else 1
             today = __import__("datetime").date.today().isoformat()
             row = await db.fetchone(
-                "SELECT COALESCE(SUM(pnl), 0) AS total_pnl FROM positions "
-                "WHERE status='closed' AND closed_at >= ?",
-                (today + "T00:00:00",),
+                "SELECT COALESCE(SUM(p.pnl), 0) AS total_pnl "
+                "FROM positions p "
+                "JOIN trade_logs t ON t.ticker = p.ticker AND t.paper_trade = ? "
+                "WHERE p.status='closed' AND p.closed_at >= ?",
+                (paper_flag, today + "T00:00:00"),
             )
             total_pnl = float((row or {}).get("total_pnl", 0) or 0)
             daily_loss = abs(total_pnl) if total_pnl < 0 else 0

@@ -24,11 +24,14 @@ class AutoScaler:
         self._last_scale_pnl = 0.0
 
     def update(self, new_pnl: float) -> float:
-        """Update cumulative PnL and return new trade size."""
+        """
+        Update cumulative PnL and return new trade size.
+        new_pnl is the ALL-TIME total PnL (not a delta) — pass sum of all closed pnl.
+        """
         if not self.enabled:
             return self.base_size
 
-        self._cumulative_pnl = new_pnl
+        self._cumulative_pnl = new_pnl   # snapshot of total, not additive
         delta = new_pnl - self._last_scale_pnl
 
         if delta >= self.scale_up_milestone:

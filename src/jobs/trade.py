@@ -99,12 +99,29 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         await auditor.log(db, "LOCKOUT", reason=lockout_reason)
         return results
 
-    # ── Max open positions check ──────────────────────────────────────────
-    open_count_row = await db.fetchone("SELECT COUNT(*) as n FROM positions WHERE status='open'")
-    open_count = (open_count_row or {}).get("n", 0)
+    # ── Open positions: log them + check cap ─────────────────────────────
+    open_positions_rows = await db.fetchall(
+        "SELECT ticker, side, contracts, avg_price, current_price, pnl, platform, title "
+        "FROM positions WHERE status='open'"
+    )
+    open_count = len(open_positions_rows)
+    if open_count > 0:
+        logger.info("── Open Positions (%d) ──────────────────────────────────────────", open_count)
+        for _p in open_positions_rows:
+            _pnl = _p.get("pnl") or 0
+            _cur = _p.get("current_price") or _p.get("avg_price") or 0
+            _ent = _p.get("avg_price") or 0
+            _pct = ((_cur - _ent) / _ent * 100) if _ent else 0
+            _lbl = (_p.get("title") or _p.get("ticker") or "?")[:40]
+            logger.info(
+                "  %-40s  %s  %dx  entry=%.0f¢  now=%.0f¢  (%+.1f%%)  PnL=%+.2f",
+                _lbl, (_p.get("side") or "?").upper(), _p.get("contracts", 0),
+                _ent, _cur, _pct, _pnl,
+            )
+
     if open_count >= settings.trading.max_open_positions:
         logger.info(
-            "Max open positions (%d) reached — skipping new trades this cycle",
+            "Max open positions (%d) reached — skipping new trade scan this cycle",
             open_count,
         )
         return results
@@ -221,6 +238,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                                 net_edge=net,
                                 kalshi_price=yes_p,
                                 poly_price=no_p,
+                                market_title=market.get("title", "") or market.get("question", ""),
                             )
 
             else:
@@ -291,35 +309,18 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                             side=side,
                             kalshi_price=sig["kalshi_price"],
                             poly_price=sig["poly_price"],
+                            market_title=market.get("title", "") or market.get("question", ""),
                         )
 
-        # ── 5. Daily trade gate — sit out if already traded today ────────────────
-        from datetime import date as _date
-        today = _date.today().isoformat()
-        paper_flag = 0 if live_mode else 1   # live trades recorded as paper_trade=0
-        trades_today_row = await db.fetchone(
-            "SELECT COUNT(*) AS n FROM trade_logs WHERE paper_trade=? AND executed_at >= ?",
-            (paper_flag, today + "T00:00:00",)
-        )
-        trades_today = (trades_today_row or {}).get("n", 0)
-        max_per_day  = settings.trading.max_trades_per_day
-
-        if trades_today >= max_per_day and trades_this_cycle == 0:
-            logger.info(
-                "Daily trade limit reached (%d/%d today) — sitting out this cycle",
-                trades_today, max_per_day,
-            )
-            return results
-
-        # ── 6. Fetch Polymarket candidates + store in DB ──────────────────────────
+        # ── 5. Fetch Polymarket candidates + store in DB (always — needed for position tracking) ──
         poly_markets = []
         if poly_enabled:
             try:
-                raw_poly = await poly_client.get_markets(limit=200)
+                raw_poly = await poly_client.get_markets(limit=1000)
                 now_ts   = __import__("datetime").datetime.now(
                     __import__("datetime").timezone.utc).isoformat()
 
-                # Persist Polymarket markets to DB so heartbeat can count them
+                # Persist Polymarket markets to DB so tracker can read live prices
                 for pm in raw_poly:
                     try:
                         await db.execute("""
@@ -350,24 +351,76 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 logger.warning("Polymarket market load failed: %s", pe)
                 poly_markets = []
 
+        # ── 6. Daily trade gate — sit out if already traded today ────────────────
+        from datetime import date as _date
+        today = _date.today().isoformat()
+        paper_flag = 0 if live_mode else 1   # live trades recorded as paper_trade=0
+        trades_today_row = await db.fetchone(
+            "SELECT COUNT(*) AS n FROM trade_logs WHERE paper_trade=? AND executed_at >= ?",
+            (paper_flag, today + "T00:00:00",)
+        )
+        trades_today = (trades_today_row or {}).get("n", 0)
+        max_per_day  = settings.trading.max_trades_per_day
+
+        if trades_today >= max_per_day and trades_this_cycle == 0:
+            logger.info(
+                "Daily trade limit reached (%d/%d today) — sitting out this cycle",
+                trades_today, max_per_day,
+            )
+            return results
+
         # ── 7. Best-opportunity hunt across BOTH platforms ────────────────────
         from src.strategy.opportunity import OpportunityHunter
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
 
         arb_tickers = {s["ticker"] for s in all_signals}
         open_positions = await db.fetchall("SELECT ticker FROM positions WHERE status='open'")
         open_tickers = {p["ticker"] for p in (open_positions or [])}
-        kalshi_candidates = [
+        now_utc = _dt.now(_tz.utc)
+
+        def _closes_within(m, hours):
+            ct = m.get("close_time", "")
+            if not ct:
+                return False
+            try:
+                close_dt = _dt.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if close_dt.tzinfo is None:
+                    close_dt = close_dt.replace(tzinfo=_tz.utc)
+                return 0 < (close_dt - now_utc).total_seconds() / 3600 <= hours
+            except Exception:
+                return False
+
+        def _tradeable_price(m):
+            """Return the best available price for a market — ask first, last_price fallback."""
+            ask = m.get("yes_ask", 0) or 0
+            return ask if ask > 0 else (m.get("last_price", 0) or 0)
+
+        # Long-term pool: higher-volume markets (any close time)
+        long_term = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
             and m.get("ticker") not in open_tickers
-            and 5 < m.get("yes_ask", 0) < 95
+            and 2 < _tradeable_price(m) < 98
             and m.get("volume", 0) >= min_vol
-            and m.get("yes_ask", 0) > 1
+            and (m.get("title") or "")
         ][:max_scan]
 
+        # Short-duration pool: closes within 24h — any volume, for 1min/5min/1hr/daily markets
+        short_term = [
+            m for m in markets
+            if m.get("ticker") not in arb_tickers
+            and m.get("ticker") not in open_tickers
+            and 2 < _tradeable_price(m) < 98
+            and m.get("ticker") not in {x.get("ticker") for x in long_term}
+            and _closes_within(m, 24)
+            and (m.get("title") or "")
+        ][:max_scan // 2]
+
+        kalshi_candidates = long_term + short_term
+
         logger.info(
-            "── Best-Opportunity Hunt: %d Kalshi + %d Polymarket candidates ─",
-            len(kalshi_candidates), len(poly_markets),
+            "── Best-Opportunity Hunt: %d Kalshi (%d long-term + %d short-duration) + %d Polymarket ─",
+            len(kalshi_candidates), len(long_term), len(short_term), len(poly_markets),
         )
 
         hunter = OpportunityHunter(db=db)
@@ -380,18 +433,13 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         )
 
         if not best:
-            # Only post "no opportunity" once per hour — not every 60s cycle (too spammy)
-            try:
-                import time as _time
-                _now = _time.time()
-                _last = getattr(run_trading_job, "_last_no_opp_ts", 0)
-                if _now - _last >= 3600:
-                    run_trading_job._last_no_opp_ts = _now
-                    await discord.no_opportunity(
-                        markets_scanned=len(kalshi_candidates) + len(poly_markets), paper=not live_mode
-                    )
-            except Exception:
-                pass
+            # Log reason; no_opportunity() Discord method is disabled (returns immediately)
+            # — covered by the hourly heartbeat instead. Also suppress if positions are open.
+            logger.info(
+                "No best opportunity found across %d Kalshi + %d Polymarket candidates "
+                "(open_positions=%d)",
+                len(kalshi_candidates), len(poly_markets), open_count,
+            )
 
         if best and trades_this_cycle < max_trades:
             market   = best["market"]
@@ -456,28 +504,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         net_ev or 0, exp_profit_usd or 0, poly_str,
                     )
 
-                    # Discord: notify we found the best opportunity before placing
-                    platform = best.get("platform", "kalshi")
-                    try:
-                        await discord.best_opportunity_found(
-                            ticker=ticker,
-                            side=side,
-                            price_cents=price,
-                            confidence=decision.get("confidence", 0),
-                            net_ev=net_ev,
-                            exp_profit=exp_profit_usd,
-                            score=best["score"],
-                            reasoning=decision.get("reasoning", ""),
-                            poly_yes=poly_comp["poly_yes"] if poly_comp else None,
-                            poly_no=poly_comp["poly_no"]  if poly_comp else None,
-                            market_title=market.get("title", ""),
-                            paper=not live_mode,
-                            platform=platform,
-                        )
-                    except Exception:
-                        pass
-
-                    # Route to the correct platform's trader
+                    # Route to the correct platform's trader (single Discord alert comes from execute())
                     platform = best.get("platform", "kalshi")
                     active_trader = kalshi_trader if platform == "kalshi" else poly_trader
 

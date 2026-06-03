@@ -67,21 +67,27 @@ async def get_crypto_price(coin_keyword: str) -> Optional[Dict]:
         f"?ids={cid}&vs_currencies=usd"
         f"&include_24hr_change=true&include_7d_change=true"
     )
-    try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            r = await client.get(url)
-            r.raise_for_status()
-            data = r.json().get(cid, {})
-            return {
-                "asset":      coin_keyword.upper(),
-                "price_usd":  data.get("usd"),
-                "change_24h": data.get("usd_24h_change"),
-                "change_7d":  data.get("usd_7d_change"),
-                "source":     "coingecko",
-            }
-    except Exception as e:
-        logger.debug("CoinGecko fetch failed for %s: %s", coin_keyword, e)
-        return None
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                r = await client.get(url)
+                r.raise_for_status()
+                data = r.json().get(cid, {})
+                price = data.get("usd")
+                if price is None:
+                    continue
+                return {
+                    "asset":      coin_keyword.upper(),
+                    "price_usd":  price,
+                    "change_24h": data.get("usd_24h_change"),
+                    "change_7d":  data.get("usd_7d_change"),
+                    "source":     "coingecko",
+                }
+        except Exception as e:
+            logger.debug("CoinGecko fetch failed for %s (attempt %d): %s", coin_keyword, attempt + 1, e)
+            if attempt == 0:
+                await asyncio.sleep(1)
+    return None
 
 
 async def get_equity_price(symbol_keyword: str) -> Optional[Dict]:

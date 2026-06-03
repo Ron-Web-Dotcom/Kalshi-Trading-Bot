@@ -25,9 +25,19 @@ class MarketDataFetcher:
         We store them AS-IS (cents) so all downstream code works in cents.
         """
         logger.info("━━━ MARKET INGEST START ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        # Cap at 1000 highest-volume markets — fetching 57k rows hangs the bot
-        markets = await self.kalshi.get_all_markets(status="open", max_markets=1000)
-        logger.info(f"Fetched {len(markets)} open markets from Kalshi API (capped at 1000 by volume)")
+        # Two pools: top-1000 by volume + top-200 soonest-closing (for short-duration markets)
+        markets_by_vol   = await self.kalshi.get_all_markets(status="open", max_markets=1000)
+        markets_by_close = await self.kalshi.get_all_markets(status="open", max_markets=200, sort_by_close=True)
+
+        # Merge — deduplicate by ticker, volume pool first
+        seen = {m.get("ticker") for m in markets_by_vol}
+        short_duration = [m for m in markets_by_close if m.get("ticker") not in seen]
+        markets = markets_by_vol + short_duration
+
+        logger.info(
+            "Fetched %d open markets from Kalshi API (%d by volume + %d short-duration unique)",
+            len(markets), len(markets_by_vol), len(short_duration),
+        )
 
         now = datetime.now(timezone.utc).isoformat()
         stored = 0
@@ -93,9 +103,14 @@ class MarketDataFetcher:
         # Mark stale markets as closed using timestamp instead of NOT IN (avoids SQLite 999-param limit)
         if markets:
             await self.db.execute(
-                "UPDATE markets SET status='closed' WHERE status='open' AND fetched_at < ? AND platform='kalshi'",
+                "UPDATE markets SET status='closed' WHERE status='open' AND fetched_at < ? AND (platform='kalshi' OR platform IS NULL)",
                 (now,)
             )
+
+        # Purge closed markets older than 7 days to prevent unbounded DB growth
+        await self.db.execute(
+            "DELETE FROM markets WHERE status='closed' AND fetched_at < datetime('now', '-7 days')"
+        )
 
         logger.info(
             f"Ingest complete: {stored} stored, {skipped} skipped "
@@ -106,13 +121,7 @@ class MarketDataFetcher:
 
     async def get_cached_markets(self, min_volume: float = 0,
                                   max_age_minutes: int = 15) -> List[Dict]:
-        """Return markets from DB fresher than max_age_minutes. Prices in cents.
-        Falls back to any available markets if none are fresh (e.g. first startup)."""
-        from datetime import timedelta
-        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).isoformat()
-        query  = "SELECT * FROM markets WHERE status='open' AND fetched_at >= ?"
-        params: tuple = (cutoff,)
-        """Return open markets from DB. Prices in cents."""
+        """Return markets from DB. Prices in cents."""
         query  = "SELECT * FROM markets WHERE status='open' OR status=''"
         params: tuple = ()
         if min_volume > 0:
@@ -122,18 +131,7 @@ class MarketDataFetcher:
         rows = await self.db.fetchall(query, params)
 
         if not rows:
-            # Fallback: no fresh data — use whatever is in DB (covers first startup)
-            logger.warning(
-                "No markets fresher than %d min — falling back to all cached markets",
-                max_age_minutes,
-            )
-            fallback_query = "SELECT * FROM markets WHERE status='open'"
-            fallback_params: tuple = ()
-            if min_volume > 0:
-                fallback_query += " AND volume >= ?"
-                fallback_params = (min_volume,)
-            fallback_query += " ORDER BY volume DESC"
-            rows = await self.db.fetchall(fallback_query, fallback_params)
+            logger.warning("No markets in cache — DB may be empty on first startup")
 
         logger.info("get_cached_markets: %d rows (min_vol=%g)", len(rows), min_volume)
         return rows

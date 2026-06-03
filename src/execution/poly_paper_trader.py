@@ -141,9 +141,10 @@ class PolyPaperTrader:
             await self.db.execute("""
                 INSERT INTO positions
                   (ticker, side, contracts, avg_price, current_price, pnl,
-                   status, platform, poly_token_id, opened_at)
-                VALUES (?,?,?,?,?,0,'open','polymarket',?,?)
-            """, (ticker, side, contracts, price_cents, price_cents, poly_token_id, now))
+                   status, platform, poly_token_id, opened_at, title)
+                VALUES (?,?,?,?,?,0,'open','polymarket',?,?,?)
+            """, (ticker, side, contracts, price_cents, price_cents, poly_token_id, now,
+                  (market_title or "")[:200]))
 
         logger.info(
             "◆ POLY PAPER  %s %s %s | %d contracts @ %.0f¢ | "

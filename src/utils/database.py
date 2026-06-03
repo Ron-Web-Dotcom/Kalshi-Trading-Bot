@@ -26,6 +26,7 @@ class DatabaseManager:
                 await db.execute("PRAGMA journal_mode=WAL")
                 await db.execute("PRAGMA busy_timeout=5000")  # wait up to 5s on lock
                 await db.execute("PRAGMA synchronous=NORMAL")  # safe + faster than FULL
+                await db.execute("PRAGMA wal_autocheckpoint=1000")  # checkpoint every 1000 pages
                 await db.executescript("""
                     CREATE TABLE IF NOT EXISTS markets (
                         ticker TEXT PRIMARY KEY,
@@ -147,6 +148,7 @@ class DatabaseManager:
                     "ALTER TABLE trade_logs ADD COLUMN platform TEXT DEFAULT 'kalshi'",
                     "ALTER TABLE positions  ADD COLUMN platform TEXT DEFAULT 'kalshi'",
                     "ALTER TABLE positions  ADD COLUMN poly_token_id TEXT",
+                    "ALTER TABLE positions  ADD COLUMN title TEXT DEFAULT ''",
                     "ALTER TABLE markets    ADD COLUMN platform TEXT DEFAULT 'kalshi'",
                 ]:
                     try:

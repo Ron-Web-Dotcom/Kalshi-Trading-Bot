@@ -130,7 +130,7 @@ def _news_keywords(title: str) -> List[str]:
 async def build_market_context(
     market: Dict,
     include_community: bool = False,
-    timeout_seconds: float = 3.0,
+    timeout_seconds: float = 6.0,
 ) -> str:
     """
     Build a real-world context block for ANY Kalshi market.

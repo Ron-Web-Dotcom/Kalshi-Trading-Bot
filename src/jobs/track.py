@@ -65,20 +65,28 @@ async def run_tracking(db_manager) -> None:
                         "SELECT yes_ask, no_ask, status FROM markets WHERE ticker=?", (ticker,)
                     )
                     if not mkt_row:
-                        logger.debug("TRACK SKIP Polymarket %s — not in markets cache", ticker)
+                        logger.warning("TRACK SKIP Polymarket %s — not in markets cache (ticker mismatch?)", ticker)
                         continue
                     bid_key   = "yes_ask" if side == "yes" else "no_ask"
                     cur_price = float(mkt_row.get(bid_key, 0) or 0)
+                    # Fall back to the other side's price if primary is 0
                     if cur_price == 0:
+                        alt_key   = "no_ask" if side == "yes" else "yes_ask"
+                        alt_price = float(mkt_row.get(alt_key, 0) or 0)
+                        if alt_price > 0:
+                            cur_price = 100.0 - alt_price
+                    if cur_price == 0:
+                        logger.warning("TRACK SKIP Polymarket %s — %s price=0 in cache", ticker, bid_key)
                         continue
                     pnl        = (cur_price - avg_price) * contracts / 100
                     pct_change = ((cur_price - avg_price) / avg_price * 100) if avg_price else 0
                     mkt_status = mkt_row.get("status", "open")
                     if mkt_status in ("resolved", "settled", "finalized"):
                         close_reason = f"resolved:{mkt_status}"
+                        # YES wins when YES price → 100; NO wins when NO price → 100 (YES → 0)
                         final_price  = 100.0 if (
                             (side == "yes" and cur_price >= 95) or
-                            (side == "no"  and cur_price >= 95)
+                            (side == "no"  and cur_price <= 5)
                         ) else 0.0
                         pnl = (final_price - avg_price) * contracts / 100
                         await db_manager.execute("""
@@ -108,7 +116,7 @@ async def run_tracking(db_manager) -> None:
                             "UPDATE positions SET current_price=?, pnl=? WHERE id=?",
                             (cur_price, pnl, pos_id)
                         )
-                        logger.debug(
+                        logger.info(
                             "MTM POLY %-28s  %s  cur=%.0f¢  entry=%.0f¢  PnL=%+.2f  (%.1f%%)",
                             ticker, side, cur_price, avg_price, pnl, pct_change,
                         )

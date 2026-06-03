@@ -129,8 +129,14 @@ class KalshiClient:
             params["cursor"] = cursor
         return await self._request("GET", "/markets", params=params)
 
-    async def get_all_markets(self, status: str = "open", max_markets: int = 1000) -> List[Dict]:
-        """Fetch up to max_markets from Kalshi, sorted by volume desc."""
+    async def get_all_markets(self, status: str = "open", max_markets: int = 1000,
+                               sort_by_close: bool = False) -> List[Dict]:
+        """
+        Fetch up to max_markets from Kalshi.
+        sort_by_close=False (default): sort by volume desc — most liquid markets first.
+        sort_by_close=True: sort by close_time asc — soonest-expiring markets first
+                            (captures 1min/5min/1hr/daily short-duration markets).
+        """
         markets = []
         cursor = ""
         while len(markets) < max_markets:
@@ -143,8 +149,22 @@ class KalshiClient:
             if not cursor:
                 break
             await asyncio.sleep(0.2)
-        # Sort by volume desc so we keep the most liquid markets
-        markets.sort(key=lambda m: m.get("volume", 0) or 0, reverse=True)
+
+        if sort_by_close:
+            # Sort by close_time ascending — soonest closing first
+            def _close_key(m):
+                ct = m.get("close_time") or ""
+                try:
+                    return datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                except Exception:
+                    return datetime.max.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            # Only include markets that haven't closed yet
+            markets = [m for m in markets if _close_key(m) > now]
+            markets.sort(key=_close_key)
+        else:
+            markets.sort(key=lambda m: m.get("volume", 0) or 0, reverse=True)
+
         return markets[:max_markets]
 
     async def get_market(self, ticker: str) -> Dict:
