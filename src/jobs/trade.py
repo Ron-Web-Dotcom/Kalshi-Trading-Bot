@@ -99,12 +99,29 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         await auditor.log(db, "LOCKOUT", reason=lockout_reason)
         return results
 
-    # ── Max open positions check ──────────────────────────────────────────
-    open_count_row = await db.fetchone("SELECT COUNT(*) as n FROM positions WHERE status='open'")
-    open_count = (open_count_row or {}).get("n", 0)
+    # ── Open positions: log them + check cap ─────────────────────────────
+    open_positions_rows = await db.fetchall(
+        "SELECT ticker, side, contracts, avg_price, current_price, pnl, platform, title "
+        "FROM positions WHERE status='open'"
+    )
+    open_count = len(open_positions_rows)
+    if open_count > 0:
+        logger.info("── Open Positions (%d) ──────────────────────────────────────────", open_count)
+        for _p in open_positions_rows:
+            _pnl = _p.get("pnl") or 0
+            _cur = _p.get("current_price") or _p.get("avg_price") or 0
+            _ent = _p.get("avg_price") or 0
+            _pct = ((_cur - _ent) / _ent * 100) if _ent else 0
+            _lbl = (_p.get("title") or _p.get("ticker") or "?")[:40]
+            logger.info(
+                "  %-40s  %s  %dx  entry=%.0f¢  now=%.0f¢  (%+.1f%%)  PnL=%+.2f",
+                _lbl, (_p.get("side") or "?").upper(), _p.get("contracts", 0),
+                _ent, _cur, _pct, _pnl,
+            )
+
     if open_count >= settings.trading.max_open_positions:
         logger.info(
-            "Max open positions (%d) reached — skipping new trades this cycle",
+            "Max open positions (%d) reached — skipping new trade scan this cycle",
             open_count,
         )
         return results
@@ -380,18 +397,13 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         )
 
         if not best:
-            # Only post "no opportunity" once per hour — not every 60s cycle (too spammy)
-            try:
-                import time as _time
-                _now = _time.time()
-                _last = getattr(run_trading_job, "_last_no_opp_ts", 0)
-                if _now - _last >= 3600:
-                    run_trading_job._last_no_opp_ts = _now
-                    await discord.no_opportunity(
-                        markets_scanned=len(kalshi_candidates) + len(poly_markets), paper=not live_mode
-                    )
-            except Exception:
-                pass
+            # Log reason; no_opportunity() Discord method is disabled (returns immediately)
+            # — covered by the hourly heartbeat instead. Also suppress if positions are open.
+            logger.info(
+                "No best opportunity found across %d Kalshi + %d Polymarket candidates "
+                "(open_positions=%d)",
+                len(kalshi_candidates), len(poly_markets), open_count,
+            )
 
         if best and trades_this_cycle < max_trades:
             market   = best["market"]
