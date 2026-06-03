@@ -170,11 +170,18 @@ class TradingBot:
                 await asyncio.sleep(TRADE_INTERVAL)
 
         async def hourly_heartbeat_loop():
-            """Send an hourly heartbeat to Discord with scan stats and top candidates."""
+            """Send an hourly heartbeat to Discord — strictly once per hour."""
             from src.alerts.discord import DiscordAlerter
-            # Fire first heartbeat quickly after startup so user sees immediate status
+            import time as _time
+            _last_fired = 0.0
+            # Fire first heartbeat quickly after startup
             await asyncio.sleep(90)
             while not self._shutdown.is_set():
+                _now = _time.time()
+                if _now - _last_fired < 3000:   # 50 min minimum gap — prevents double-fire
+                    await asyncio.sleep(HEARTBEAT_INTERVAL - (_now - _last_fired))
+                    continue
+                _last_fired = _now
                 try:
                     discord = DiscordAlerter()
                     today = datetime.now(timezone.utc).date().isoformat()
