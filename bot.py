@@ -297,11 +297,17 @@ class TradingBot:
                 # ── Active position monitor (separate message) ────────────
                 try:
                     open_pos = await self.db.fetchall(
-                        "SELECT * FROM positions WHERE status='open' ORDER BY opened_at DESC"
+                        "SELECT p.*, COALESCE(p.title, m.title, '') as display_title "
+                        "FROM positions p LEFT JOIN markets m ON p.ticker = m.ticker "
+                        "WHERE p.status='open' ORDER BY p.opened_at DESC"
                     )
                     if open_pos:
+                        positions_with_title = [
+                            {**dict(r), "title": r.get("display_title") or r.get("title") or ""}
+                            for r in open_pos
+                        ]
                         await discord.position_monitor(
-                            positions=open_pos,
+                            positions=positions_with_title,
                             paper=not settings.trading.live_trading_enabled,
                         )
                 except Exception:
