@@ -611,6 +611,25 @@ class DiscordAlerter:
             },
         ]
 
+        # Top candidates — 2 Kalshi + 2 Polymarket
+        if top_candidates:
+            kal_lines  = []
+            poly_lines = []
+            for c in top_candidates:
+                title = self._display_ticker(c.get("ticker", ""), c.get("title", "") or "")
+                yes   = c.get("yes_ask", 0)
+                no    = c.get("no_ask",  0)
+                if c.get("platform") == "polymarket":
+                    poly_lines.append(f"🟣 **{title}**\nYES {yes:.0f}¢ | NO {no:.0f}¢")
+                else:
+                    kal_lines.append(f"🟦 **{title}**\nYES {yes:.0f}¢ | NO {no:.0f}¢")
+            watching = "\n\n".join(kal_lines + poly_lines) or "_No candidates_"
+            fields.insert(-1, {
+                "name":   "👀 Watching (Top 2 Kalshi + Top 2 Polymarket)",
+                "value":  watching,
+                "inline": False,
+            })
+
         # Show today's trade results if any
         if closed_trades:
             lines = []
@@ -625,7 +644,8 @@ class DiscordAlerter:
                     "take-profit" if why.startswith("take_profit") else
                     "AI opt-out" if why.startswith("ai_reeval") else "closed"
                 )
-                lines.append(f"{icon} `{t.get('ticker','')}` {(t.get('side') or '').upper()} **${sign}{t_pnl:.2f}** — {label}")
+                title = self._display_ticker(t.get("ticker", ""), t.get("title", "") or "")
+                lines.append(f"{icon} **{title}** {(t.get('side') or '').upper()} **${sign}{t_pnl:.2f}** — {label}")
             fields.insert(-1, {
                 "name":   "📋 Today's Trade Results",
                 "value":  "\n".join(lines),

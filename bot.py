@@ -253,7 +253,7 @@ class TradingBot:
                     poly_cand = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform FROM markets "
                         "WHERE yes_ask > 5 AND yes_ask < 95 "
-                        "AND platform='polymarket' ORDER BY volume DESC LIMIT 1"
+                        "AND platform='polymarket' ORDER BY volume DESC LIMIT 2"
                     )
                     top_candidates = _cand_rows(kal_cand) + _cand_rows(poly_cand)
 
