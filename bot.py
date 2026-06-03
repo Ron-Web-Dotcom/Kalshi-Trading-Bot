@@ -232,24 +232,30 @@ class TradingBot:
                     total_pnl    = wl.get("total_pnl", 0.0) or 0.0
                     win_rate     = (total_wins / total_closed * 100) if total_closed > 0 else 0.0
 
-                    # Top 3 candidates by volume (yes_ask between 5 and 95)
-                    candidates_rows = await self.db.fetchall(
-                        "SELECT ticker, title, yes_ask, no_ask, volume, platform "
-                        "FROM markets "
+                    # Top candidates: top 2 Kalshi + top 1 Polymarket by volume
+                    def _cand_rows(rows):
+                        return [
+                            {
+                                "ticker":   r["ticker"],
+                                "title":    r.get("title", ""),
+                                "yes_ask":  r.get("yes_ask", 0),
+                                "no_ask":   r.get("no_ask",  0),
+                                "volume":   r.get("volume",  0),
+                                "platform": r.get("platform", "kalshi"),
+                            }
+                            for r in (rows or [])
+                        ]
+                    kal_cand = await self.db.fetchall(
+                        "SELECT ticker, title, yes_ask, no_ask, volume, platform FROM markets "
                         "WHERE yes_ask > 5 AND yes_ask < 95 "
-                        "ORDER BY volume DESC LIMIT 3"
+                        "AND (platform='kalshi' OR platform IS NULL) ORDER BY volume DESC LIMIT 2"
                     )
-                    top_candidates = [
-                        {
-                            "ticker":   r["ticker"],
-                            "title":    r.get("title", ""),
-                            "yes_ask":  r.get("yes_ask", 0),
-                            "no_ask":   r.get("no_ask",  0),
-                            "volume":   r.get("volume",  0),
-                            "platform": r.get("platform", "kalshi"),
-                        }
-                        for r in (candidates_rows or [])
-                    ]
+                    poly_cand = await self.db.fetchall(
+                        "SELECT ticker, title, yes_ask, no_ask, volume, platform FROM markets "
+                        "WHERE yes_ask > 5 AND yes_ask < 95 "
+                        "AND platform='polymarket' ORDER BY volume DESC LIMIT 1"
+                    )
+                    top_candidates = _cand_rows(kal_cand) + _cand_rows(poly_cand)
 
                     # Today's closed trades with outcomes
                     closed_rows = await self.db.fetchall(

@@ -49,6 +49,16 @@ class DiscordAlerter:
 
     # ── Alert methods ─────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _display_ticker(ticker: str, title: str = "") -> str:
+        """Return a human-readable label — never expose raw 0x hex condition IDs."""
+        if title and not title.startswith("0x"):
+            return title[:50]
+        if ticker and not ticker.startswith("0x"):
+            return ticker[:30]
+        # Polymarket hex conditionId — use last 6 chars as short ID
+        return f"poly-{ticker[-6:]}" if ticker else "unknown"
+
     async def test_alert(self, mode: str = "PAPER") -> bool:
         """Send a connectivity test message. Returns True if delivered."""
         payload = self._embed(
@@ -440,6 +450,8 @@ class DiscordAlerter:
         total_pnl = 0.0
         for p in positions:
             ticker    = p.get("ticker", "?")
+            title     = p.get("title", "") or ""
+            label     = self._display_ticker(ticker, title)
             side      = (p.get("side") or "yes").upper()
             contracts = p.get("contracts", 0)
             avg_price = float(p.get("avg_price") or 0)
@@ -452,7 +464,7 @@ class DiscordAlerter:
             icon      = "📈" if pnl >= 0 else "📉"
             platform  = "🟣" if p.get("platform") == "polymarket" else "🟦"
             lines.append(
-                f"{icon} {platform} **{ticker[:20]}** | {side} | {contracts} contracts\n"
+                f"{icon} {platform} **{label}** | {side} | {contracts} contracts\n"
                 f"   Entry: **{avg_price:.0f}¢** → Now: **{cur_price:.0f}¢** "
                 f"({pct_sign}{pct:.1f}%) | PnL: **${pnl_sign}{pnl:.2f}**"
             )
@@ -795,8 +807,9 @@ class DiscordAlerter:
                 side  = (p.get("side") or "yes").upper()
                 price = float(p.get("avg_price") or 0)
                 size  = float(p.get("size_usd") or 0)
+                label = self._display_ticker(p.get("ticker", "?"), p.get("title", "") or "")
                 lines.append(
-                    f"{plat} `{p.get('ticker','?')[:24]}` | **{side}** @ {price:.0f}¢ | ${size:.2f}"
+                    f"{plat} **{label}** | **{side}** @ {price:.0f}¢ | ${size:.2f}"
                 )
             fields.append({
                 "name":   f"🆕 New Positions Opened ({len(new_positions)})",
@@ -823,8 +836,9 @@ class DiscordAlerter:
                 total_unrealised += pnl
                 pnl_s = "+" if pnl >= 0 else ""
                 mv    = "📈" if pnl >= 0 else "📉"
+                label = self._display_ticker(p.get("ticker", "?"), p.get("title", "") or "")
                 lines.append(
-                    f"{mv} {plat} `{p.get('ticker','?')[:22]}` | {side} | "
+                    f"{mv} {plat} **{label}** | {side} | "
                     f"{avg_price:.0f}¢→{cur_price:.0f}¢ | **${pnl_s}{pnl:.2f}**"
                 )
             total_s = "+" if total_unrealised >= 0 else ""
