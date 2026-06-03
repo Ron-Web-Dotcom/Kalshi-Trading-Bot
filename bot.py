@@ -99,6 +99,19 @@ class TradingBot:
         except Exception as e:
             logger.warning("Initial ingestion failed (will retry): %s", e)
 
+        # Backfill missing position titles from markets table (fixes poly-xxx labels)
+        try:
+            await self.db.execute("""
+                UPDATE positions SET title = (
+                    SELECT COALESCE(m.title, '') FROM markets m WHERE m.ticker = positions.ticker
+                )
+                WHERE (title IS NULL OR title = '')
+                AND EXISTS (SELECT 1 FROM markets m WHERE m.ticker = positions.ticker)
+            """)
+            logger.info("Position titles backfilled from markets cache")
+        except Exception as e:
+            logger.warning("Title backfill failed: %s", e)
+
         # Discord startup alert
         try:
             from src.alerts.discord import DiscordAlerter
