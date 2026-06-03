@@ -164,7 +164,11 @@ class AIDecisionEngine:
         no_ev_if_true  = (100 - no_ask)  * 0.98
         spread         = yes_ask + no_ask - 100
         liquidity      = "LOW" if volume < 100 else "HIGH" if volume > 10000 else "MEDIUM"
-        context_block  = f"\n\n--- REAL-WORLD CONTEXT ---\n{context}\n--- END CONTEXT ---" if context else ""
+        # Warn AI if no live price data was fetched for asset markets
+        _no_price_warn = ""
+        if not context and any(k in title.lower() for k in ["bitcoin", "btc", "eth", "crypto", "price", "$"]):
+            _no_price_warn = "\n⚠️ WARNING: Live price fetch failed — your training data prices may be STALE. Do NOT cite specific prices unless you are certain they are current. Be extra conservative."
+        context_block  = f"\n\n--- REAL-WORLD CONTEXT ---\n{context}\n--- END CONTEXT ---" if context else _no_price_warn
         bot_block      = f"\n\n{bot_context}" if bot_context else ""
 
         return f"""You are an expert quantitative prediction market trader. Your ONLY goal is to find bets where your estimated true probability beats the market price by enough to profit after fees.

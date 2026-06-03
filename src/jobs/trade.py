@@ -470,28 +470,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         net_ev or 0, exp_profit_usd or 0, poly_str,
                     )
 
-                    # Discord: notify we found the best opportunity before placing
-                    platform = best.get("platform", "kalshi")
-                    try:
-                        await discord.best_opportunity_found(
-                            ticker=ticker,
-                            side=side,
-                            price_cents=price,
-                            confidence=decision.get("confidence", 0),
-                            net_ev=net_ev,
-                            exp_profit=exp_profit_usd,
-                            score=best["score"],
-                            reasoning=decision.get("reasoning", ""),
-                            poly_yes=poly_comp["poly_yes"] if poly_comp else None,
-                            poly_no=poly_comp["poly_no"]  if poly_comp else None,
-                            market_title=market.get("title", ""),
-                            paper=not live_mode,
-                            platform=platform,
-                        )
-                    except Exception:
-                        pass
-
-                    # Route to the correct platform's trader
+                    # Route to the correct platform's trader (single Discord alert comes from execute())
                     platform = best.get("platform", "kalshi")
                     active_trader = kalshi_trader if platform == "kalshi" else poly_trader
 

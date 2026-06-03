@@ -149,7 +149,7 @@ class DiscordAlerter:
 
         fields = [
             {"name": "Side",      "value": f"**{side.upper()}**",       "inline": True},
-            {"name": "Price",     "value": f"{price:.0f}¢",             "inline": True},
+            {"name": "Price",     "value": f"{price:.1f}¢",             "inline": True},
             {"name": "Contracts", "value": str(contracts),              "inline": True},
             {"name": "Capital",   "value": f"${size_dollars:.2f}",      "inline": True},
             {"name": "Max Payout","value": f"${max_payout:.2f}",        "inline": True},
