@@ -79,7 +79,7 @@ class PolymarketTradingClient:
 
     # ── Market data ───────────────────────────────────────────────────────────
 
-    async def get_markets(self, limit: int = 300) -> List[Dict]:
+    async def get_markets(self, limit: int = 500) -> List[Dict]:
         """Fetch active Polymarket markets with current YES/NO prices."""
         try:
             r = await self._client().get(
@@ -93,6 +93,12 @@ class PolymarketTradingClient:
             markets = []
             for m in raw:
                 prices = m.get("outcomePrices") or []
+                if isinstance(prices, str):
+                    import json as _json
+                    try:
+                        prices = _json.loads(prices)
+                    except Exception:
+                        prices = []
                 if len(prices) < 2:
                     continue
                 try:
@@ -100,7 +106,8 @@ class PolymarketTradingClient:
                     no_price  = float(prices[1]) * 100
                 except (TypeError, ValueError):
                     continue
-                if not (5 < yes_price < 95):
+                # Skip only fully zero-priced markets (not yet live)
+                if yes_price == 0 and no_price == 0:
                     continue
 
                 token_ids = m.get("clobTokenIds") or []
