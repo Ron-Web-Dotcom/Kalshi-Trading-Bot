@@ -86,6 +86,14 @@ class MarketDataFetcher:
                 )
             logger.info("─" * 80)
 
+        # Mark any market not in this fresh batch as closed so stale rows don't get traded
+        fetched_tickers = [m.get("ticker") for m in markets if m.get("ticker")]
+        if fetched_tickers:
+            placeholders = ",".join("?" * len(fetched_tickers))
+            await self.db.execute(
+                f"UPDATE markets SET status='closed' WHERE status='open' "
+                f"AND ticker NOT IN ({placeholders})",
+                tuple(fetched_tickers),
         # Mark stale markets as closed using timestamp instead of NOT IN (avoids SQLite 999-param limit)
         if markets:
             await self.db.execute(
@@ -102,6 +110,12 @@ class MarketDataFetcher:
 
     async def get_cached_markets(self, min_volume: float = 0,
                                   max_age_minutes: int = 15) -> List[Dict]:
+        """Return markets from DB fresher than max_age_minutes. Prices in cents.
+        Falls back to any available markets if none are fresh (e.g. first startup)."""
+        from datetime import timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).isoformat()
+        query  = "SELECT * FROM markets WHERE status='open' AND fetched_at >= ?"
+        params: tuple = (cutoff,)
         """Return open markets from DB. Prices in cents."""
         query  = "SELECT * FROM markets WHERE status='open' OR status=''"
         params: tuple = ()
@@ -110,6 +124,21 @@ class MarketDataFetcher:
             params += (min_volume,)
         query += " ORDER BY volume DESC"
         rows = await self.db.fetchall(query, params)
+
+        if not rows:
+            # Fallback: no fresh data — use whatever is in DB (covers first startup)
+            logger.warning(
+                "No markets fresher than %d min — falling back to all cached markets",
+                max_age_minutes,
+            )
+            fallback_query = "SELECT * FROM markets WHERE status='open'"
+            fallback_params: tuple = ()
+            if min_volume > 0:
+                fallback_query += " AND volume >= ?"
+                fallback_params = (min_volume,)
+            fallback_query += " ORDER BY volume DESC"
+            rows = await self.db.fetchall(fallback_query, fallback_params)
+
         logger.info("get_cached_markets: %d rows (min_vol=%g)", len(rows), min_volume)
         return rows
 

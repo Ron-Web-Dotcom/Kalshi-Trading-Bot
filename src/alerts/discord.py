@@ -49,6 +49,16 @@ class DiscordAlerter:
 
     # ── Alert methods ─────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _display_ticker(ticker: str, title: str = "") -> str:
+        """Return a human-readable label — never expose raw 0x hex condition IDs."""
+        if title and not title.startswith("0x"):
+            return title[:50]
+        if ticker and not ticker.startswith("0x"):
+            return ticker[:30]
+        # Polymarket hex conditionId — use last 6 chars as short ID
+        return f"poly-{ticker[-6:]}" if ticker else "unknown"
+
     async def test_alert(self, mode: str = "PAPER") -> bool:
         """Send a connectivity test message. Returns True if delivered."""
         payload = self._embed(
@@ -378,6 +388,10 @@ class DiscordAlerter:
         )
         await self._post(payload)
 
+    async def near_miss(self, *args, **kwargs) -> None:
+        """Disabled — individual near-miss alerts replaced by hourly near_miss_digest."""
+        return
+
     async def near_miss(self, ticker: str, side: str, confidence: float,
                         min_confidence: float, net_ev: Optional[float],
                         true_prob: Optional[float], reasoning: str,
@@ -412,6 +426,7 @@ class DiscordAlerter:
             ev_str = f" | EV {nm['net_ev']:+.1f}¢" if nm.get("net_ev") is not None else ""
             tp_str = f" | P(YES)={nm['true_prob']:.0f}%" if nm.get("true_prob") is not None else ""
             plat   = "🟣 Polymarket" if nm.get("platform") == "polymarket" else "🟦 Kalshi"
+            title  = self._display_ticker(nm.get("ticker", ""), nm.get("title", "") or "")[:70]
             title  = (nm.get("title") or nm["ticker"])[:70]
             reason = (nm.get("reasoning") or "")[:150]
             lines.append(
@@ -440,6 +455,8 @@ class DiscordAlerter:
         total_pnl = 0.0
         for p in positions:
             ticker    = p.get("ticker", "?")
+            title     = p.get("title", "") or ""
+            label     = self._display_ticker(ticker, title)
             side      = (p.get("side") or "yes").upper()
             contracts = p.get("contracts", 0)
             avg_price = float(p.get("avg_price") or 0)
@@ -452,6 +469,7 @@ class DiscordAlerter:
             icon      = "📈" if pnl >= 0 else "📉"
             platform  = "🟣" if p.get("platform") == "polymarket" else "🟦"
             lines.append(
+                f"{icon} {platform} **{label}** | {side} | {contracts} contracts\n"
                 f"{icon} {platform} **{ticker[:20]}** | {side} | {contracts} contracts\n"
                 f"   Entry: **{avg_price:.0f}¢** → Now: **{cur_price:.0f}¢** "
                 f"({pct_sign}{pct:.1f}%) | PnL: **${pnl_sign}{pnl:.2f}**"
@@ -544,6 +562,7 @@ class DiscordAlerter:
         top_candidates: list,
         open_positions: int,
         paper_pnl: float,
+        unrealised_pnl: float = 0.0,
         paper: bool = True,
         closed_trades: Optional[List[Dict]] = None,
         win_rate: float = 0.0,
@@ -553,6 +572,12 @@ class DiscordAlerter:
         total_closed: int = 0,
         best_pick: Optional[Dict] = None,
     ) -> None:
+        """Hourly heartbeat — clean stats only. Near-misses and positions have their own messages."""
+        now_utc  = datetime.now(timezone.utc)
+        hhmm     = now_utc.strftime("%H:%M")
+        pnl_sign = "+" if paper_pnl >= 0 else ""
+        color    = 0x5865F2
+
         """Send hourly scan summary — bot heartbeat + top market candidates."""
         now_utc  = datetime.now(timezone.utc)
         hhmm     = now_utc.strftime("%H:%M")
@@ -583,6 +608,12 @@ class DiscordAlerter:
             record_str = "No trades yet — building track record..."
             wr_emoji   = "🆕"
         else:
+            wr_emoji     = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
+            all_pnl_sign = "+" if total_pnl >= 0 else ""
+            record_str   = (
+                f"**{win_rate:.0f}% win rate** — "
+                f"{total_wins}W / {total_losses}L / {total_closed} total | "
+                f"PnL: **${all_pnl_sign}{total_pnl:.2f}**"
             wr_emoji   = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
             all_pnl_sign = "+" if total_pnl >= 0 else ""
             record_str = (
@@ -593,11 +624,27 @@ class DiscordAlerter:
 
         fields = [
             {
+                "name":   f"{wr_emoji} Track Record",
                 "name":   f"{wr_emoji} Bot Track Record (Can I Trust It?)",
                 "value":  record_str,
                 "inline": False,
             },
             {
+                "name":   "📡 Markets Scanned",
+                "value":  f"🟦 {kalshi_count} Kalshi + 🟣 {poly_count} Polymarket = **{markets_scanned} total**",
+                "inline": False,
+            },
+            {
+                "name":   "💼 Open Positions",
+                "value":  (
+                    f"**{open_positions}** open | "
+                    f"Realised: **${pnl_sign}{paper_pnl:.2f}** | "
+                    f"Unrealised: **${'+'if unrealised_pnl>=0 else ''}{unrealised_pnl:.2f}**"
+                ),
+                "inline": False,
+            },
+            {
+                "name":   "⏱ Next Scan",
                 "name":   "Markets Scanned",
                 "value":  f"{kalshi_count} Kalshi + {poly_count} Polymarket = **{markets_scanned} total**",
                 "inline": False,
@@ -619,6 +666,22 @@ class DiscordAlerter:
             },
         ]
 
+        # Top candidates — 2 Kalshi + 2 Polymarket
+        if top_candidates:
+            kal_lines  = []
+            poly_lines = []
+            for c in top_candidates:
+                title = self._display_ticker(c.get("ticker", ""), c.get("title", "") or "")
+                yes   = c.get("yes_ask", 0)
+                no    = c.get("no_ask",  0)
+                if c.get("platform") == "polymarket":
+                    poly_lines.append(f"🟣 **{title}**\nYES {yes:.0f}¢ | NO {no:.0f}¢")
+                else:
+                    kal_lines.append(f"🟦 **{title}**\nYES {yes:.0f}¢ | NO {no:.0f}¢")
+            watching = "\n\n".join(kal_lines + poly_lines) or "_No candidates_"
+            fields.insert(-1, {
+                "name":   "👀 Watching (Top 2 Kalshi + Top 2 Polymarket)",
+                "value":  watching,
         # Near-Misses — top BUY signals that fell just short, deduplicated
         try:
             from src.utils.daily_stats import stats as _ds
@@ -678,10 +741,39 @@ class DiscordAlerter:
                     "take-profit" if why.startswith("take_profit") else
                     "AI opt-out" if why.startswith("ai_reeval") else "closed"
                 )
+                title = self._display_ticker(t.get("ticker", ""), t.get("title", "") or "")
+                lines.append(f"{icon} **{title}** {(t.get('side') or '').upper()} **${sign}{t_pnl:.2f}** — {label}")
                 lines.append(f"{icon} `{t.get('ticker','')}` {(t.get('side') or '').upper()} **${sign}{t_pnl:.2f}** — {label}")
             fields.insert(-1, {
                 "name":   "📋 Today's Trade Results",
                 "value":  "\n".join(lines),
+                "inline": False,
+            })
+
+        # Best Pick of the Day — one from Kalshi, one from Polymarket (fair slot each)
+        if best_pick:
+            from src.utils.daily_stats import stats as _ds
+            picks = _ds.best_pick_by_platform()
+            pick_lines = []
+            for plat_key, icon, label in [("kalshi", "🟦", "Kalshi"), ("polymarket", "🟣", "Polymarket")]:
+                p = picks.get(plat_key)
+                if not p:
+                    pick_lines.append(f"{icon} **{label}** — _No evaluation yet_")
+                    continue
+                title   = self._display_ticker(p.get("ticker", ""), p.get("title", "") or "")
+                side    = (p.get("side") or "YES").upper()
+                conf    = p.get("confidence", 0)
+                ev      = p.get("net_ev")
+                ev_str  = f" | EV **{ev:+.1f}¢**" if ev is not None else ""
+                reason  = (p.get("reasoning") or "")[:100]
+                pick_lines.append(
+                    f"{icon} **{label}** — {title}\n"
+                    f"BUY **{side}** | Conf: **{conf:.0f}%**{ev_str}\n"
+                    f"_{reason}_"
+                )
+            fields.insert(-1, {
+                "name":  "🧠 Best Pick of the Day",
+                "value": "\n\n".join(pick_lines),
                 "inline": False,
             })
 
@@ -804,6 +896,113 @@ class DiscordAlerter:
                 f"End-of-day summary for **{date}**. "
                 f"Bot ran for **{snap.get('uptime','?')}** scanning prediction markets 24/7."
             ),
+            color=color,
+            fields=fields,
+        )
+        await self._post(payload)
+
+    async def daytime_summary(
+        self,
+        period: str,            # "Morning" or "Afternoon"
+        open_positions: list,
+        new_positions: list,    # opened since last summary
+        today_pnl: float,
+        kalshi_count: int,
+        poly_count: int,
+        win_rate: float,
+        total_wins: int,
+        total_losses: int,
+        total_closed: int,
+        paper: bool = True,
+    ) -> None:
+        """Morning (9 AM) or Afternoon (3 PM) UTC digest — positions + today's PnL."""
+        mode_tag  = "📝 PAPER" if paper else "💰 LIVE"
+        pnl_sign  = "+" if today_pnl >= 0 else ""
+        color     = 0x00BFFF if period == "Morning" else 0xFFA500
+        icon      = "🌅" if period == "Morning" else "🌇"
+        now_utc   = datetime.now(timezone.utc).strftime("%H:%M UTC")
+
+        fields = []
+
+        # Today's PnL + scan counts
+        fields.append({
+            "name":   "📊 Status",
+            "value":  (
+                f"Today's PnL: **${pnl_sign}{today_pnl:.2f}** | Mode: {mode_tag}\n"
+                f"Markets: 🟦 **{kalshi_count}** Kalshi + 🟣 **{poly_count}** Polymarket"
+            ),
+            "inline": False,
+        })
+
+        # Track record
+        if total_closed == 0:
+            wr_str   = "No closed trades yet — building track record..."
+            wr_emoji = "🆕"
+        else:
+            wr_emoji = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
+            all_pnl_sign = "+"
+            wr_str = f"**{win_rate:.0f}% win rate** — {total_wins}W / {total_losses}L / {total_closed} closed"
+        fields.append({"name": f"{wr_emoji} Track Record", "value": wr_str, "inline": False})
+
+        # New positions opened since last summary
+        if new_positions:
+            lines = []
+            for p in new_positions[:8]:
+                plat  = "🟣" if p.get("platform") == "polymarket" else "🟦"
+                side  = (p.get("side") or "yes").upper()
+                price = float(p.get("avg_price") or 0)
+                size  = float(p.get("size_usd") or 0)
+                label = self._display_ticker(p.get("ticker", "?"), p.get("title", "") or "")
+                lines.append(
+                    f"{plat} **{label}** | **{side}** @ {price:.0f}¢ | ${size:.2f}"
+                )
+            fields.append({
+                "name":   f"🆕 New Positions Opened ({len(new_positions)})",
+                "value":  "\n".join(lines),
+                "inline": False,
+            })
+        else:
+            fields.append({
+                "name":   "🆕 New Positions",
+                "value":  "_No new positions since last summary_",
+                "inline": False,
+            })
+
+        # All currently open positions
+        if open_positions:
+            lines = []
+            total_unrealised = 0.0
+            for p in open_positions[:10]:
+                plat      = "🟣" if p.get("platform") == "polymarket" else "🟦"
+                side      = (p.get("side") or "yes").upper()
+                avg_price = float(p.get("avg_price") or 0)
+                cur_price = float(p.get("current_price") or avg_price)
+                pnl       = float(p.get("pnl") or 0)
+                total_unrealised += pnl
+                pnl_s = "+" if pnl >= 0 else ""
+                mv    = "📈" if pnl >= 0 else "📉"
+                label = self._display_ticker(p.get("ticker", "?"), p.get("title", "") or "")
+                lines.append(
+                    f"{mv} {plat} **{label}** | {side} | "
+                    f"{avg_price:.0f}¢→{cur_price:.0f}¢ | **${pnl_s}{pnl:.2f}**"
+                )
+            total_s = "+" if total_unrealised >= 0 else ""
+            lines.append(f"\n**Unrealised Total: ${total_s}{total_unrealised:.2f}**")
+            fields.append({
+                "name":   f"💼 Open Positions ({len(open_positions)})",
+                "value":  "\n".join(lines),
+                "inline": False,
+            })
+        else:
+            fields.append({
+                "name":   "💼 Open Positions",
+                "value":  "_No open positions — cash held_",
+                "inline": False,
+            })
+
+        payload = self._embed(
+            title=f"{icon} {mode_tag} {period} Summary — {now_utc}",
+            description="Scheduled position digest — Kalshi + Polymarket",
             color=color,
             fields=fields,
         )

@@ -264,10 +264,26 @@ Rules:
             if side not in ("yes", "no"):
                 side = "yes"
 
+            # Reject low EV
+            if action == "BUY" and net_ev is not None and net_ev < 4.0:
             # Reject negative EV — must show at least a tiny positive edge
             if action == "BUY" and net_ev is not None and net_ev < 0.5:
                 action = "HOLD"
                 reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < 0.5¢ minimum] " + reasoning
+
+            # Reject physically impossible EV given the market price
+            if action == "BUY" and net_ev is not None:
+                _yes_ask = float(market.get("yes_ask", 50))
+                _no_ask  = float(market.get("no_ask", 50))
+                price_for_side = _yes_ask if side == "yes" else _no_ask
+                max_possible_ev = (100.0 - price_for_side) * 0.98
+                if net_ev > max_possible_ev + 1.0:
+                    logger.warning(
+                        "[AI SANITY] %s net_ev=%.1f¢ > physical max=%.1f¢ — downgrading to HOLD",
+                        ticker, net_ev, max_possible_ev,
+                    )
+                    action = "HOLD"
+                    reasoning = f"[Sanity: impossible EV {net_ev:.1f}¢ > max {max_possible_ev:.1f}¢] " + reasoning
 
             # Reject physically impossible EV given the market price
             if action == "BUY" and net_ev is not None:

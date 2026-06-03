@@ -58,9 +58,62 @@ async def run_tracking(db_manager) -> None:
             pos_id    = pos["id"]
             platform  = pos.get("platform", "kalshi")
 
-            # Polymarket positions: Kalshi API knows nothing about them — skip for now
+            # Polymarket positions: fetch current price from the cached markets table
             if platform == "polymarket":
-                logger.debug("TRACK SKIP Polymarket position %s (no live price feed yet)", ticker)
+                try:
+                    mkt_row = await db_manager.fetchone(
+                        "SELECT yes_ask, no_ask, status FROM markets WHERE ticker=?", (ticker,)
+                    )
+                    if not mkt_row:
+                        logger.debug("TRACK SKIP Polymarket %s — not in markets cache", ticker)
+                        continue
+                    bid_key   = "yes_ask" if side == "yes" else "no_ask"
+                    cur_price = float(mkt_row.get(bid_key, 0) or 0)
+                    if cur_price == 0:
+                        continue
+                    pnl        = (cur_price - avg_price) * contracts / 100
+                    pct_change = ((cur_price - avg_price) / avg_price * 100) if avg_price else 0
+                    mkt_status = mkt_row.get("status", "open")
+                    if mkt_status in ("resolved", "settled", "finalized"):
+                        close_reason = f"resolved:{mkt_status}"
+                        final_price  = 100.0 if (
+                            (side == "yes" and cur_price >= 95) or
+                            (side == "no"  and cur_price >= 95)
+                        ) else 0.0
+                        pnl = (final_price - avg_price) * contracts / 100
+                        await db_manager.execute("""
+                            UPDATE positions SET status='closed', current_price=?,
+                            pnl=?, closed_at=?, close_reason=? WHERE id=?
+                        """, (final_price, pnl, now, close_reason, pos_id))
+                        risk.record_trade(ticker, pnl)
+                        closed += 1
+                    elif stop_loss_pct > 0 and pct_change <= -stop_loss_pct:
+                        close_reason = f"stop_loss:{pct_change:.1f}%"
+                        await db_manager.execute("""
+                            UPDATE positions SET status='closed', current_price=?,
+                            pnl=?, closed_at=?, close_reason=? WHERE id=?
+                        """, (cur_price, pnl, now, close_reason, pos_id))
+                        risk.record_trade(ticker, pnl)
+                        closed += 1
+                    elif take_profit_pct > 0 and pct_change >= take_profit_pct:
+                        close_reason = f"take_profit:{pct_change:.1f}%"
+                        await db_manager.execute("""
+                            UPDATE positions SET status='closed', current_price=?,
+                            pnl=?, closed_at=?, close_reason=? WHERE id=?
+                        """, (cur_price, pnl, now, close_reason, pos_id))
+                        risk.record_trade(ticker, pnl)
+                        closed += 1
+                    else:
+                        await db_manager.execute(
+                            "UPDATE positions SET current_price=?, pnl=? WHERE id=?",
+                            (cur_price, pnl, pos_id)
+                        )
+                        logger.debug(
+                            "MTM POLY %-28s  %s  cur=%.0f¢  entry=%.0f¢  PnL=%+.2f  (%.1f%%)",
+                            ticker, side, cur_price, avg_price, pnl, pct_change,
+                        )
+                except Exception as e:
+                    logger.warning("Poly track error for %s: %s", ticker, e)
                 continue
 
             try:

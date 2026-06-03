@@ -41,6 +41,7 @@ class DailyStats:
         true_prob: Optional[float],
         reasoning: str,
         title: str = "",
+        platform: str = "kalshi",
     ) -> None:
         """Record every AI evaluation — BUY or HOLD — to find best pick of the day."""
         entry = {
@@ -52,6 +53,7 @@ class DailyStats:
             "net_ev":     net_ev,
             "true_prob":  true_prob,
             "reasoning":  reasoning,
+            "platform":   platform,
             "evaluated_at": datetime.now(timezone.utc).isoformat(),
         }
         self.all_evaluations.append(entry)
@@ -60,6 +62,15 @@ class DailyStats:
         self.all_evaluations = self.all_evaluations[:20]
 
     def best_pick(self) -> Optional[Dict]:
+        """Return the highest-confidence evaluation of the day (any platform)."""
+        return self.all_evaluations[0] if self.all_evaluations else None
+
+    def best_pick_by_platform(self) -> Dict[str, Optional[Dict]]:
+        """Return the best pick per platform — Kalshi and Polymarket each get a fair slot."""
+        kal  = next((e for e in self.all_evaluations if e.get("platform", "kalshi") != "polymarket"), None)
+        poly = next((e for e in self.all_evaluations if e.get("platform") == "polymarket"), None)
+        return {"kalshi": kal, "polymarket": poly}
+
         """Return the highest-confidence evaluation of the day."""
         return self.all_evaluations[0] if self.all_evaluations else None
 

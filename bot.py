@@ -210,6 +210,12 @@ class TradingBot:
                     )
                     paper_pnl = (pnl_row or {}).get("pnl", 0.0)
 
+                    # Unrealised PnL from open positions (so $0 isn't shown when trades are open)
+                    unrealised_row = await self.db.fetchone(
+                        "SELECT COALESCE(SUM(pnl),0) as pnl FROM positions WHERE status='open'"
+                    )
+                    unrealised_pnl = (unrealised_row or {}).get("pnl", 0.0) or 0.0
+
                     # All-time win rate — the bot's track record
                     wl_row = await self.db.fetchone(
                         "SELECT "
@@ -226,6 +232,30 @@ class TradingBot:
                     total_pnl    = wl.get("total_pnl", 0.0) or 0.0
                     win_rate     = (total_wins / total_closed * 100) if total_closed > 0 else 0.0
 
+                    # Top candidates: top 2 Kalshi + top 1 Polymarket by volume
+                    def _cand_rows(rows):
+                        return [
+                            {
+                                "ticker":   r["ticker"],
+                                "title":    r.get("title", ""),
+                                "yes_ask":  r.get("yes_ask", 0),
+                                "no_ask":   r.get("no_ask",  0),
+                                "volume":   r.get("volume",  0),
+                                "platform": r.get("platform", "kalshi"),
+                            }
+                            for r in (rows or [])
+                        ]
+                    kal_cand = await self.db.fetchall(
+                        "SELECT ticker, title, yes_ask, no_ask, volume, platform FROM markets "
+                        "WHERE yes_ask > 5 AND yes_ask < 95 "
+                        "AND (platform='kalshi' OR platform IS NULL) ORDER BY volume DESC LIMIT 2"
+                    )
+                    poly_cand = await self.db.fetchall(
+                        "SELECT ticker, title, yes_ask, no_ask, volume, platform FROM markets "
+                        "WHERE yes_ask > 5 AND yes_ask < 95 "
+                        "AND platform='polymarket' ORDER BY volume DESC LIMIT 2"
+                    )
+                    top_candidates = _cand_rows(kal_cand) + _cand_rows(poly_cand)
                     # Top 3 candidates by volume (yes_ask between 5 and 95)
                     candidates_rows = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform "
@@ -261,6 +291,7 @@ class TradingBot:
                         top_candidates=top_candidates,
                         open_positions=open_n,
                         paper_pnl=paper_pnl,
+                        unrealised_pnl=unrealised_pnl,
                         paper=not settings.trading.live_trading_enabled,
                         closed_trades=closed_trades,
                         win_rate=win_rate,
@@ -295,6 +326,85 @@ class TradingBot:
                     pass
 
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
+
+        async def daytime_summary_loop():
+            """Post morning (6 AM UTC) and afternoon (12 PM UTC) position digests."""
+            from src.alerts.discord import DiscordAlerter
+            from datetime import timedelta
+
+            last_summary_at = datetime.now(timezone.utc).isoformat()
+
+            while not self._shutdown.is_set():
+                now = datetime.now(timezone.utc)
+                targets = [now.replace(hour=6,  minute=0, second=0, microsecond=0),
+                           now.replace(hour=12, minute=0, second=0, microsecond=0)]
+                upcoming = [t if t > now else t + timedelta(days=1) for t in targets]
+                next_time = min(upcoming)
+                period = "Morning" if next_time.hour == 6 else "Afternoon"
+                secs_until = (next_time - now).total_seconds()
+                await asyncio.sleep(secs_until)
+                if self._shutdown.is_set():
+                    break
+
+                try:
+                    discord     = DiscordAlerter()
+                    today       = datetime.now(timezone.utc).date().isoformat()
+                    _paper_flag = 0 if settings.trading.live_trading_enabled else 1
+
+                    open_pos = await self.db.fetchall(
+                        "SELECT * FROM positions WHERE status='open' ORDER BY opened_at DESC"
+                    )
+                    open_pos = [dict(r) for r in (open_pos or [])]
+
+                    new_pos = await self.db.fetchall(
+                        "SELECT * FROM positions WHERE status='open' AND opened_at >= ? ORDER BY opened_at DESC",
+                        (last_summary_at,)
+                    )
+                    new_pos = [dict(r) for r in (new_pos or [])]
+
+                    pnl_row = await self.db.fetchone(
+                        "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
+                        "WHERE executed_at >= ? AND pnl IS NOT NULL AND paper_trade=?",
+                        (today + "T00:00:00", _paper_flag)
+                    )
+                    today_pnl = (pnl_row or {}).get("pnl", 0.0)
+
+                    kal_row  = await self.db.fetchone(
+                        "SELECT COUNT(*) as n FROM markets WHERE platform='kalshi' OR platform IS NULL"
+                    )
+                    poly_row = await self.db.fetchone(
+                        "SELECT COUNT(*) as n FROM markets WHERE platform='polymarket'"
+                    )
+                    kalshi_count = (kal_row  or {}).get("n", 0)
+                    poly_count   = (poly_row or {}).get("n", 0)
+
+                    wl = await self.db.fetchone(
+                        "SELECT COUNT(*) as total, "
+                        "SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
+                        "SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses "
+                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL"
+                    ) or {}
+                    total_closed = wl.get("total", 0) or 0
+                    total_wins   = wl.get("wins",  0) or 0
+                    total_losses = wl.get("losses",0) or 0
+                    win_rate     = (total_wins / total_closed * 100) if total_closed > 0 else 0.0
+
+                    await discord.daytime_summary(
+                        period=period,
+                        open_positions=open_pos,
+                        new_positions=new_pos,
+                        today_pnl=today_pnl,
+                        kalshi_count=kalshi_count,
+                        poly_count=poly_count,
+                        win_rate=win_rate,
+                        total_wins=total_wins,
+                        total_losses=total_losses,
+                        total_closed=total_closed,
+                        paper=not settings.trading.live_trading_enabled,
+                    )
+                    last_summary_at = datetime.now(timezone.utc).isoformat()
+                except Exception as e:
+                    logger.error("Daytime summary error: %s", e)
 
         async def daily_summary_loop():
             """Post midnight daily report to Discord, then reset daily stats."""
@@ -370,6 +480,7 @@ class TradingBot:
             asyncio.create_task(track_loop(),            name="track"),
             asyncio.create_task(trade_loop(),            name="trade"),
             asyncio.create_task(hourly_heartbeat_loop(), name="hourly_heartbeat"),
+            asyncio.create_task(daytime_summary_loop(),  name="daytime_summary"),
             asyncio.create_task(daily_summary_loop(),    name="daily_summary"),
         ]
 

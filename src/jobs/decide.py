@@ -67,6 +67,7 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
             true_prob=true_prob,
             reasoning=decision.reasoning,
             title=market.get("title", ""),
+            platform=market.get("platform", "kalshi"),
         )
     except Exception:
         pass

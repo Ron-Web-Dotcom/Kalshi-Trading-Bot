@@ -48,6 +48,20 @@ class PolymarketTradingClient:
 
     # ── Market data (PUBLIC — no auth) ────────────────────────────────────────
 
+    def _auth_headers(self, method: str, path: str, body: str = "") -> Dict[str, str]:
+        ts  = str(int(time.time() * 1000))
+        sig = self._sign(ts, method, path, body)
+        return {
+            "X-PM-Access-Key":  self.key_id,
+            "X-PM-Timestamp":   ts,
+            "X-PM-Signature":   sig,
+            "Content-Type":     "application/json",
+        }
+
+    # ── Market data ───────────────────────────────────────────────────────────
+
+    async def get_markets(self, limit: int = 500) -> List[Dict]:
+        """Fetch active Polymarket markets with current YES/NO prices."""
     async def get_markets(self, limit: int = 500) -> List[Dict]:
         """
         Fetch active Polymarket markets from the public Gamma API.
@@ -76,6 +90,44 @@ class PolymarketTradingClient:
                 return []
 
             markets = []
+            for m in raw:
+                prices = m.get("outcomePrices") or []
+                if isinstance(prices, str):
+                    import json as _json
+                    try:
+                        prices = _json.loads(prices)
+                    except Exception:
+                        prices = []
+                if len(prices) < 2:
+                    continue
+                try:
+                    yes_price = float(prices[0]) * 100
+                    no_price  = float(prices[1]) * 100
+                except (TypeError, ValueError):
+                    continue
+                # Skip only fully zero-priced markets (not yet live)
+                if yes_price == 0 and no_price == 0:
+                    continue
+
+                token_ids = m.get("clobTokenIds") or []
+                markets.append({
+                    "platform":    "polymarket",
+                    "ticker":      m.get("conditionId") or m.get("id", ""),
+                    "slug":        m.get("slug", ""),
+                    "title":       m.get("question", ""),
+                    "category":    (m.get("category") or "").lower(),
+                    "yes_ask":     yes_price,
+                    "no_ask":      no_price,
+                    "yes_bid":     max(yes_price - 1, 1),
+                    "no_bid":      max(no_price  - 1, 1),
+                    "volume":      float(m.get("volume") or 0),
+                    "close_time":  m.get("endDate", ""),
+                    "open_interest": 0,
+                    "status":      "open",
+                    "_yes_token":  token_ids[0] if len(token_ids) > 0 else None,
+                    "_no_token":   token_ids[1] if len(token_ids) > 1 else None,
+                })
+            logger.debug("Polymarket: fetched %d tradeable markets", len(markets))
             for m in items:
                 parsed = self._parse_market(m)
                 if parsed:

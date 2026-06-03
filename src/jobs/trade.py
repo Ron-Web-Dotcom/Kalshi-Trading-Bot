@@ -88,6 +88,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 logger.info("Live portfolio: $%.2f", portfolio_val)
         except Exception as _be:
             logger.warning("Could not fetch live balance — using config $%.2f: %s", portfolio_val, _be)
+    results           = TradingResults()
     trades_this_cycle = 0
 
     # ── Daily loss lockout check ──────────────────────────────────────────
@@ -359,6 +360,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             m for m in markets
             if m.get("ticker") not in arb_tickers
             and m.get("ticker") not in open_tickers
+            and 5 < m.get("yes_ask", 0) < 95
+            and m.get("volume", 0) >= min_vol
             and m.get("yes_ask", 0) > 1
         ][:max_scan]
 
