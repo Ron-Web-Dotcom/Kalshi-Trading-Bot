@@ -331,16 +331,25 @@ class TradingBot:
             last_summary_at = datetime.now(timezone.utc).isoformat()
 
             while not self._shutdown.is_set():
-                now = datetime.now(timezone.utc)
-                targets = [
-                    now.replace(hour=6,  minute=0, second=0, microsecond=0),
-                    now.replace(hour=12, minute=0, second=0, microsecond=0),
-                    now.replace(hour=18, minute=0, second=0, microsecond=0),
+                # Targets in Eastern Time (UTC-4 summer / UTC-5 winter — auto-detect)
+                import zoneinfo
+                et = zoneinfo.ZoneInfo("America/New_York")
+                now_et = datetime.now(et)
+                now    = datetime.now(timezone.utc)
+                targets_et = [
+                    now_et.replace(hour=0,  minute=0, second=0, microsecond=0),
+                    now_et.replace(hour=6,  minute=0, second=0, microsecond=0),
+                    now_et.replace(hour=12, minute=0, second=0, microsecond=0),
+                    now_et.replace(hour=18, minute=0, second=0, microsecond=0),
                 ]
-                upcoming = [t if t > now else t + timedelta(days=1) for t in targets]
-                next_time = min(upcoming)
-                period = {6: "6AM UTC", 12: "12PM UTC", 18: "6PM UTC"}[next_time.hour]
-                secs_until = (next_time - now).total_seconds()
+                # Convert ET targets to UTC for sleep calculation
+                upcoming = [t.astimezone(timezone.utc) if t > now_et else
+                            (t + timedelta(days=1)).astimezone(timezone.utc)
+                            for t in targets_et]
+                next_time_utc = min(upcoming)
+                next_hour_et  = next_time_utc.astimezone(et).hour
+                period = {0: "Midnight", 6: "6AM", 12: "12PM", 18: "6PM"}.get(next_hour_et, "Summary")
+                secs_until = (next_time_utc - now).total_seconds()
                 await asyncio.sleep(secs_until)
                 if self._shutdown.is_set():
                     break
