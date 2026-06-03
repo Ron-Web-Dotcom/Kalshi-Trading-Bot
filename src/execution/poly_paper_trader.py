@@ -144,7 +144,7 @@ class PolyPaperTrader:
                    status, platform, poly_token_id, opened_at, title)
                 VALUES (?,?,?,?,?,0,'open','polymarket',?,?,?)
             """, (ticker, side, contracts, price_cents, price_cents, poly_token_id, now,
-                  (market.get("title") or market.get("question") or "")[:200]))
+                  (market_title or "")[:200]))
 
         logger.info(
             "◆ POLY PAPER  %s %s %s | %d contracts @ %.0f¢ | "

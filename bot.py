@@ -316,7 +316,7 @@ class TradingBot:
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
 
         async def daytime_summary_loop():
-            """Post position digests at 12 AM, 6 AM, 12 PM, 6 PM UTC."""
+            """Post position digests at 6 AM, 12 PM, 6 PM UTC. Midnight handled by daily_summary_loop."""
             from src.alerts.discord import DiscordAlerter
             from datetime import timedelta
 
@@ -325,14 +325,13 @@ class TradingBot:
             while not self._shutdown.is_set():
                 now = datetime.now(timezone.utc)
                 targets = [
-                    now.replace(hour=0,  minute=0, second=0, microsecond=0),
                     now.replace(hour=6,  minute=0, second=0, microsecond=0),
                     now.replace(hour=12, minute=0, second=0, microsecond=0),
                     now.replace(hour=18, minute=0, second=0, microsecond=0),
                 ]
                 upcoming = [t if t > now else t + timedelta(days=1) for t in targets]
                 next_time = min(upcoming)
-                period = {0: "Midnight", 6: "Morning", 12: "Afternoon", 18: "Evening"}[next_time.hour]
+                period = {6: "Morning", 12: "Afternoon", 18: "Evening"}[next_time.hour]
                 secs_until = (next_time - now).total_seconds()
                 await asyncio.sleep(secs_until)
                 if self._shutdown.is_set():

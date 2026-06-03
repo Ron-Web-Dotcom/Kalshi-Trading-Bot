@@ -106,8 +106,8 @@ class PaperTrader:
                                        pnl, status, opened_at, platform, title)
                 VALUES (?,?,?,?,?,0,'open',?,?,?)
             """, (ticker, side, contracts, price_cents, price_cents, now,
-                  market.get("platform", "kalshi"),
-                  (market.get("title") or market.get("question") or "")[:200]))
+                  "kalshi",
+                  (market_title or "")[:200]))
 
             await self.db.insert("paper_signals", {
                 "ticker":        ticker,

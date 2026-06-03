@@ -46,19 +46,7 @@ class PolymarketTradingClient:
             self._http = httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS)
         return self._http
 
-    # ── Market data (PUBLIC — no auth) ────────────────────────────────────────
-
-    def _auth_headers(self, method: str, path: str, body: str = "") -> Dict[str, str]:
-        ts  = str(int(time.time() * 1000))
-        sig = self._sign(ts, method, path, body)
-        return {
-            "X-PM-Access-Key":  self.key_id,
-            "X-PM-Timestamp":   ts,
-            "X-PM-Signature":   sig,
-            "Content-Type":     "application/json",
-        }
-
-    # ── Market data ───────────────────────────────────────────────────────────
+    # ── Market data (PUBLIC — no auth needed for Gamma API) ──────────────────
 
     async def get_markets(self, limit: int = 500) -> List[Dict]:
         """

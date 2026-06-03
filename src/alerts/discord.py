@@ -202,12 +202,14 @@ class DiscordAlerter:
         await self._post(payload)
 
     async def signal_detected(self, ticker: str, signal_type: str,
-                               diff_pct: float, edge_cents: float) -> None:
+                               diff_pct: float, edge_cents: float,
+                               market_title: str = "") -> None:
         """Generic signal alert (backward compat)."""
         if not self.cfg.alert_on_signal:
             return
+        label = self._display_ticker(ticker, market_title)
         payload = self._embed(
-            title=f"📡 Signal: {ticker}",
+            title=f"📡 Signal: {label}",
             description=f"Type: **{signal_type}** | Diff: **{diff_pct:.1f}%** | Edge: **{edge_cents:.1f}¢**",
             color=0xFFAA00,
         )
@@ -696,7 +698,7 @@ class DiscordAlerter:
                     f"Suspicious / low-confidence matches flagged: **{len(snap.get('suspicious_matches', []))}**"
                     + (
                         "\n⚠️ Flagged: " + ", ".join(
-                            f"`{m['ticker']}` (jaccard={m['jaccard']:.2f})"
+                            f"**{self._display_ticker(m['ticker'])}** (jaccard={m['jaccard']:.2f})"
                             for m in snap.get("suspicious_matches", [])[:5]
                         ) if snap.get("suspicious_matches") else ""
                     )
@@ -711,8 +713,9 @@ class DiscordAlerter:
             lines = []
             for i, o in enumerate(top_opps[:3], 1):
                 ev_str = f" EV={o['net_ev']:+.1f}¢" if o.get("net_ev") is not None else ""
+                opp_label = self._display_ticker(o.get('ticker',''), o.get('title','') or '')
                 lines.append(
-                    f"{i}. `{o['ticker']}` {(o.get('side') or '').upper()} — "
+                    f"{i}. **{opp_label}** {(o.get('side') or '').upper()} — "
                     f"conf={o.get('confidence',0):.0f}%{ev_str}\n"
                     f"   _{(o.get('reasoning') or '')[:100]}_"
                 )
@@ -734,7 +737,8 @@ class DiscordAlerter:
                     "take-profit"  if why.startswith("take_profit") else
                     "AI opted out" if why.startswith("ai_reeval")   else "closed"
                 )
-                lines.append(f"{icon} `{t.get('ticker','')}` {(t.get('side') or '').upper()} **${sign}{t_pnl:.2f}** — {label}")
+                t_label = self._display_ticker(t.get('ticker',''), t.get('title','') or '')
+                lines.append(f"{icon} **{t_label}** {(t.get('side') or '').upper()} **${sign}{t_pnl:.2f}** — {label}")
             fields.append({"name": "📋 Closed Trades Today", "value": "\n".join(lines), "inline": False})
 
         # Errors

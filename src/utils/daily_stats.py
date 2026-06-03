@@ -201,6 +201,7 @@ class DailyStats:
         self.trades_skipped = 0
         self.errors = []
         self.top_opportunities = []
+        self.all_evaluations = []
         self.near_misses = []
         self.poly_matches = 0
         self.suspicious_matches = []

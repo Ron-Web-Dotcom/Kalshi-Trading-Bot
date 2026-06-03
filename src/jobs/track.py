@@ -83,9 +83,10 @@ async def run_tracking(db_manager) -> None:
                     mkt_status = mkt_row.get("status", "open")
                     if mkt_status in ("resolved", "settled", "finalized"):
                         close_reason = f"resolved:{mkt_status}"
+                        # YES wins when YES price → 100; NO wins when NO price → 100 (YES → 0)
                         final_price  = 100.0 if (
                             (side == "yes" and cur_price >= 95) or
-                            (side == "no"  and cur_price >= 95)
+                            (side == "no"  and cur_price <= 5)
                         ) else 0.0
                         pnl = (final_price - avg_price) * contracts / 100
                         await db_manager.execute("""
