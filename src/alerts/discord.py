@@ -652,6 +652,25 @@ class DiscordAlerter:
                 "inline": False,
             })
 
+        # Best Pick of the Day — highest AI confidence evaluation, either platform
+        if best_pick:
+            bp_plat  = "🟣 Polymarket" if best_pick.get("platform") == "polymarket" else "🟦 Kalshi"
+            bp_title = self._display_ticker(best_pick.get("ticker", ""), best_pick.get("title", "") or "")
+            bp_side  = (best_pick.get("side") or "YES").upper()
+            bp_conf  = best_pick.get("confidence", 0)
+            bp_ev    = best_pick.get("net_ev")
+            bp_ev_str = f" | EV **{bp_ev:+.1f}¢**" if bp_ev is not None else ""
+            bp_reason = (best_pick.get("reasoning") or "")[:120]
+            fields.insert(-1, {
+                "name":  "🧠 Best Pick of the Day (Highest AI Confidence)",
+                "value": (
+                    f"{bp_plat} — **{bp_title}**\n"
+                    f"BUY **{bp_side}** | Confidence: **{bp_conf:.0f}%**{bp_ev_str}\n"
+                    f"_{bp_reason}_"
+                ),
+                "inline": False,
+            })
+
         payload = self._embed(
             title=f"🔍 Hourly Scan Report — {hhmm} UTC",
             description="Bot alive ✅ | Scanning Kalshi + Polymarket every 60s",
