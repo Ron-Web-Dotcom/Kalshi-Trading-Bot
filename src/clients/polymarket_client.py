@@ -63,47 +63,56 @@ class PolymarketTradingClient:
     async def get_markets(self, limit: int = 500) -> List[Dict]:
         """
         Fetch active Polymarket markets from the public Gamma API.
+        Paginates via offset because the API caps each response at 100.
         Returns list of normalised market dicts ready for the opportunity hunter.
         """
-        logger.info("Polymarket: fetching markets from Gamma API (limit=%d)...", limit)
+        logger.info("Polymarket: fetching markets from Gamma API (target=%d)...", limit)
+        all_items: List[Dict] = []
+        page_size = 100
+        offset    = 0
         try:
-            r = await self._client().get(
-                f"{GAMMA_BASE}/markets",
-                params={"active": "true", "closed": "false", "limit": limit},
-            )
-            if r.status_code != 200:
-                logger.warning(
-                    "Polymarket Gamma API HTTP %d — %s",
-                    r.status_code, r.text[:200],
+            client = self._client()
+            while len(all_items) < limit:
+                r = await client.get(
+                    f"{GAMMA_BASE}/markets",
+                    params={
+                        "active": "true",
+                        "closed": "false",
+                        "limit":  page_size,
+                        "offset": offset,
+                    },
                 )
-                return []
+                if r.status_code != 200:
+                    logger.warning("Polymarket Gamma API HTTP %d — %s", r.status_code, r.text[:200])
+                    break
 
-            raw = r.json()
-            if isinstance(raw, dict):
-                items = raw.get("data") or raw.get("markets") or []
-            elif isinstance(raw, list):
-                items = raw
-            else:
-                logger.warning("Polymarket: unexpected response type %s", type(raw))
-                return []
+                raw = r.json()
+                if isinstance(raw, dict):
+                    items = raw.get("data") or raw.get("markets") or []
+                elif isinstance(raw, list):
+                    items = raw
+                else:
+                    break
+
+                if not items:
+                    break
+                all_items.extend(items)
+                if len(items) < page_size:
+                    break  # last page
+                offset += page_size
 
             markets = []
-            for m in items:
+            for m in all_items[:limit]:
                 parsed = self._parse_market(m)
                 if parsed:
                     markets.append(parsed)
 
-            if items and not markets:
-                sample = items[0]
+            if all_items and not markets:
                 logger.warning(
                     "Polymarket: 0 tradeable from %d raw — sample keys: %s",
-                    len(items),
-                    list(sample.keys())[:15],
+                    len(all_items), list(all_items[0].keys())[:15],
                 )
-            logger.info(
-                "Polymarket: %d tradeable markets from %d raw",
-                len(markets), len(items),
-            )
+            logger.info("Polymarket: %d tradeable markets from %d raw", len(markets), len(all_items))
             return markets
 
         except Exception as e:

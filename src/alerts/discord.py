@@ -522,34 +522,12 @@ class DiscordAlerter:
         pnl_sign = "+" if paper_pnl >= 0 else ""
         color    = 0x5865F2
 
-        """Send hourly scan summary — bot heartbeat + top market candidates."""
-        now_utc  = datetime.now(timezone.utc)
-        hhmm     = now_utc.strftime("%H:%M")
-        pnl_sign = "+" if paper_pnl >= 0 else ""
-        color    = 0x5865F2  # Discord blurple — neutral heartbeat colour
-
-        # Build watching field value
-        if top_candidates:
-            lines = []
-            for i, c in enumerate(top_candidates[:3], 1):
-                ticker   = c.get("ticker", "?")
-                title    = (c.get("title") or "")[:40]
-                yes_ask  = c.get("yes_ask", 0)
-                no_ask   = c.get("no_ask",  0)
-                volume   = c.get("volume",  0)
-                platform = c.get("platform", "kalshi")
-                plat_tag = "🟣" if platform == "polymarket" else "🟦"
-                lines.append(
-                    f"{i}. {plat_tag} `{ticker}` — {title}\n"
-                    f"   YES {yes_ask:.0f}¢ | NO {no_ask:.0f}¢ | vol {volume:,}"
-                )
-            watching_value = "\n".join(lines)
-        else:
-            watching_value = "_No candidates above threshold_"
-
         # Win rate display
         if total_closed == 0:
-            record_str = "No trades yet — building track record..."
+            if open_positions > 0:
+                record_str = f"**{open_positions}** position(s) open — waiting for first settlement..."
+            else:
+                record_str = "No trades yet — building track record..."
             wr_emoji   = "🆕"
         else:
             wr_emoji     = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
@@ -560,10 +538,23 @@ class DiscordAlerter:
                 f"All-time PnL: **${all_pnl_sign}{total_pnl:.2f}**"
             )
 
+        # Build watching field: 2 Kalshi + 2 Polymarket, human-readable labels
+        kal_lines  = []
+        poly_lines = []
+        for c in top_candidates:
+            label = self._display_ticker(c.get("ticker", ""), c.get("title", "") or "")
+            yes   = c.get("yes_ask", 0)
+            no    = c.get("no_ask",  0)
+            if c.get("platform") == "polymarket":
+                poly_lines.append(f"🟣 **{label}**\nYES {yes:.0f}¢ | NO {no:.0f}¢")
+            else:
+                kal_lines.append(f"🟦 **{label}**\nYES {yes:.0f}¢ | NO {no:.0f}¢")
+        watching_no_kalshi = not kal_lines
+        watching = "\n\n".join(kal_lines + poly_lines) or "_No candidates_"
+
         fields = [
             {
-                "name":   f"{wr_emoji} Track Record",
-                "name":   f"{wr_emoji} Bot Track Record (Can I Trust It?)",
+                "name":   f"{wr_emoji} Bot Track Record",
                 "value":  record_str,
                 "inline": False,
             },
@@ -582,46 +573,11 @@ class DiscordAlerter:
                 "inline": False,
             },
             {
-                "name":   "⏱ Next Scan",
-                "name":   "Markets Scanned",
-                "value":  f"{kalshi_count} Kalshi + {poly_count} Polymarket = **{markets_scanned} total**",
-                "inline": False,
-            },
-            {
-                "name":   "Open Positions",
-                "value":  f"{open_positions} | Today's PnL: **${pnl_sign}{paper_pnl:.2f}**",
-                "inline": False,
-            },
-            {
-                "name":   "👀 Watching — Top Candidates",
-                "value":  watching_value,
-                "inline": False,
-            },
-            {
-                "name":   "Next Scan",
-                "value":  "in ~60s",
-                "inline": False,
-            },
-        ]
-
-        # Top candidates — 2 Kalshi + 2 Polymarket
-        if top_candidates:
-            kal_lines  = []
-            poly_lines = []
-            for c in top_candidates:
-                title = self._display_ticker(c.get("ticker", ""), c.get("title", "") or "")
-                yes   = c.get("yes_ask", 0)
-                no    = c.get("no_ask",  0)
-                if c.get("platform") == "polymarket":
-                    poly_lines.append(f"🟣 **{title}**\nYES {yes:.0f}¢ | NO {no:.0f}¢")
-                else:
-                    kal_lines.append(f"🟦 **{title}**\nYES {yes:.0f}¢ | NO {no:.0f}¢")
-            watching = "\n\n".join(kal_lines + poly_lines) or "_No candidates_"
-            fields.insert(-1, {
                 "name":   "👀 Watching (Top 2 Kalshi + Top 2 Polymarket)",
                 "value":  watching,
                 "inline": False,
-            })
+            },
+        ]
 
         # Show today's trade results if any
         if closed_trades:
@@ -639,7 +595,6 @@ class DiscordAlerter:
                 )
                 title = self._display_ticker(t.get("ticker", ""), t.get("title", "") or "")
                 lines.append(f"{icon} **{title}** {(t.get('side') or '').upper()} **${sign}{t_pnl:.2f}** — {label}")
-                lines.append(f"{icon} `{t.get('ticker','')}` {(t.get('side') or '').upper()} **${sign}{t_pnl:.2f}** — {label}")
             fields.insert(-1, {
                 "name":   "📋 Today's Trade Results",
                 "value":  "\n".join(lines),
