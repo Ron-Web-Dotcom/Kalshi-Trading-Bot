@@ -25,9 +25,19 @@ class MarketDataFetcher:
         We store them AS-IS (cents) so all downstream code works in cents.
         """
         logger.info("━━━ MARKET INGEST START ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        # Cap at 1000 highest-volume markets — fetching 57k rows hangs the bot
-        markets = await self.kalshi.get_all_markets(status="open", max_markets=1000)
-        logger.info(f"Fetched {len(markets)} open markets from Kalshi API (capped at 1000 by volume)")
+        # Two pools: top-1000 by volume + top-200 soonest-closing (for short-duration markets)
+        markets_by_vol   = await self.kalshi.get_all_markets(status="open", max_markets=1000)
+        markets_by_close = await self.kalshi.get_all_markets(status="open", max_markets=200, sort_by_close=True)
+
+        # Merge — deduplicate by ticker, volume pool first
+        seen = {m.get("ticker") for m in markets_by_vol}
+        short_duration = [m for m in markets_by_close if m.get("ticker") not in seen]
+        markets = markets_by_vol + short_duration
+
+        logger.info(
+            "Fetched %d open markets from Kalshi API (%d by volume + %d short-duration unique)",
+            len(markets), len(markets_by_vol), len(short_duration),
+        )
 
         now = datetime.now(timezone.utc).isoformat()
         stored = 0

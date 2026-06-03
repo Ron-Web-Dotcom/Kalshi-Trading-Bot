@@ -48,7 +48,7 @@ class PolymarketTradingClient:
 
     # ── Market data (PUBLIC — no auth needed for Gamma API) ──────────────────
 
-    async def get_markets(self, limit: int = 500) -> List[Dict]:
+    async def get_markets(self, limit: int = 1000) -> List[Dict]:
         """
         Fetch active Polymarket markets from the public Gamma API.
         Paginates via offset because the API caps each response at 100.

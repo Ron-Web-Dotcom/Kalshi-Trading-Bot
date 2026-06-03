@@ -334,7 +334,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         poly_markets = []
         if poly_enabled:
             try:
-                raw_poly = await poly_client.get_markets(limit=500)
+                raw_poly = await poly_client.get_markets(limit=1000)
                 now_ts   = __import__("datetime").datetime.now(
                     __import__("datetime").timezone.utc).isoformat()
 
@@ -371,22 +371,50 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
         # ── 7. Best-opportunity hunt across BOTH platforms ────────────────────
         from src.strategy.opportunity import OpportunityHunter
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
 
         arb_tickers = {s["ticker"] for s in all_signals}
         open_positions = await db.fetchall("SELECT ticker FROM positions WHERE status='open'")
         open_tickers = {p["ticker"] for p in (open_positions or [])}
-        kalshi_candidates = [
+        now_utc = _dt.now(_tz.utc)
+
+        def _closes_within(m, hours):
+            ct = m.get("close_time", "")
+            if not ct:
+                return False
+            try:
+                close_dt = _dt.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if close_dt.tzinfo is None:
+                    close_dt = close_dt.replace(tzinfo=_tz.utc)
+                return 0 < (close_dt - now_utc).total_seconds() / 3600 <= hours
+            except Exception:
+                return False
+
+        # Long-term pool: higher-volume markets (any close time)
+        long_term = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
             and m.get("ticker") not in open_tickers
-            and 5 < m.get("yes_ask", 0) < 95
+            and 2 < m.get("yes_ask", 0) < 98
             and m.get("volume", 0) >= min_vol
-            and m.get("yes_ask", 0) > 1
         ][:max_scan]
 
+        # Short-duration pool: closes within 24h — lower volume threshold so
+        # 1min/5min/1hr/daily markets are included regardless of cumulative volume
+        short_term = [
+            m for m in markets
+            if m.get("ticker") not in arb_tickers
+            and m.get("ticker") not in open_tickers
+            and 2 < m.get("yes_ask", 0) < 98
+            and m.get("ticker") not in {x.get("ticker") for x in long_term}
+            and _closes_within(m, 24)
+        ][:max_scan // 2]
+
+        kalshi_candidates = long_term + short_term
+
         logger.info(
-            "── Best-Opportunity Hunt: %d Kalshi + %d Polymarket candidates ─",
-            len(kalshi_candidates), len(poly_markets),
+            "── Best-Opportunity Hunt: %d Kalshi (%d long-term + %d short-duration) + %d Polymarket ─",
+            len(kalshi_candidates), len(long_term), len(short_term), len(poly_markets),
         )
 
         hunter = OpportunityHunter(db=db)
