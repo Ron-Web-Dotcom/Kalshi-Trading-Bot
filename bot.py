@@ -339,7 +339,7 @@ class TradingBot:
                 ]
                 upcoming = [t if t > now else t + timedelta(days=1) for t in targets]
                 next_time = min(upcoming)
-                period = {6: "Morning", 12: "Afternoon", 18: "Evening"}[next_time.hour]
+                period = {6: "6AM UTC", 12: "12PM UTC", 18: "6PM UTC"}[next_time.hour]
                 secs_until = (next_time - now).total_seconds()
                 await asyncio.sleep(secs_until)
                 if self._shutdown.is_set():

@@ -775,8 +775,10 @@ class DiscordAlerter:
         """Morning (9 AM) or Afternoon (3 PM) UTC digest — positions + today's PnL."""
         mode_tag  = "📝 PAPER" if paper else "💰 LIVE"
         pnl_sign  = "+" if today_pnl >= 0 else ""
-        icons  = {"Midnight": "🌙", "Morning": "🌅", "Afternoon": "🌇", "Evening": "🌆"}
-        colors = {"Midnight": 0x2C2F33, "Morning": 0x00BFFF, "Afternoon": 0xFFA500, "Evening": 0xFF6B35}
+        icons  = {"Midnight": "🌙", "6AM UTC": "🌅", "12PM UTC": "☀️", "6PM UTC": "🌆",
+                  "Morning": "🌅", "Afternoon": "🌇", "Evening": "🌆"}
+        colors = {"Midnight": 0x2C2F33, "6AM UTC": 0x00BFFF, "12PM UTC": 0xFFA500, "6PM UTC": 0xFF6B35,
+                  "Morning": 0x00BFFF, "Afternoon": 0xFFA500, "Evening": 0xFF6B35}
         icon  = icons.get(period, "🕐")
         color = colors.get(period, 0x5865F2)
         now_utc   = datetime.now(timezone.utc).strftime("%H:%M UTC")
