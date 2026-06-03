@@ -312,25 +312,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                             market_title=market.get("title", "") or market.get("question", ""),
                         )
 
-        # ── 5. Daily trade gate — sit out if already traded today ────────────────
-        from datetime import date as _date
-        today = _date.today().isoformat()
-        paper_flag = 0 if live_mode else 1   # live trades recorded as paper_trade=0
-        trades_today_row = await db.fetchone(
-            "SELECT COUNT(*) AS n FROM trade_logs WHERE paper_trade=? AND executed_at >= ?",
-            (paper_flag, today + "T00:00:00",)
-        )
-        trades_today = (trades_today_row or {}).get("n", 0)
-        max_per_day  = settings.trading.max_trades_per_day
-
-        if trades_today >= max_per_day and trades_this_cycle == 0:
-            logger.info(
-                "Daily trade limit reached (%d/%d today) — sitting out this cycle",
-                trades_today, max_per_day,
-            )
-            return results
-
-        # ── 6. Fetch Polymarket candidates + store in DB ──────────────────────────
+        # ── 5. Fetch Polymarket candidates + store in DB (always — needed for position tracking) ──
         poly_markets = []
         if poly_enabled:
             try:
@@ -338,7 +320,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 now_ts   = __import__("datetime").datetime.now(
                     __import__("datetime").timezone.utc).isoformat()
 
-                # Persist Polymarket markets to DB so heartbeat can count them
+                # Persist Polymarket markets to DB so tracker can read live prices
                 for pm in raw_poly:
                     try:
                         await db.execute("""
@@ -368,6 +350,24 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             except Exception as pe:
                 logger.warning("Polymarket market load failed: %s", pe)
                 poly_markets = []
+
+        # ── 6. Daily trade gate — sit out if already traded today ────────────────
+        from datetime import date as _date
+        today = _date.today().isoformat()
+        paper_flag = 0 if live_mode else 1   # live trades recorded as paper_trade=0
+        trades_today_row = await db.fetchone(
+            "SELECT COUNT(*) AS n FROM trade_logs WHERE paper_trade=? AND executed_at >= ?",
+            (paper_flag, today + "T00:00:00",)
+        )
+        trades_today = (trades_today_row or {}).get("n", 0)
+        max_per_day  = settings.trading.max_trades_per_day
+
+        if trades_today >= max_per_day and trades_this_cycle == 0:
+            logger.info(
+                "Daily trade limit reached (%d/%d today) — sitting out this cycle",
+                trades_today, max_per_day,
+            )
+            return results
 
         # ── 7. Best-opportunity hunt across BOTH platforms ────────────────────
         from src.strategy.opportunity import OpportunityHunter
