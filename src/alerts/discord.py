@@ -739,6 +739,111 @@ class DiscordAlerter:
         )
         await self._post(payload)
 
+    async def daytime_summary(
+        self,
+        period: str,            # "Morning" or "Afternoon"
+        open_positions: list,
+        new_positions: list,    # opened since last summary
+        today_pnl: float,
+        kalshi_count: int,
+        poly_count: int,
+        win_rate: float,
+        total_wins: int,
+        total_losses: int,
+        total_closed: int,
+        paper: bool = True,
+    ) -> None:
+        """Morning (9 AM) or Afternoon (3 PM) UTC digest — positions + today's PnL."""
+        mode_tag  = "📝 PAPER" if paper else "💰 LIVE"
+        pnl_sign  = "+" if today_pnl >= 0 else ""
+        color     = 0x00BFFF if period == "Morning" else 0xFFA500
+        icon      = "🌅" if period == "Morning" else "🌇"
+        now_utc   = datetime.now(timezone.utc).strftime("%H:%M UTC")
+
+        fields = []
+
+        # Today's PnL + scan counts
+        fields.append({
+            "name":   "📊 Status",
+            "value":  (
+                f"Today's PnL: **${pnl_sign}{today_pnl:.2f}** | Mode: {mode_tag}\n"
+                f"Markets: 🟦 **{kalshi_count}** Kalshi + 🟣 **{poly_count}** Polymarket"
+            ),
+            "inline": False,
+        })
+
+        # Track record
+        if total_closed == 0:
+            wr_str   = "No closed trades yet — building track record..."
+            wr_emoji = "🆕"
+        else:
+            wr_emoji = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
+            all_pnl_sign = "+"
+            wr_str = f"**{win_rate:.0f}% win rate** — {total_wins}W / {total_losses}L / {total_closed} closed"
+        fields.append({"name": f"{wr_emoji} Track Record", "value": wr_str, "inline": False})
+
+        # New positions opened since last summary
+        if new_positions:
+            lines = []
+            for p in new_positions[:8]:
+                plat  = "🟣" if p.get("platform") == "polymarket" else "🟦"
+                side  = (p.get("side") or "yes").upper()
+                price = float(p.get("avg_price") or 0)
+                size  = float(p.get("size_usd") or 0)
+                lines.append(
+                    f"{plat} `{p.get('ticker','?')[:24]}` | **{side}** @ {price:.0f}¢ | ${size:.2f}"
+                )
+            fields.append({
+                "name":   f"🆕 New Positions Opened ({len(new_positions)})",
+                "value":  "\n".join(lines),
+                "inline": False,
+            })
+        else:
+            fields.append({
+                "name":   "🆕 New Positions",
+                "value":  "_No new positions since last summary_",
+                "inline": False,
+            })
+
+        # All currently open positions
+        if open_positions:
+            lines = []
+            total_unrealised = 0.0
+            for p in open_positions[:10]:
+                plat      = "🟣" if p.get("platform") == "polymarket" else "🟦"
+                side      = (p.get("side") or "yes").upper()
+                avg_price = float(p.get("avg_price") or 0)
+                cur_price = float(p.get("current_price") or avg_price)
+                pnl       = float(p.get("pnl") or 0)
+                total_unrealised += pnl
+                pnl_s = "+" if pnl >= 0 else ""
+                mv    = "📈" if pnl >= 0 else "📉"
+                lines.append(
+                    f"{mv} {plat} `{p.get('ticker','?')[:22]}` | {side} | "
+                    f"{avg_price:.0f}¢→{cur_price:.0f}¢ | **${pnl_s}{pnl:.2f}**"
+                )
+            total_s = "+" if total_unrealised >= 0 else ""
+            lines.append(f"\n**Unrealised Total: ${total_s}{total_unrealised:.2f}**")
+            fields.append({
+                "name":   f"💼 Open Positions ({len(open_positions)})",
+                "value":  "\n".join(lines),
+                "inline": False,
+            })
+        else:
+            fields.append({
+                "name":   "💼 Open Positions",
+                "value":  "_No open positions — cash held_",
+                "inline": False,
+            })
+
+        payload = self._embed(
+            title=f"{icon} {mode_tag} {period} Summary — {now_utc}",
+            description="Scheduled position digest — Kalshi + Polymarket",
+            color=color,
+            fields=fields,
+        )
+        await self._post(payload)
+
     async def trade_review(
         self,
         ticker: str,

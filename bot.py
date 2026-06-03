@@ -21,7 +21,6 @@ from src.utils.database import DatabaseManager
 from src.jobs.ingest import run_ingestion
 from src.jobs.trade import run_trading_job
 from src.jobs.track import run_tracking
-from src.jobs.evaluate import run_evaluation
 from src.config.settings import settings
 
 logger = get_trading_logger("main")
@@ -81,6 +80,15 @@ class TradingBot:
             logger.info(line)
 
     async def startup(self):
+        # Run health check before startup banner
+        health = {}
+        try:
+            from src.utils.health_check import HealthChecker
+            checker = HealthChecker()
+            health = await checker.run_all()
+        except Exception as _he:
+            logger.warning("Health check failed: %s", _he)
+
         self._print_startup_banner()
         logger.info("Initializing database...")
         await self.db.initialize()
@@ -108,6 +116,7 @@ class TradingBot:
             await discord.startup_banner(
                 mode="LIVE" if self.live_mode else "PAPER",
                 balance=balance,
+                health_results=health,
             )
         except Exception:
             pass
@@ -152,15 +161,6 @@ class TradingBot:
                     logger.error("Track error: %s", e)
                 await asyncio.sleep(TRACK_INTERVAL)
 
-        async def eval_loop():
-            await asyncio.sleep(EVAL_INTERVAL)
-            while not self._shutdown.is_set():
-                try:
-                    await run_evaluation(db=self.db)
-                except Exception as e:
-                    logger.error("Eval error: %s", e)
-                await asyncio.sleep(EVAL_INTERVAL)
-
         async def trade_loop():
             while not self._shutdown.is_set():
                 try:
@@ -172,10 +172,8 @@ class TradingBot:
         async def hourly_heartbeat_loop():
             """Send an hourly heartbeat to Discord with scan stats and top candidates."""
             from src.alerts.discord import DiscordAlerter
-            # Wait until the top of the next hour before first send
-            now = datetime.now(timezone.utc)
-            seconds_until_next_hour = 3600 - (now.minute * 60 + now.second)
-            await asyncio.sleep(seconds_until_next_hour)
+            # Fire first heartbeat quickly after startup so user sees immediate status
+            await asyncio.sleep(90)
             while not self._shutdown.is_set():
                 try:
                     discord = DiscordAlerter()
@@ -212,6 +210,22 @@ class TradingBot:
                     )
                     paper_pnl = (pnl_row or {}).get("pnl", 0.0)
 
+                    # All-time win rate — the bot's track record
+                    wl_row = await self.db.fetchone(
+                        "SELECT "
+                        "  COUNT(*) as total, "
+                        "  SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
+                        "  SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
+                        "  COALESCE(SUM(pnl), 0) as total_pnl "
+                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL"
+                    )
+                    wl = wl_row or {}
+                    total_closed = wl.get("total", 0) or 0
+                    total_wins   = wl.get("wins",  0) or 0
+                    total_losses = wl.get("losses",0) or 0
+                    total_pnl    = wl.get("total_pnl", 0.0) or 0.0
+                    win_rate     = (total_wins / total_closed * 100) if total_closed > 0 else 0.0
+
                     # Top 3 candidates by volume (yes_ask between 5 and 95)
                     candidates_rows = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform "
@@ -231,6 +245,15 @@ class TradingBot:
                         for r in (candidates_rows or [])
                     ]
 
+                    # Today's closed trades with outcomes
+                    closed_rows = await self.db.fetchall(
+                        "SELECT ticker, side, pnl, close_reason FROM positions "
+                        "WHERE status='closed' AND closed_at >= ? ORDER BY closed_at DESC LIMIT 10",
+                        (today + "T00:00:00",)
+                    )
+                    closed_trades = [dict(r) for r in (closed_rows or [])]
+
+                    from src.utils.daily_stats import stats as daily_stats
                     await discord.hourly_heartbeat(
                         markets_scanned=markets_total,
                         kalshi_count=kalshi_count,
@@ -239,10 +262,180 @@ class TradingBot:
                         open_positions=open_n,
                         paper_pnl=paper_pnl,
                         paper=not settings.trading.live_trading_enabled,
+                        closed_trades=closed_trades,
+                        win_rate=win_rate,
+                        total_wins=total_wins,
+                        total_losses=total_losses,
+                        total_pnl=total_pnl,
+                        total_closed=total_closed,
+                        best_pick=daily_stats.best_pick(),
                     )
                 except Exception as e:
                     logger.error("Hourly heartbeat error: %s", e)
+
+                # ── Near-miss digest (separate message) ───────────────────
+                try:
+                    await discord.near_miss_digest(
+                        paper=not settings.trading.live_trading_enabled
+                    )
+                except Exception:
+                    pass
+
+                # ── Active position monitor (separate message) ────────────
+                try:
+                    open_pos = await self.db.fetchall(
+                        "SELECT * FROM positions WHERE status='open' ORDER BY opened_at DESC"
+                    )
+                    if open_pos:
+                        await discord.position_monitor(
+                            positions=open_pos,
+                            paper=not settings.trading.live_trading_enabled,
+                        )
+                except Exception:
+                    pass
+
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
+
+        async def daytime_summary_loop():
+            """Post morning (6 AM UTC) and afternoon (12 PM UTC) position digests."""
+            from src.alerts.discord import DiscordAlerter
+            from datetime import timedelta
+
+            last_summary_at = datetime.now(timezone.utc).isoformat()
+
+            while not self._shutdown.is_set():
+                now = datetime.now(timezone.utc)
+                targets = [now.replace(hour=6,  minute=0, second=0, microsecond=0),
+                           now.replace(hour=12, minute=0, second=0, microsecond=0)]
+                upcoming = [t if t > now else t + timedelta(days=1) for t in targets]
+                next_time = min(upcoming)
+                period = "Morning" if next_time.hour == 6 else "Afternoon"
+                secs_until = (next_time - now).total_seconds()
+                await asyncio.sleep(secs_until)
+                if self._shutdown.is_set():
+                    break
+
+                try:
+                    discord     = DiscordAlerter()
+                    today       = datetime.now(timezone.utc).date().isoformat()
+                    _paper_flag = 0 if settings.trading.live_trading_enabled else 1
+
+                    open_pos = await self.db.fetchall(
+                        "SELECT * FROM positions WHERE status='open' ORDER BY opened_at DESC"
+                    )
+                    open_pos = [dict(r) for r in (open_pos or [])]
+
+                    new_pos = await self.db.fetchall(
+                        "SELECT * FROM positions WHERE status='open' AND opened_at >= ? ORDER BY opened_at DESC",
+                        (last_summary_at,)
+                    )
+                    new_pos = [dict(r) for r in (new_pos or [])]
+
+                    pnl_row = await self.db.fetchone(
+                        "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
+                        "WHERE executed_at >= ? AND pnl IS NOT NULL AND paper_trade=?",
+                        (today + "T00:00:00", _paper_flag)
+                    )
+                    today_pnl = (pnl_row or {}).get("pnl", 0.0)
+
+                    kal_row  = await self.db.fetchone(
+                        "SELECT COUNT(*) as n FROM markets WHERE platform='kalshi' OR platform IS NULL"
+                    )
+                    poly_row = await self.db.fetchone(
+                        "SELECT COUNT(*) as n FROM markets WHERE platform='polymarket'"
+                    )
+                    kalshi_count = (kal_row  or {}).get("n", 0)
+                    poly_count   = (poly_row or {}).get("n", 0)
+
+                    wl = await self.db.fetchone(
+                        "SELECT COUNT(*) as total, "
+                        "SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
+                        "SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses "
+                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL"
+                    ) or {}
+                    total_closed = wl.get("total", 0) or 0
+                    total_wins   = wl.get("wins",  0) or 0
+                    total_losses = wl.get("losses",0) or 0
+                    win_rate     = (total_wins / total_closed * 100) if total_closed > 0 else 0.0
+
+                    await discord.daytime_summary(
+                        period=period,
+                        open_positions=open_pos,
+                        new_positions=new_pos,
+                        today_pnl=today_pnl,
+                        kalshi_count=kalshi_count,
+                        poly_count=poly_count,
+                        win_rate=win_rate,
+                        total_wins=total_wins,
+                        total_losses=total_losses,
+                        total_closed=total_closed,
+                        paper=not settings.trading.live_trading_enabled,
+                    )
+                    last_summary_at = datetime.now(timezone.utc).isoformat()
+                except Exception as e:
+                    logger.error("Daytime summary error: %s", e)
+
+        async def daily_summary_loop():
+            """Post midnight daily report to Discord, then reset daily stats."""
+            from src.alerts.discord import DiscordAlerter
+            from src.utils.daily_stats import stats as daily_stats
+
+            while not self._shutdown.is_set():
+                # Sleep until next midnight UTC
+                now = datetime.now(timezone.utc)
+                midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                from datetime import timedelta
+                next_midnight = midnight + timedelta(days=1)
+                secs_until = (next_midnight - now).total_seconds()
+                await asyncio.sleep(secs_until)
+
+                try:
+                    discord     = DiscordAlerter()
+                    today       = now.date().isoformat()
+                    snap        = daily_stats.snapshot()
+                    paper       = not settings.trading.live_trading_enabled
+                    _paper_flag = 0 if settings.trading.live_trading_enabled else 1
+
+                    # Win/loss record
+                    wl = await self.db.fetchone(
+                        "SELECT COUNT(*) as total, "
+                        "SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
+                        "SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
+                        "COALESCE(SUM(pnl),0) as total_pnl "
+                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL"
+                    ) or {}
+                    today_pnl_row = await self.db.fetchone(
+                        "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
+                        "WHERE executed_at >= ? AND pnl IS NOT NULL AND paper_trade=?",
+                        (today + "T00:00:00", _paper_flag)
+                    ) or {}
+                    closed_today = await self.db.fetchall(
+                        "SELECT ticker, side, pnl, close_reason FROM positions "
+                        "WHERE status='closed' AND closed_at >= ? ORDER BY closed_at DESC",
+                        (today + "T00:00:00",)
+                    ) or []
+                    open_row = await self.db.fetchone(
+                        "SELECT COUNT(*) as n FROM positions WHERE status='open'"
+                    ) or {}
+
+                    await discord.midnight_daily_summary(
+                        date=today,
+                        snap=snap,
+                        wins=wl.get("wins", 0) or 0,
+                        losses=wl.get("losses", 0) or 0,
+                        total_closed=wl.get("total", 0) or 0,
+                        alltime_pnl=wl.get("total_pnl", 0.0) or 0.0,
+                        today_pnl=today_pnl_row.get("pnl", 0.0) or 0.0,
+                        open_positions=open_row.get("n", 0) or 0,
+                        closed_today=[dict(r) for r in closed_today],
+                        paper=paper,
+                    )
+                    daily_stats.reset_for_new_day()
+                    logger.info("Midnight daily summary sent and stats reset.")
+                except Exception as e:
+                    logger.error("Daily summary error: %s", e)
+
+                await asyncio.sleep(23 * 3600)  # safety — won't fire twice
 
         def _on_signal(signum, frame):
             logger.info("Shutdown signal %s — stopping bot...", signum)
@@ -252,11 +445,12 @@ class TradingBot:
         signal.signal(signal.SIGTERM, _on_signal)
 
         tasks = [
-            asyncio.create_task(ingest_loop(),        name="ingest"),
-            asyncio.create_task(track_loop(),         name="track"),
-            asyncio.create_task(eval_loop(),          name="eval"),
-            asyncio.create_task(trade_loop(),         name="trade"),
+            asyncio.create_task(ingest_loop(),           name="ingest"),
+            asyncio.create_task(track_loop(),            name="track"),
+            asyncio.create_task(trade_loop(),            name="trade"),
             asyncio.create_task(hourly_heartbeat_loop(), name="hourly_heartbeat"),
+            asyncio.create_task(daytime_summary_loop(),  name="daytime_summary"),
+            asyncio.create_task(daily_summary_loop(),    name="daily_summary"),
         ]
 
         await self._shutdown.wait()
