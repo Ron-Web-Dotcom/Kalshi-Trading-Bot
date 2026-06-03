@@ -371,28 +371,6 @@ class DiscordAlerter:
         """Disabled — individual near-miss alerts replaced by hourly near_miss_digest."""
         return
 
-    async def near_miss(self, ticker: str, side: str, confidence: float,
-                        min_confidence: float, net_ev: Optional[float],
-                        true_prob: Optional[float], reasoning: str,
-                        paper: bool = True) -> None:
-        """Disabled — near-miss alerts create too much noise in paper mode."""
-        return
-        mode_tag = "📝 PAPER" if paper else "💰 LIVE"
-        ev_str   = f"{net_ev:+.1f}¢" if net_ev is not None else "n/a"
-        tp_str   = f"{true_prob:.0f}%" if true_prob is not None else "n/a"
-        gap      = min_confidence - confidence
-        payload  = self._embed(
-            title=f"🟡 {mode_tag} Near-Miss — {ticker}",
-            description=(
-                f"AI almost traded `{ticker}` ({side.upper()}) but confidence fell short.\n\n"
-                f"**Confidence:** {confidence:.0f}%  _(need {min_confidence:.0f}% — gap: {gap:.0f}%)_\n"
-                f"**Net EV:** {ev_str}  |  **P(YES):** {tp_str}\n\n"
-                f"_{reasoning[:300]}_"
-            ),
-            color=0xFFAA00,
-        )
-        await self._post(payload)
-
     async def near_miss_digest(self, paper: bool = True) -> None:
         """Send a single hourly near-miss digest — top BUY signals that fell short."""
         from src.utils.daily_stats import stats as _ds
@@ -406,7 +384,6 @@ class DiscordAlerter:
             tp_str = f" | P(YES)={nm['true_prob']:.0f}%" if nm.get("true_prob") is not None else ""
             plat   = "🟣 Polymarket" if nm.get("platform") == "polymarket" else "🟦 Kalshi"
             title  = self._display_ticker(nm.get("ticker", ""), nm.get("title", "") or "")[:70]
-            title  = (nm.get("title") or nm["ticker"])[:70]
             reason = (nm.get("reasoning") or "")[:150]
             lines.append(
                 f"**#{i} — {plat}**\n"

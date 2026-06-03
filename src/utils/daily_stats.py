@@ -71,9 +71,6 @@ class DailyStats:
         poly = next((e for e in self.all_evaluations if e.get("platform") == "polymarket"), None)
         return {"kalshi": kal, "polymarket": poly}
 
-        """Return the highest-confidence evaluation of the day."""
-        return self.all_evaluations[0] if self.all_evaluations else None
-
     def record_near_miss(
         self,
         ticker: str,
