@@ -341,6 +341,10 @@ Rules:
             logger.debug("AI response parse error for %s: %s", ticker, e)
             return self._rule_based_decision(market, signals)
         except Exception as e:
+            err_str = str(e)
+            if "credit balance" in err_str or "invalid_request_error" in err_str and "400" in err_str:
+                # Re-raise so decide.py credit guard can catch it and halt the batch
+                raise
             logger.error(f"AI decision error for {ticker}: {e}")
             return self._rule_based_decision(market, signals)
 
