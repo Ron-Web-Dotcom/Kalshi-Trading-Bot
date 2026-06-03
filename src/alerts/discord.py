@@ -552,6 +552,30 @@ class DiscordAlerter:
             },
         ]
 
+        # Near-Misses — top BUY signals that fell just short, deduplicated
+        try:
+            from src.utils.daily_stats import stats as _ds
+            near_misses = _ds.top_near_misses()
+            if near_misses:
+                nm_lines = []
+                for nm in near_misses:
+                    ev_str   = f" EV {nm['net_ev']:+.1f}¢" if nm.get("net_ev") is not None else ""
+                    tp_str   = f" P(YES)={nm['true_prob']:.0f}%" if nm.get("true_prob") is not None else ""
+                    title    = (nm.get("title") or nm["ticker"])[:60]
+                    platform = "🟣" if nm.get("platform") == "polymarket" else "🟦"
+                    nm_lines.append(
+                        f"{platform} **{nm['confidence']:.0f}% conf**{ev_str}{tp_str}\n"
+                        f"_{title}_\n"
+                        f"{(nm.get('reasoning') or '')[:120]}"
+                    )
+                fields.insert(-1, {
+                    "name":   "🟡 Today's Best Near-Misses (AI wanted BUY, conf fell short)",
+                    "value":  "\n\n".join(nm_lines)[:900],
+                    "inline": False,
+                })
+        except Exception:
+            pass
+
         # Best Pick of the Day — highest-confidence AI evaluation even if not traded
         if best_pick:
             bp_action = best_pick.get("action", "HOLD")

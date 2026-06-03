@@ -24,9 +24,9 @@ class DailyStats:
         self.errors: List[Tuple[datetime, str]] = []
         self.top_opportunities: List[Dict] = []
         self.all_evaluations: List[Dict] = []   # every AI evaluation including HOLDs
+        self.near_misses: List[Dict] = []        # BUY signals that fell just short
         self.poly_matches: int = 0
         self.suspicious_matches: List[Dict] = []
-        self.consecutive_losses: int = 0
         self.consecutive_losses: int = 0
 
     # ── Recording methods ──────────────────────────────────────────────────
@@ -62,6 +62,38 @@ class DailyStats:
     def best_pick(self) -> Optional[Dict]:
         """Return the highest-confidence evaluation of the day."""
         return self.all_evaluations[0] if self.all_evaluations else None
+
+    def record_near_miss(
+        self,
+        ticker: str,
+        title: str,
+        side: str,
+        confidence: float,
+        net_ev: Optional[float],
+        true_prob: Optional[float],
+        reasoning: str,
+        platform: str = "kalshi",
+    ) -> None:
+        """Record a BUY signal that didn't clear the confidence bar. Deduplicates by ticker."""
+        # Remove any existing entry for this ticker (keep freshest)
+        self.near_misses = [n for n in self.near_misses if n["ticker"] != ticker]
+        self.near_misses.append({
+            "ticker":     ticker,
+            "title":      title or ticker[:32],
+            "side":       side,
+            "confidence": confidence,
+            "net_ev":     net_ev,
+            "true_prob":  true_prob,
+            "reasoning":  reasoning,
+            "platform":   platform,
+        })
+        # Keep top 5 by EV, deduplicated
+        self.near_misses.sort(key=lambda x: x.get("net_ev") or 0, reverse=True)
+        self.near_misses = self.near_misses[:5]
+
+    def top_near_misses(self) -> List[Dict]:
+        """Return up to 3 best near-misses of the day."""
+        return self.near_misses[:3]
 
     def record_signal(self, ticker: str, confidence: float, net_ev: Optional[float], action: str) -> None:
         """Increment signals_generated if action is BUY."""
@@ -161,6 +193,7 @@ class DailyStats:
         self.trades_skipped = 0
         self.errors = []
         self.top_opportunities = []
+        self.near_misses = []
         self.poly_matches = 0
         self.suspicious_matches = []
         self.consecutive_losses = 0
