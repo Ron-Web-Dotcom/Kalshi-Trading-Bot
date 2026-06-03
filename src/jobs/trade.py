@@ -521,7 +521,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             _err = str(e)[:500]
             for _secret in filter(None, [
                 _s.kalshi.api_key_id, _s.kalshi.api_key,
-                _s.polymarket.api_secret, _s.ai.anthropic_api_key,
+                _s.polymarket.api_secret, _s.ai.openai_api_key,
             ]):
                 _err = _err.replace(_secret, "[REDACTED]")
             await discord.error_alert(_err, context="run_trading_job")

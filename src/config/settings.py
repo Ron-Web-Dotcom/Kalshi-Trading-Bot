@@ -125,8 +125,8 @@ class PolymarketConfig:
 
 @dataclass
 class AIConfig:
-    anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))
-    model: str = field(default_factory=lambda: _env("AI_MODEL", "claude-sonnet-4-6"))
+    openai_api_key: str = field(default_factory=lambda: _env("OPENAI_API_KEY"))
+    model: str = field(default_factory=lambda: _env("AI_MODEL", "gpt-4o-mini"))
     max_tokens: int = field(default_factory=lambda: _env_int("AI_MAX_TOKENS", 1024))
     temperature: float = field(default_factory=lambda: _env_float("AI_TEMPERATURE", 0.3))
     enabled: bool = field(default_factory=lambda: _env_bool("AI_ENABLED", True))

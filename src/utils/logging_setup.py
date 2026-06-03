@@ -72,7 +72,7 @@ def setup_logging(log_level: str = "INFO") -> None:
         handlers.append(fh)
 
     # Silence noisy third-party loggers
-    for noisy in ("httpx", "httpcore", "anthropic", "asyncio"):
+    for noisy in ("httpx", "httpcore", "openai", "asyncio"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     logging.basicConfig(level=level, handlers=handlers, force=True)

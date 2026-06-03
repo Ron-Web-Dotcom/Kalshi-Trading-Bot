@@ -82,20 +82,20 @@ class HealthChecker:
 
     async def _check_ai(self) -> HealthResult:
         from src.config.settings import settings
-        api_key = settings.ai.anthropic_api_key
+        api_key = settings.ai.openai_api_key
         if not api_key:
-            return HealthResult("AI", False, 0, "ANTHROPIC_API_KEY not set")
+            return HealthResult("AI", False, 0, "OPENAI_API_KEY not set")
         t0 = time.monotonic()
         try:
-            import anthropic
-            client = anthropic.AsyncAnthropic(api_key=api_key)
-            resp = await client.messages.create(
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=api_key)
+            resp = await client.chat.completions.create(
                 model=settings.ai.model,
                 max_tokens=16,
                 messages=[{"role": "user", "content": "Reply OK"}],
             )
             latency_ms = (time.monotonic() - t0) * 1000
-            text = resp.content[0].text if resp.content else ""
+            text = (resp.choices[0].message.content or "") if resp.choices else ""
             ok = bool(text)
             msg = "ok" if ok else "empty response"
             return HealthResult("AI", ok, latency_ms, msg)

@@ -32,11 +32,11 @@ async def run_preflight(verbose: bool = True) -> Tuple[bool, List[str]]:
     def warn(msg: str):
         results.append(f"  WARN  {msg}")
 
-    # 1. Anthropic API key present
-    if settings.ai.anthropic_api_key:
-        ok("ANTHROPIC_API_KEY is set")
+    # 1. OpenAI API key present
+    if settings.ai.openai_api_key:
+        ok("OPENAI_API_KEY is set")
     else:
-        warn("ANTHROPIC_API_KEY not set — AI decisions will use rule-based fallback")
+        warn("OPENAI_API_KEY not set — AI decisions will use rule-based fallback")
 
     # 2. Kalshi RSA key loadable
     try:

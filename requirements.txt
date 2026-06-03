@@ -12,8 +12,8 @@ aiosqlite==0.22.1
 # Kalshi RSA request signing
 cryptography==48.0.0
 
-# Anthropic Claude SDK (AI decision engine)
-anthropic==0.105.2
+# OpenAI SDK (AI decision engine)
+openai==1.90.0
 
 # Data handling
 pandas==3.0.3

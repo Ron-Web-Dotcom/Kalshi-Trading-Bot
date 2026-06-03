@@ -1,4 +1,4 @@
-"""Phase 10 — AI decision layer using Anthropic Claude."""
+"""Phase 10 — AI decision layer using OpenAI."""
 
 import json
 import logging
@@ -36,8 +36,8 @@ class AIDecisionEngine:
 
     def _get_client(self):
         if self._client is None:
-            import anthropic
-            self._client = anthropic.AsyncAnthropic(api_key=self.cfg.anthropic_api_key)
+            from openai import AsyncOpenAI
+            self._client = AsyncOpenAI(api_key=self.cfg.openai_api_key)
         return self._client
 
     async def _build_bot_context(self) -> str:
@@ -131,8 +131,10 @@ class AIDecisionEngine:
     def _build_prompt(self, market: Dict, signals: List[Dict], context: str = "", bot_context: str = "") -> str:
         ticker        = market.get("ticker", "")
         title         = market.get("title", "")
-        yes_ask       = market.get("yes_ask", 0)
-        no_ask        = market.get("no_ask", 0)
+        # Use last_price as fallback when order book is thin (yes_ask=0)
+        _last         = float(market.get("last_price", 0) or 0)
+        yes_ask       = float(market.get("yes_ask", 0) or 0) or _last
+        no_ask        = float(market.get("no_ask",  0) or 0) or (100 - _last if _last else 0)
         volume        = market.get("volume", 0)
         open_interest = market.get("open_interest", 0)
         close_time    = market.get("close_time", "unknown")
@@ -159,12 +161,16 @@ class AIDecisionEngine:
                 f"(Polymarket is an independent prediction market — significant gaps suggest mispricing on one platform)"
             )
 
-        # Pre-compute EV helpers so Claude reasons correctly
+        # Pre-compute EV helpers
         yes_ev_if_true = (100 - yes_ask) * 0.98
         no_ev_if_true  = (100 - no_ask)  * 0.98
         spread         = yes_ask + no_ask - 100
         liquidity      = "LOW" if volume < 100 else "HIGH" if volume > 10000 else "MEDIUM"
-        context_block  = f"\n\n--- REAL-WORLD CONTEXT ---\n{context}\n--- END CONTEXT ---" if context else ""
+        # Warn AI if no live price data was fetched for asset markets
+        _no_price_warn = ""
+        if not context and any(k in title.lower() for k in ["bitcoin", "btc", "eth", "crypto", "price", "$"]):
+            _no_price_warn = "\n⚠️ WARNING: Live price fetch failed — your training data prices may be STALE. Do NOT cite specific prices unless you are certain they are current. Be extra conservative."
+        context_block  = f"\n\n--- REAL-WORLD CONTEXT ---\n{context}\n--- END CONTEXT ---" if context else _no_price_warn
         bot_block      = f"\n\n{bot_context}" if bot_context else ""
 
         return f"""You are an expert quantitative prediction market trader. Your ONLY goal is to find bets where your estimated true probability beats the market price by enough to profit after fees.
@@ -188,7 +194,7 @@ BUY NO  @ {no_ask:.0f}¢ → win {no_ev_if_true:.1f}¢ if NO   |  lose {no_ask:.
 Step 1 — Use the real-world context AND the Polymarket cross-reference (if present) to estimate TRUE P(YES).
          Polymarket having a significantly different price is a strong signal one platform is wrong.
 Step 2 — Compute net EV = (your_true_prob/100 - kalshi_price/100) × 98¢  for the better side.
-Step 3 — BUY if: |net_ev| > 1¢  AND  price between 5–95¢  AND  your true_prob clearly differs from market price.
+Step 3 — BUY if: net_ev > 0¢  AND  price between 5–95¢  AND  your true_prob clearly differs from market price.
 Step 4 — HOLD if context contradicts your estimate or you genuinely have no edge. If edge exists, BUY.
 
 Respond ONLY with this exact JSON (no markdown):
@@ -206,14 +212,13 @@ Rules:
 - Polymarket price divergence is a useful signal but not sufficient alone — check the real-world data.
 - confidence = certainty in your probability, not excitement about the trade
 - confidence ≥ {self.trading_cfg.min_ai_confidence:.0f} required to place a trade
-- This is PAPER trading — no real money. If you see any edge, take it so we can evaluate your reasoning.
 - HOLD only when you genuinely see no edge or context directly contradicts the bet"""
 
     async def decide(self, market: Dict, signals: List[Dict] = []) -> AIDecision:
         ticker = market.get("ticker", "UNKNOWN")
 
-        if not self.cfg.anthropic_api_key:
-            logger.warning("No ANTHROPIC_API_KEY set — using rule-based fallback")
+        if not self.cfg.openai_api_key:
+            logger.warning("No OPENAI_API_KEY set — using rule-based fallback")
             return self._rule_based_decision(market, signals)
 
         try:
@@ -228,13 +233,13 @@ Rules:
         prompt = self._build_prompt(market, signals, context, bot_context)
         try:
             client = self._get_client()
-            response = await client.messages.create(
+            response = await client.chat.completions.create(
                 model=self.cfg.model,
                 max_tokens=self.cfg.max_tokens,
                 temperature=self.cfg.temperature,
                 messages=[{"role": "user", "content": prompt}],
             )
-            raw = response.content[0].text.strip() if response.content else ""
+            raw = (response.choices[0].message.content or "").strip()
             if not raw:
                 logger.warning("AI returned empty response for %s — rule-based fallback", ticker)
                 return self._rule_based_decision(market, signals)
@@ -264,24 +269,10 @@ Rules:
             if side not in ("yes", "no"):
                 side = "yes"
 
-            # Reject negative EV — must show at least a tiny positive edge
-            if action == "BUY" and net_ev is not None and net_ev < 0.5:
+            # Reject zero/negative EV — any positive edge is acceptable
+            if action == "BUY" and net_ev is not None and net_ev <= 0:
                 action = "HOLD"
-                reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < 0.5¢ minimum] " + reasoning
-
-            # Reject physically impossible EV given the market price
-            if action == "BUY" and net_ev is not None:
-                _yes_ask = float(market.get("yes_ask", 50))
-                _no_ask  = float(market.get("no_ask", 50))
-                price_for_side = _yes_ask if side == "yes" else _no_ask
-                max_possible_ev = (100.0 - price_for_side) * 0.98
-                if net_ev > max_possible_ev + 1.0:
-                    logger.warning(
-                        "[AI SANITY] %s net_ev=%.1f¢ > physical max=%.1f¢ — downgrading to HOLD",
-                        ticker, net_ev, max_possible_ev,
-                    )
-                    action = "HOLD"
-                    reasoning = f"[Sanity: impossible EV {net_ev:.1f}¢ > max {max_possible_ev:.1f}¢] " + reasoning
+                reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ ≤ 0] " + reasoning
 
             # Reject physically impossible EV given the market price
             if action == "BUY" and net_ev is not None:
@@ -315,20 +306,20 @@ Rules:
                 ticker, action, side.upper(), confidence, tp_str, ev_str, reasoning[:80],
             )
 
-            # Persist decision
+            # Persist decision — gpt-4o-mini pricing: $0.15/M input, $0.60/M output
             if self.db:
                 now = datetime.now(timezone.utc).isoformat()
                 try:
                     usage = response.usage
-                    cost = (usage.input_tokens * 3e-6 + usage.output_tokens * 15e-6)
+                    cost = (usage.prompt_tokens * 0.15e-6 + usage.completion_tokens * 0.60e-6)
                     await self.db.insert("ai_decisions", {
                         "ticker": ticker,
                         "action": action,
                         "confidence": confidence,
                         "reasoning": reasoning,
                         "model": self.cfg.model,
-                        "prompt_tokens": usage.input_tokens,
-                        "completion_tokens": usage.output_tokens,
+                        "prompt_tokens": usage.prompt_tokens,
+                        "completion_tokens": usage.completion_tokens,
                         "cost_usd": cost,
                         "decided_at": now,
                     })
@@ -338,10 +329,16 @@ Rules:
             return decision
 
         except json.JSONDecodeError as e:
-            logger.debug("AI response parse error for %s: %s", ticker, e)
+            logger.warning("AI JSON parse error for %s: %s — raw: %s", ticker, e, raw[:200] if 'raw' in dir() else "?")
             return self._rule_based_decision(market, signals)
         except Exception as e:
-            logger.error(f"AI decision error for {ticker}: {e}")
+            err_str = str(e)
+            if "insufficient_quota" in err_str or "billing" in err_str.lower():
+                raise
+            if "model" in err_str.lower() or "not_found" in err_str.lower():
+                logger.error("AI MODEL ERROR for %s — check AI_MODEL env var: %s", ticker, e)
+            else:
+                logger.error("AI decision error for %s: %s", ticker, e)
             return self._rule_based_decision(market, signals)
 
     def _rule_based_decision(self, market: Dict, signals: List[Dict]) -> AIDecision:
@@ -396,9 +393,6 @@ Rules:
 
         Returns dict:
           {"verdict": "HOLD" | "EXIT", "confidence": float, "reasoning": str}
-
-        EXIT means the AI believes the original thesis has broken down and
-        we should close now rather than wait for stop-loss / take-profit.
         """
         ticker     = position.get("ticker", "")
         side       = position.get("side", "yes")
@@ -451,18 +445,18 @@ Respond ONLY with this JSON (no markdown):
 
 Important: bias toward HOLD — only EXIT when evidence is clear and strong (confidence >= 75)."""
 
-        if not self.cfg.anthropic_api_key:
+        if not self.cfg.openai_api_key:
             return {"verdict": "HOLD", "confidence": 50, "reasoning": "No AI key — holding by default"}
 
         try:
             client = self._get_client()
-            response = await client.messages.create(
+            response = await client.chat.completions.create(
                 model=self.cfg.model,
                 max_tokens=512,
                 temperature=0.2,
                 messages=[{"role": "user", "content": prompt}],
             )
-            raw = response.content[0].text.strip()
+            raw = (response.choices[0].message.content or "").strip()
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
                 if raw.startswith("json"):
@@ -477,5 +471,5 @@ Important: bias toward HOLD — only EXIT when evidence is clear and strong (con
             )
             return {"verdict": verdict, "confidence": confidence, "reasoning": reasoning}
         except Exception as e:
-            logger.debug("Re-eval error for %s: %s", ticker, e)
+            logger.warning("Re-eval error for %s: %s", ticker, e)
             return {"verdict": "HOLD", "confidence": 0, "reasoning": f"Re-eval failed: {e}"}
