@@ -352,20 +352,8 @@ class DiscordAlerter:
         await self._post(payload)
 
     async def no_opportunity(self, markets_scanned: int, paper: bool = True) -> None:
-        """Alert when the bot scans everything and finds nothing worth trading."""
-        if not self.cfg.alert_on_trade and not self.cfg.alert_on_signal:
-            return
-        mode_tag = "📝 PAPER" if paper else "💰 LIVE"
-        payload  = self._embed(
-            title=f"💤 {mode_tag} No Opportunity Today",
-            description=(
-                f"Scanned {markets_scanned} markets across Kalshi + Polymarket.\n"
-                f"Nothing cleared the confidence + profit threshold.\n"
-                f"**Sitting out — cash is a valid position.**"
-            ),
-            color=0x808080,
-        )
-        await self._post(payload)
+        """Disabled — covered by hourly heartbeat instead of per-cycle noise."""
+        return
 
     async def near_miss(self, *args, **kwargs) -> None:
         """Disabled — individual near-miss alerts replaced by hourly near_miss_digest."""
