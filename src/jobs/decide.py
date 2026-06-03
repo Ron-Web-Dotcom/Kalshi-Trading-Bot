@@ -42,7 +42,14 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
             return None
 
     engine = AIDecisionEngine(db=db)
-    decision = await engine.decide(market, signals)
+    try:
+        decision = await engine.decide(market, signals)
+    except Exception as _api_err:
+        err_str = str(_api_err)
+        if "credit balance" in err_str or "insufficient" in err_str.lower() or "402" in err_str:
+            logger.error("Anthropic API credits exhausted — add funds at console.anthropic.com/billing")
+            return None
+        raise
 
     ticker    = market.get("ticker", "?")
     conf      = decision.confidence
