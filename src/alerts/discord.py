@@ -467,7 +467,7 @@ class DiscordAlerter:
             {"name": f"{pnl_emoji} PnL",    "value": f"${pnl_sign}{pnl:.2f}",    "inline": True},
             {"name": "Open Positions",      "value": str(open_positions),         "inline": True},
             {"name": "Mode",                "value": "Paper (no real money)" if paper else "LIVE",  "inline": True},
-            {"name": "Next Summary",        "value": "Tomorrow 8PM UTC",          "inline": True},
+            {"name": "Next Summary",        "value": "Tomorrow 8PM ET",           "inline": True},
         ]
 
         # Append each closed trade's result so you can review them
@@ -521,8 +521,11 @@ class DiscordAlerter:
         best_pick: Optional[Dict] = None,
     ) -> None:
         """Hourly heartbeat — clean stats only. Near-misses and positions have their own messages."""
+        import zoneinfo as _zi
+        _et      = _zi.ZoneInfo("America/New_York")
+        now_et   = datetime.now(_et)
         now_utc  = datetime.now(timezone.utc)
-        hhmm     = now_utc.strftime("%H:%M")
+        hhmm     = now_et.strftime("%I:%M %p ET")
         pnl_sign = "+" if paper_pnl >= 0 else ""
         color    = 0x5865F2
 
@@ -633,7 +636,7 @@ class DiscordAlerter:
             })
 
         payload = self._embed(
-            title=f"🔍 Hourly Scan Report — {hhmm} UTC",
+            title=f"🔍 Hourly Scan Report — {hhmm}",
             description="Bot alive ✅ | Scanning Kalshi + Polymarket every 60s",
             color=color,
             fields=fields,
@@ -772,14 +775,16 @@ class DiscordAlerter:
         total_closed: int,
         paper: bool = True,
     ) -> None:
-        """Morning (9 AM) or Afternoon (3 PM) UTC digest — positions + today's PnL."""
+        """Scheduled ET digest — positions + today's PnL."""
+        import zoneinfo as _zi
+        _et      = _zi.ZoneInfo("America/New_York")
         mode_tag  = "📝 PAPER" if paper else "💰 LIVE"
         pnl_sign  = "+" if today_pnl >= 0 else ""
         icons  = {"Midnight": "🌙", "6AM": "🌅", "12PM": "☀️", "6PM": "🌆"}
         colors = {"Midnight": 0x2C2F33, "6AM": 0x00BFFF, "12PM": 0xFFA500, "6PM": 0xFF6B35}
         icon  = icons.get(period, "🕐")
         color = colors.get(period, 0x5865F2)
-        now_utc   = datetime.now(timezone.utc).strftime("%H:%M UTC")
+        now_et = datetime.now(_et).strftime("%I:%M %p ET")
 
         fields = []
 
@@ -860,7 +865,7 @@ class DiscordAlerter:
             })
 
         payload = self._embed(
-            title=f"{icon} {mode_tag} {period} Summary — {now_utc}",
+            title=f"{icon} {mode_tag} {period} Summary — {now_et}",
             description="Scheduled position digest — Kalshi + Polymarket",
             color=color,
             fields=fields,
