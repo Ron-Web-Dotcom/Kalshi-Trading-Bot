@@ -266,15 +266,20 @@ class TradingBot:
                             for r in (rows or [])
                         ]
                     kal_cand = await self.db.fetchall(
-                        "SELECT ticker, title, yes_ask, no_ask, volume, platform FROM markets "
-                        "WHERE (yes_ask > 1 AND yes_ask < 99) "
-                        "AND (platform='kalshi' OR platform IS NULL) "
+                        "SELECT ticker, title, "
+                        "  CASE WHEN yes_ask > 0 THEN yes_ask ELSE last_price END as yes_ask, "
+                        "  CASE WHEN no_ask  > 0 THEN no_ask  ELSE (100 - last_price) END as no_ask, "
+                        "  volume, platform FROM markets "
+                        "WHERE (platform='kalshi' OR platform IS NULL) "
                         "AND (status='open' OR status='') "
-                        "AND volume > 0 ORDER BY volume DESC LIMIT 2"
+                        "AND (yes_ask > 1 OR last_price > 1) "
+                        "AND (yes_ask < 99 OR last_price < 99) "
+                        "AND title IS NOT NULL AND title != '' "
+                        "ORDER BY volume DESC LIMIT 2"
                     )
                     poly_cand = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform FROM markets "
-                        "WHERE (yes_ask > 1 AND yes_ask < 99) "
+                        "WHERE yes_ask > 1 AND yes_ask < 99 "
                         "AND platform='polymarket' "
                         "AND (status='open' OR status='') "
                         "ORDER BY volume DESC LIMIT 2"

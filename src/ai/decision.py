@@ -131,8 +131,10 @@ class AIDecisionEngine:
     def _build_prompt(self, market: Dict, signals: List[Dict], context: str = "", bot_context: str = "") -> str:
         ticker        = market.get("ticker", "")
         title         = market.get("title", "")
-        yes_ask       = market.get("yes_ask", 0)
-        no_ask        = market.get("no_ask", 0)
+        # Use last_price as fallback when order book is thin (yes_ask=0)
+        _last         = float(market.get("last_price", 0) or 0)
+        yes_ask       = float(market.get("yes_ask", 0) or 0) or _last
+        no_ask        = float(market.get("no_ask",  0) or 0) or (100 - _last if _last else 0)
         volume        = market.get("volume", 0)
         open_interest = market.get("open_interest", 0)
         close_time    = market.get("close_time", "unknown")

@@ -390,24 +390,30 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             except Exception:
                 return False
 
+        def _tradeable_price(m):
+            """Return the best available price for a market — ask first, last_price fallback."""
+            ask = m.get("yes_ask", 0) or 0
+            return ask if ask > 0 else (m.get("last_price", 0) or 0)
+
         # Long-term pool: higher-volume markets (any close time)
         long_term = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
             and m.get("ticker") not in open_tickers
-            and 2 < m.get("yes_ask", 0) < 98
+            and 2 < _tradeable_price(m) < 98
             and m.get("volume", 0) >= min_vol
+            and (m.get("title") or "")
         ][:max_scan]
 
-        # Short-duration pool: closes within 24h — lower volume threshold so
-        # 1min/5min/1hr/daily markets are included regardless of cumulative volume
+        # Short-duration pool: closes within 24h — any volume, for 1min/5min/1hr/daily markets
         short_term = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
             and m.get("ticker") not in open_tickers
-            and 2 < m.get("yes_ask", 0) < 98
+            and 2 < _tradeable_price(m) < 98
             and m.get("ticker") not in {x.get("ticker") for x in long_term}
             and _closes_within(m, 24)
+            and (m.get("title") or "")
         ][:max_scan // 2]
 
         kalshi_candidates = long_term + short_term
