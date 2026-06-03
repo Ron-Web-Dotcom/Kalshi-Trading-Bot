@@ -124,8 +124,9 @@ class PolymarketTradingClient:
                 try:
                     p0 = float(raw_prices[0])
                     p1 = float(raw_prices[1])
-                    yes_price = p0 * 100 if p0 <= 1.0 else p0
-                    no_price  = p1 * 100 if p1 <= 1.0 else p1
+                    # Gamma API returns fractions (0.0–1.0); cents form is 0–100
+                    yes_price = p0 * 100 if p0 < 1.0 else p0
+                    no_price  = p1 * 100 if p1 < 1.0 else p1
                 except (TypeError, ValueError):
                     pass
 

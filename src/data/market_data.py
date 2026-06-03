@@ -97,6 +97,11 @@ class MarketDataFetcher:
                 (now,)
             )
 
+        # Purge closed markets older than 7 days to prevent unbounded DB growth
+        await self.db.execute(
+            "DELETE FROM markets WHERE status='closed' AND fetched_at < datetime('now', '-7 days')"
+        )
+
         logger.info(
             f"Ingest complete: {stored} stored, {skipped} skipped "
             f"(no ticker)  @{now[:19]}"

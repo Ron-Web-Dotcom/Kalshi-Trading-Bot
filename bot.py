@@ -190,7 +190,7 @@ class TradingBot:
             # Fire first heartbeat quickly after startup
             await asyncio.sleep(90)
             while not self._shutdown.is_set():
-                _now = _time.time()
+                _now = _time.monotonic()  # immune to system clock adjustments
                 if _now - _last_fired < 3000:   # 50 min minimum gap — prevents double-fire
                     await asyncio.sleep(HEARTBEAT_INTERVAL - (_now - _last_fired))
                     continue
