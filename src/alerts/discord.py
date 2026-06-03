@@ -418,7 +418,7 @@ class DiscordAlerter:
             platform  = "🟣" if p.get("platform") == "polymarket" else "🟦"
             lines.append(
                 f"{icon} {platform} **{label}** | {side} | {contracts} contracts\n"
-                f"   Entry: **{avg_price:.0f}¢** → Now: **{cur_price:.0f}¢** "
+                f"   Entry: **{avg_price:.1f}¢** → Now: **{cur_price:.1f}¢** "
                 f"({pct_sign}{pct:.1f}%) | PnL: **${pnl_sign}{pnl:.2f}**"
             )
         total_sign = "+" if total_pnl >= 0 else ""
@@ -553,9 +553,9 @@ class DiscordAlerter:
             yes   = c.get("yes_ask", 0)
             no    = c.get("no_ask",  0)
             if c.get("platform") == "polymarket":
-                poly_lines.append(f"🟣 **{label}**\nYES {yes:.0f}¢ | NO {no:.0f}¢")
+                poly_lines.append(f"🟣 **{label}**\nYES {yes:.1f}¢ | NO {no:.1f}¢")
             else:
-                kal_lines.append(f"🟦 **{label}**\nYES {yes:.0f}¢ | NO {no:.0f}¢")
+                kal_lines.append(f"🟦 **{label}**\nYES {yes:.1f}¢ | NO {no:.1f}¢")
         watching_no_kalshi = not kal_lines
         watching = "\n\n".join(kal_lines + poly_lines) or "_No candidates_"
 
@@ -848,7 +848,7 @@ class DiscordAlerter:
                 label = self._display_ticker(p.get("ticker", "?"), p.get("title", "") or "")
                 lines.append(
                     f"{mv} {plat} **{label}** | {side} | "
-                    f"{avg_price:.0f}¢→{cur_price:.0f}¢ | **${pnl_s}{pnl:.2f}**"
+                    f"{avg_price:.1f}¢→{cur_price:.1f}¢ | **${pnl_s}{pnl:.2f}**"
                 )
             total_s = "+" if total_unrealised >= 0 else ""
             lines.append(f"\n**Unrealised Total: ${total_s}{total_unrealised:.2f}**")
