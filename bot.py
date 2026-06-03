@@ -210,6 +210,12 @@ class TradingBot:
                     )
                     paper_pnl = (pnl_row or {}).get("pnl", 0.0)
 
+                    # Unrealised PnL from open positions (so $0 isn't shown when trades are open)
+                    unrealised_row = await self.db.fetchone(
+                        "SELECT COALESCE(SUM(pnl),0) as pnl FROM positions WHERE status='open'"
+                    )
+                    unrealised_pnl = (unrealised_row or {}).get("pnl", 0.0) or 0.0
+
                     # All-time win rate — the bot's track record
                     wl_row = await self.db.fetchone(
                         "SELECT "
@@ -261,6 +267,7 @@ class TradingBot:
                         top_candidates=top_candidates,
                         open_positions=open_n,
                         paper_pnl=paper_pnl,
+                        unrealised_pnl=unrealised_pnl,
                         paper=not settings.trading.live_trading_enabled,
                         closed_trades=closed_trades,
                         win_rate=win_rate,

@@ -544,6 +544,7 @@ class DiscordAlerter:
         top_candidates: list,
         open_positions: int,
         paper_pnl: float,
+        unrealised_pnl: float = 0.0,
         paper: bool = True,
         closed_trades: Optional[List[Dict]] = None,
         win_rate: float = 0.0,
@@ -584,7 +585,11 @@ class DiscordAlerter:
             },
             {
                 "name":   "💼 Open Positions",
-                "value":  f"**{open_positions}** open | Today's PnL: **${pnl_sign}{paper_pnl:.2f}**",
+                "value":  (
+                    f"**{open_positions}** open | "
+                    f"Realised: **${pnl_sign}{paper_pnl:.2f}** | "
+                    f"Unrealised: **${'+'if unrealised_pnl>=0 else ''}{unrealised_pnl:.2f}**"
+                ),
                 "inline": False,
             },
             {
