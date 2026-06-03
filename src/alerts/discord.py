@@ -592,12 +592,6 @@ class DiscordAlerter:
             record_str   = (
                 f"**{win_rate:.0f}% win rate** — "
                 f"{total_wins}W / {total_losses}L / {total_closed} total | "
-                f"PnL: **${all_pnl_sign}{total_pnl:.2f}**"
-            wr_emoji   = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
-            all_pnl_sign = "+" if total_pnl >= 0 else ""
-            record_str = (
-                f"**{win_rate:.0f}% win rate** — "
-                f"{total_wins}W / {total_losses}L / {total_closed} total | "
                 f"All-time PnL: **${all_pnl_sign}{total_pnl:.2f}**"
             )
 
@@ -661,48 +655,6 @@ class DiscordAlerter:
             fields.insert(-1, {
                 "name":   "👀 Watching (Top 2 Kalshi + Top 2 Polymarket)",
                 "value":  watching,
-        # Near-Misses — top BUY signals that fell just short, deduplicated
-        try:
-            from src.utils.daily_stats import stats as _ds
-            near_misses = _ds.top_near_misses()
-            if near_misses:
-                nm_lines = []
-                for nm in near_misses:
-                    ev_str   = f" EV {nm['net_ev']:+.1f}¢" if nm.get("net_ev") is not None else ""
-                    tp_str   = f" P(YES)={nm['true_prob']:.0f}%" if nm.get("true_prob") is not None else ""
-                    title    = (nm.get("title") or nm["ticker"])[:60]
-                    platform = "🟣" if nm.get("platform") == "polymarket" else "🟦"
-                    nm_lines.append(
-                        f"{platform} **{nm['confidence']:.0f}% conf**{ev_str}{tp_str}\n"
-                        f"_{title}_\n"
-                        f"{(nm.get('reasoning') or '')[:120]}"
-                    )
-                fields.insert(-1, {
-                    "name":   "🟡 Today's Best Near-Misses (AI wanted BUY, conf fell short)",
-                    "value":  "\n\n".join(nm_lines)[:900],
-                    "inline": False,
-                })
-        except Exception:
-            pass
-
-        # Best Pick of the Day — highest-confidence AI evaluation even if not traded
-        if best_pick:
-            bp_action = best_pick.get("action", "HOLD")
-            bp_conf   = best_pick.get("confidence", 0)
-            bp_ev     = best_pick.get("net_ev")
-            bp_ev_str = f" | EV {bp_ev:+.1f}¢" if bp_ev is not None else ""
-            bp_side   = (best_pick.get("side") or "yes").upper()
-            bp_reason = (best_pick.get("reasoning") or "")[:250]
-            bp_title  = (best_pick.get("title") or best_pick.get("ticker", "?"))[:80]
-            bp_ticker = best_pick.get("ticker", "?")
-            traded_note = "" if bp_action == "BUY" else "\n_Not traded — shown for visibility only._"
-            fields.insert(-1, {
-                "name": "🧠 Best Pick of the Day (Highest AI Confidence)",
-                "value": (
-                    f"**{bp_ticker}** — BUY {bp_side} | Confidence: **{bp_conf:.0f}%**{bp_ev_str}\n"
-                    f"_{bp_title}_\n\n"
-                    f"{bp_reason}{traded_note}"
-                ),
                 "inline": False,
             })
 
