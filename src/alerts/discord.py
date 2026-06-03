@@ -316,27 +316,6 @@ class DiscordAlerter:
         ev_str     = f"{net_ev:.1f}¢" if net_ev is not None else "n/a"
         profit_str = f"${exp_profit:.2f}" if exp_profit is not None else "n/a"
 
-        fields = [
-            {"name": "Side",         "value": f"**{side.upper()}**",  "inline": True},
-            {"name": "Price",        "value": f"{price_cents:.0f}¢",  "inline": True},
-            {"name": "Confidence",   "value": f"{confidence:.0f}%",   "inline": True},
-            {"name": "Net EV",       "value": ev_str,                  "inline": True},
-            {"name": "Exp. Profit",  "value": profit_str,              "inline": True},
-            {"name": "Opp. Score",   "value": f"{score_pct}/100",      "inline": True},
-        ]
-        if poly_yes is not None and poly_no is not None:
-            fields.append({
-                "name":  "Polymarket Cross-Check",
-                "value": f"YES {poly_yes:.0f}¢  |  NO {poly_no:.0f}¢",
-                "inline": False,
-            })
-        if reasoning:
-            fields.append({
-                "name":  "🤖 Why this trade",
-                "value": reasoning[:300],
-                "inline": False,
-            })
-
         title_line = market_title[:100] if market_title else ticker
         poly_check = ""
         if poly_yes is not None and poly_no is not None:
@@ -346,13 +325,13 @@ class DiscordAlerter:
             )
 
         fields = [
-            {"name": "❓ Question",      "value": title_line,             "inline": False},
-            {"name": "🎲 Bet",           "value": f"**BUY {side.upper()}**", "inline": True},
-            {"name": "💲 Price",         "value": f"{price_cents:.0f}¢",  "inline": True},
-            {"name": "🎯 Confidence",    "value": f"{confidence:.0f}%",   "inline": True},
-            {"name": "📈 Expected Profit", "value": profit_str,           "inline": True},
-            {"name": "⚖️ Edge per contract", "value": ev_str,            "inline": True},
-            {"name": "🏦 Platform",      "value": platform_tag,           "inline": True},
+            {"name": "❓ Question",          "value": title_line,               "inline": False},
+            {"name": "🎲 Bet",               "value": f"**BUY {side.upper()}**","inline": True},
+            {"name": "💲 Price",             "value": f"{price_cents:.0f}¢",    "inline": True},
+            {"name": "🎯 Confidence",        "value": f"{confidence:.0f}%",     "inline": True},
+            {"name": "📈 Expected Profit",   "value": profit_str,               "inline": True},
+            {"name": "⚖️ Edge per contract", "value": ev_str,                   "inline": True},
+            {"name": "🏦 Platform",          "value": platform_tag,             "inline": True},
         ]
         if reasoning:
             fields.append({
