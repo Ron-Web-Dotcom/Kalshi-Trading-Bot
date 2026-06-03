@@ -316,7 +316,7 @@ class DiscordAlerter:
         ev_str     = f"{net_ev:.1f}¢" if net_ev is not None else "n/a"
         profit_str = f"${exp_profit:.2f}" if exp_profit is not None else "n/a"
 
-        title_line = market_title[:100] if market_title else ticker
+        title_line = self._display_ticker(ticker, market_title)[:100]
         poly_check = ""
         if poly_yes is not None and poly_no is not None:
             poly_check = (
@@ -341,7 +341,7 @@ class DiscordAlerter:
             })
 
         payload = self._embed(
-            title=f"🎯 {mode_tag} Trade Placed — BUY {side.upper()} on {ticker}",
+            title=f"🎯 {mode_tag} Trade Placed — BUY {side.upper()} on {title_line}",
             description=(
                 f"The AI found a profitable edge and is placing a bet.{poly_check}\n\n"
                 f"**If this resolves {side.upper()}, you profit. If not, you lose your stake.**"

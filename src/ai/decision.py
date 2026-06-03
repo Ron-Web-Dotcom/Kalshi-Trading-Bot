@@ -283,20 +283,6 @@ Rules:
                     action = "HOLD"
                     reasoning = f"[Sanity: impossible EV {net_ev:.1f}¢ > max {max_possible_ev:.1f}¢] " + reasoning
 
-            # Reject physically impossible EV given the market price
-            if action == "BUY" and net_ev is not None:
-                _yes_ask = float(market.get("yes_ask", 50))
-                _no_ask  = float(market.get("no_ask", 50))
-                price_for_side = _yes_ask if side == "yes" else _no_ask
-                max_possible_ev = (100.0 - price_for_side) * 0.98
-                if net_ev > max_possible_ev + 1.0:
-                    logger.warning(
-                        "[AI SANITY] %s net_ev=%.1f¢ > physical max=%.1f¢ — downgrading to HOLD",
-                        ticker, net_ev, max_possible_ev,
-                    )
-                    action = "HOLD"
-                    reasoning = f"[Sanity: impossible EV {net_ev:.1f}¢ > max {max_possible_ev:.1f}¢] " + reasoning
-
             decision = AIDecision(
                 action=action,
                 confidence=confidence,
@@ -338,14 +324,16 @@ Rules:
             return decision
 
         except json.JSONDecodeError as e:
-            logger.debug("AI response parse error for %s: %s", ticker, e)
+            logger.warning("AI JSON parse error for %s: %s — raw: %s", ticker, e, raw[:200] if 'raw' in dir() else "?")
             return self._rule_based_decision(market, signals)
         except Exception as e:
             err_str = str(e)
-            if "credit balance" in err_str or "invalid_request_error" in err_str and "400" in err_str:
-                # Re-raise so decide.py credit guard can catch it and halt the batch
+            if "credit balance" in err_str or ("invalid_request_error" in err_str and "400" in err_str):
                 raise
-            logger.error(f"AI decision error for {ticker}: {e}")
+            if "model" in err_str.lower() or "not_found" in err_str.lower():
+                logger.error("AI MODEL ERROR for %s — check AI_MODEL env var: %s", ticker, e)
+            else:
+                logger.error("AI decision error for %s: %s", ticker, e)
             return self._rule_based_decision(market, signals)
 
     def _rule_based_decision(self, market: Dict, signals: List[Dict]) -> AIDecision:
