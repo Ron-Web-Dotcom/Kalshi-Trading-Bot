@@ -233,14 +233,10 @@ async def _fill_slots(
 
     # Fetch live markets from BOTH platforms — all categories, any close time ≤ LIVE_WINDOW_HOURS
     live_k, live_p = [], []
-    try:
-        live_k = await kalshi.get_live_markets(max_hours=LIVE_WINDOW_HOURS, max_markets=60, db=db)
-        if not live_k:
-            logger.warning("Kalshi live fetch: 0 markets in %.1fh window — no in-play Kalshi markets right now", LIVE_WINDOW_HOURS)
-        else:
-            logger.info("Kalshi live fetch: %d markets (window=%.1fh)", len(live_k), LIVE_WINDOW_HOURS)
-    except Exception as e:
-        logger.warning("Kalshi live fetch FAILED: %s", e)
+    # Kalshi bulk API and DB don't carry price data for short-duration live markets
+    # Skip Kalshi in live manager — handled by the regular trade loop instead
+    live_k = []
+    logger.info("Kalshi live: skipped in live manager (no orderbook prices in bulk API)")
     try:
         live_p = await poly_client.get_live_markets(max_hours=POLY_LIVE_WINDOW_HOURS, max_markets=60)
         if not live_p:
@@ -300,10 +296,12 @@ async def _fill_slots(
     )
 
     hunter   = OpportunityHunter(db=db)
+    # Live markets resolve fast — use slightly lower confidence gate than regular trades
+    live_min_conf = max(55.0, settings.trading.min_ai_confidence - 5.0)
     top_live = await hunter.find_top_live(
         live_markets    = all_live,
         arb_signals     = [],
-        min_confidence  = settings.trading.min_ai_confidence,
+        min_confidence  = live_min_conf,
         top_n           = n_needed,
         ai_eval_n       = min(AI_EVAL_N, len(all_live)),
     )
