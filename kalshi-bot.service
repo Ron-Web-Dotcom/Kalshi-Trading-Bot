@@ -11,6 +11,7 @@ User=root
 WorkingDirectory=/root/trading-bot
 Environment="PYTHONUNBUFFERED=1"
 EnvironmentFile=/root/trading-bot/.env
+ExecStartPre=/bin/bash -c 'pkill -f bot.py 2>/dev/null; sleep 2; true'
 ExecStart=/root/trading-bot/venv/bin/python /root/trading-bot/bot.py
 Restart=on-failure
 RestartSec=15
