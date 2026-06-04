@@ -232,32 +232,40 @@ class TradingBot:
                     total_pnl    = wl.get("total_pnl", 0.0) or 0.0
                     win_rate     = (total_wins / total_closed * 100) if total_closed > 0 else 0.0
 
-                    # Top candidates: top 2 Kalshi + top 1 Polymarket by volume
+                    # Top candidates: 4 from each platform, sorted by soonest expiry
+                    # (rotates naturally every hour — actionable, diverse timing)
                     def _cand_rows(rows):
                         return [
                             {
-                                "ticker":   r["ticker"],
-                                "title":    r.get("title", ""),
-                                "yes_ask":  r.get("yes_ask", 0),
-                                "no_ask":   r.get("no_ask",  0),
-                                "volume":   r.get("volume",  0),
-                                "platform": r.get("platform", "kalshi"),
+                                "ticker":     r["ticker"],
+                                "title":      r.get("title", ""),
+                                "yes_ask":    r.get("yes_ask", 0),
+                                "no_ask":     r.get("no_ask",  0),
+                                "volume":     r.get("volume",  0),
+                                "platform":   r.get("platform", "kalshi"),
+                                "close_time": r.get("close_time", ""),
                             }
                             for r in (rows or [])
                         ]
                     kal_cand = await self.db.fetchall(
-                        "SELECT ticker, title, yes_ask, no_ask, volume, platform FROM markets "
+                        "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time FROM markets "
                         "WHERE yes_ask > 5 AND yes_ask < 95 "
                         "AND (platform='kalshi' OR platform IS NULL) "
+                        "AND (status='open' OR status='') "
                         "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
-                        "ORDER BY volume DESC LIMIT 2"
+                        "ORDER BY "
+                        "  CASE WHEN close_time IS NOT NULL AND close_time != '' THEN 1 ELSE 2 END, "
+                        "  close_time ASC LIMIT 4"
                     )
                     poly_cand = await self.db.fetchall(
-                        "SELECT ticker, title, yes_ask, no_ask, volume, platform FROM markets "
+                        "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time FROM markets "
                         "WHERE yes_ask > 5 AND yes_ask < 95 "
                         "AND platform='polymarket' "
+                        "AND (status='open' OR status='') "
                         "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
-                        "ORDER BY volume DESC LIMIT 2"
+                        "ORDER BY "
+                        "  CASE WHEN close_time IS NOT NULL AND close_time != '' THEN 1 ELSE 2 END, "
+                        "  close_time ASC LIMIT 4"
                     )
                     top_candidates = _cand_rows(kal_cand) + _cand_rows(poly_cand)
 
@@ -289,6 +297,7 @@ class TradingBot:
                         best_pick=daily_stats.best_pick(),
                         live_slots=len(_live_slots),
                         live_slots_max=MAX_LIVE_POSITIONS,
+                        all_evaluations=list(daily_stats.all_evaluations),
                     )
                 except Exception as e:
                     logger.error("Hourly heartbeat error: %s", e)

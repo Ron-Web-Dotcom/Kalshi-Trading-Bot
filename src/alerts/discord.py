@@ -627,46 +627,138 @@ class DiscordAlerter:
         best_pick: Optional[Dict] = None,
         live_slots: int = 0,
         live_slots_max: int = 3,
+        all_evaluations: Optional[List[Dict]] = None,
     ) -> None:
         """Hourly heartbeat — clean stats, watching section, best pick."""
         from src.utils.eastern_time import format_et, et_label
         now_utc  = datetime.now(timezone.utc)
         hhmm     = format_et(now_utc, "%I:%M %p") + f" {et_label()}"
-        pnl_sign = "+" if paper_pnl >= 0 else ""
-        color    = 0x5865F2  # Discord blurple
+        color    = 0x5865F2
 
-        # Win rate display
-        if total_closed == 0:
-            record_str = "No trades yet — building track record..."
-            wr_emoji   = "🆕"
-        else:
+        all_evals = all_evaluations or []
+
+        def _timing(ct: str) -> str:
+            """Classify a market by how soon it expires."""
+            if not ct:
+                return "📅 Long-term"
+            try:
+                close_dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if close_dt.tzinfo is None:
+                    close_dt = close_dt.replace(tzinfo=timezone.utc)
+                hours = (close_dt - now_utc).total_seconds() / 3600
+                if hours < 0:
+                    return "⏰ Resolving now"
+                if hours <= 3:
+                    return "🔥 Ends <3h"
+                if hours <= 24:
+                    return "⏳ Ends today"
+                if hours <= 72:
+                    return "📆 Ends this week"
+                if hours <= 720:
+                    return "🗓 Ends this month"
+                return "📅 Long-term"
+            except Exception:
+                return "📅 Long-term"
+
+        # ── Can I Trust This Bot? ─────────────────────────────────────────────
+        if total_closed > 0:
             wr_emoji     = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
             all_pnl_sign = "+" if total_pnl >= 0 else ""
             record_str   = (
-                f"**{win_rate:.0f}% win rate** — "
-                f"{total_wins}W / {total_losses}L / {total_closed} total | "
+                f"**{win_rate:.0f}% win rate** — {total_wins}W / {total_losses}L / {total_closed} closed\n"
                 f"All-time PnL: **${all_pnl_sign}{total_pnl:.2f}**"
             )
+        elif all_evals:
+            wr_emoji   = "🤖"
+            # Prefer BUY signals, fall back to highest-confidence HOLDs
+            buys  = [e for e in all_evals if e.get("action") == "BUY"]
+            show  = (buys or all_evals)[:3]
+            lines = []
+            for e in show:
+                plat   = "🟣" if e.get("platform") == "polymarket" else "🟦"
+                ttl    = self._display_ticker(e.get("ticker", ""), e.get("title", "") or "")[:48]
+                action = e.get("action", "HOLD")
+                conf   = e.get("confidence", 0)
+                ev     = e.get("net_ev")
+                ev_s   = f" EV {ev:+.1f}¢" if ev is not None else ""
+                a_icon = "🟢 BUY" if action == "BUY" else "⏸ HOLD"
+                lines.append(f"{plat} **{ttl}**\n→ {a_icon} {conf:.0f}% conf{ev_s}")
+            record_str = (
+                "No settled bets yet — track record builds when first trade closes.\n\n"
+                "**What the bot evaluated this cycle:**\n\n" + "\n\n".join(lines)
+            )
+        else:
+            wr_emoji   = "🆕"
+            record_str = "Just started — scanning now. First evaluation will appear here shortly."
 
-        # Watching — top 2 Kalshi + top 2 Polymarket, clean titles only
-        kal_lines  = []
-        poly_lines = []
-        if top_candidates:
-            for c in top_candidates:
-                title = self._display_ticker(c.get("ticker", ""), c.get("title", "") or "")
-                yes   = c.get("yes_ask", 0)
-                no    = c.get("no_ask",  0)
-                if c.get("platform") == "polymarket":
-                    if len(poly_lines) < 2:
-                        poly_lines.append(f"🟣 **{title}**\nYES {yes:.0f}¢ | NO {no:.0f}¢")
-                else:
-                    if len(kal_lines) < 2:
-                        kal_lines.append(f"🟦 **{title}**\nYES {yes:.0f}¢ | NO {no:.0f}¢")
-        watching = "\n\n".join(kal_lines + poly_lines) or "_No candidates above threshold_"
+        # ── Watching — dynamic: timed labels + AI verdict ─────────────────────
+        # Build a lookup: ticker → AI evaluation (so we can overlay what bot thinks)
+        eval_by_ticker: Dict[str, Dict] = {}
+        for e in all_evals:
+            t = e.get("ticker", "")
+            if t and t not in eval_by_ticker:
+                eval_by_ticker[t] = e
+
+        watch_lines = []
+        kal_shown = poly_shown = 0
+        for c in top_candidates:
+            if kal_shown >= 2 and poly_shown >= 2:
+                break
+            plat = c.get("platform", "kalshi")
+            if plat == "polymarket" and poly_shown >= 2:
+                continue
+            if plat != "polymarket" and kal_shown >= 2:
+                continue
+
+            icon   = "🟣" if plat == "polymarket" else "🟦"
+            title  = self._display_ticker(c.get("ticker", ""), c.get("title", "") or "")
+            yes    = float(c.get("yes_ask", 0) or 0)
+            no     = float(c.get("no_ask", 0) or (100 - yes if yes else 0))
+            timing = _timing(c.get("close_time", ""))
+
+            ev = eval_by_ticker.get(c.get("ticker", ""))
+            if ev:
+                action = ev.get("action", "HOLD")
+                conf   = ev.get("confidence", 0)
+                a_icon = "🟢 BUY" if action == "BUY" else "⏸ HOLD"
+                ai_str = f"\n🤖 Bot: {a_icon} ({conf:.0f}% conf)"
+            else:
+                ai_str = ""
+
+            watch_lines.append(
+                f"{icon} **{title}** — {timing}\n"
+                f"YES {yes:.0f}¢ | NO {no:.0f}¢{ai_str}"
+            )
+            if plat == "polymarket":
+                poly_shown += 1
+            else:
+                kal_shown += 1
+
+        watching = "\n\n".join(watch_lines) or "_Scanning... no candidates yet_"
+
+        # ── Open Positions — plain-English PnL ───────────────────────────────
+        locked_s = "+" if paper_pnl >= 0 else ""
+        paper_s  = "+" if unrealised_pnl >= 0 else ""
+        p_emoji  = "💰" if paper_pnl >= 0 else "💸"
+        u_emoji  = "📈" if unrealised_pnl >= 0 else "📉"
+
+        if live_slots >= live_slots_max:
+            slots_str = f"⚡ **{live_slots}/{live_slots_max}** in-play slots filled"
+        elif live_slots > 0:
+            slots_str = f"⚡ **{live_slots}/{live_slots_max}** in-play slots active — hunting for more"
+        else:
+            slots_str = f"⚡ **0/{live_slots_max}** in-play — no live events right now"
+
+        positions_val = (
+            f"**{open_positions}** open bets right now\n"
+            f"{p_emoji} **Locked in:** ${locked_s}{paper_pnl:.2f} ← _money already banked from closed bets_\n"
+            f"{u_emoji} **On paper:** ${paper_s}{unrealised_pnl:.2f} ← _what we'd pocket if we cashed out NOW_\n"
+            f"{slots_str}"
+        )
 
         fields = [
             {
-                "name":   f"{wr_emoji} Bot Track Record (Can I Trust It?)",
+                "name":   f"{wr_emoji} Can I Trust This Bot? (Track Record)",
                 "value":  record_str,
                 "inline": False,
             },
@@ -677,23 +769,17 @@ class DiscordAlerter:
             },
             {
                 "name":   "💼 Open Positions",
-                "value":  (
-                    f"**{open_positions}** open | "
-                    f"Realised: **${pnl_sign}{paper_pnl:.2f}** | "
-                    f"Unrealised: **${'+'if unrealised_pnl>=0 else ''}{unrealised_pnl:.2f}**\n"
-                    f"⚡ Live slots: **{live_slots}/{live_slots_max}** active "
-                    f"{'— scanning for in-play markets' if live_slots < live_slots_max else '— all filled'}"
-                ),
+                "value":  positions_val,
                 "inline": False,
             },
             {
-                "name":   "👀 Watching (Top 2 Kalshi + Top 2 Polymarket)",
+                "name":   "👀 What The Bot Is Watching Right Now",
                 "value":  watching,
                 "inline": False,
             },
             {
                 "name":   "⏱ Next Scan",
-                "value":  "in ~60s",
+                "value":  "in ~60s — running 24/7",
                 "inline": False,
             },
         ]
@@ -720,25 +806,27 @@ class DiscordAlerter:
                 "inline": False,
             })
 
-        # Best Pick of the Day — one from Kalshi, one from Polymarket (fair slot each)
-        if best_pick:
+        # Best Pick of the Day — one Kalshi slot + one Polymarket slot
+        if best_pick or all_evals:
             from src.utils.daily_stats import stats as _ds
             picks = _ds.best_pick_by_platform()
             pick_lines = []
-            for plat_key, icon, label in [("kalshi", "🟦", "Kalshi"), ("polymarket", "🟣", "Polymarket")]:
+            for plat_key, p_icon, p_label in [("kalshi", "🟦", "Kalshi"), ("polymarket", "🟣", "Polymarket")]:
                 p = picks.get(plat_key)
                 if not p:
-                    pick_lines.append(f"{icon} **{label}** — _No evaluation yet_")
+                    pick_lines.append(f"{p_icon} **{p_label}** — _No evaluation yet this cycle_")
                     continue
-                title   = self._display_ticker(p.get("ticker", ""), p.get("title", "") or "")
-                side    = (p.get("side") or "YES").upper()
-                conf    = p.get("confidence", 0)
-                ev      = p.get("net_ev")
-                ev_str  = f" | EV **{ev:+.1f}¢**" if ev is not None else ""
-                reason  = (p.get("reasoning") or "")[:100]
+                title  = self._display_ticker(p.get("ticker", ""), p.get("title", "") or "")
+                side   = (p.get("side") or "YES").upper()
+                conf   = p.get("confidence", 0)
+                ev     = p.get("net_ev")
+                ev_str = f" | EV **{ev:+.1f}¢**" if ev is not None else ""
+                action = p.get("action", "HOLD")
+                act_s  = "🟢 Bot would BUY" if action == "BUY" else "⏸ Bot is watching (HOLD)"
+                reason = (p.get("reasoning") or "")[:120]
                 pick_lines.append(
-                    f"{icon} **{label}** — {title}\n"
-                    f"BUY **{side}** | Conf: **{conf:.0f}%**{ev_str}\n"
+                    f"{p_icon} **{p_label}** — {title}\n"
+                    f"{act_s} | **{side}** {conf:.0f}% conf{ev_str}\n"
                     f"_{reason}_"
                 )
             fields.insert(-1, {
