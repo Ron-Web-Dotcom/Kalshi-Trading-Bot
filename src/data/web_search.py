@@ -27,6 +27,9 @@ Sources (all free, no API key required):
 
   COMMUNITY SENTIMENT
   15. Reddit RSS search    — community discussion and sentiment
+
+  VIDEO COVERAGE
+  16. YouTube search       — video titles, channels, view counts (no API key)
 """
 
 import asyncio
@@ -278,6 +281,101 @@ async def _reddit_search(q: str) -> List[str]:
         return []
 
 
+async def _youtube_search(q: str) -> List[str]:
+    """
+    YouTube video search — scrapes titles, channels, and view counts
+    from youtube.com/results without requiring an API key.
+
+    Returns list of strings like:
+      'YouTube [ChannelName]: "Video Title" (1.2M views)'
+    """
+    try:
+        url  = f"https://www.youtube.com/results?search_query={quote_plus(q)}&sp=CAI%253D"  # sorted by upload date
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as _yc:
+                _yr = await _yc.get(url, headers={**_HEADERS, "Accept-Language": "en-US,en;q=0.9"})
+                html = _yr.text
+        except Exception:
+            return []
+        if not html or not isinstance(html, str):
+            return []
+
+        videos = []
+
+        # YouTube embeds initial data as a JSON blob in a <script> tag
+        match = re.search(r'var ytInitialData\s*=\s*(\{.*?\});\s*</script>', html, re.DOTALL)
+        if match:
+            import json
+            try:
+                yt_data = json.loads(match.group(1))
+                # Navigate to video renderers
+                contents = (
+                    yt_data
+                    .get("contents", {})
+                    .get("twoColumnSearchResultsRenderer", {})
+                    .get("primaryContents", {})
+                    .get("sectionListRenderer", {})
+                    .get("contents", [])
+                )
+                for section in contents:
+                    items = (
+                        section
+                        .get("itemSectionRenderer", {})
+                        .get("contents", [])
+                    )
+                    for item in items:
+                        vr = item.get("videoRenderer", {})
+                        if not vr:
+                            continue
+                        title   = "".join(
+                            r.get("text", "")
+                            for r in vr.get("title", {}).get("runs", [])
+                        ).strip()
+                        channel = "".join(
+                            r.get("text", "")
+                            for r in (
+                                vr.get("ownerText", {}).get("runs", [])
+                                or vr.get("longBylineText", {}).get("runs", [])
+                            )
+                        ).strip()
+                        views   = (
+                            vr.get("viewCountText", {}).get("simpleText", "")
+                            or vr.get("shortViewCountText", {}).get("simpleText", "")
+                        ).strip()
+                        pub     = vr.get("publishedTimeText", {}).get("simpleText", "").strip()
+
+                        if title and len(title) > 8:
+                            parts = [f'"{title}"']
+                            if channel:
+                                parts.insert(0, f"[{channel}]")
+                            if views:
+                                parts.append(f"({views})")
+                            if pub:
+                                parts.append(pub)
+                            videos.append("YouTube " + " ".join(parts))
+                        if len(videos) >= 6:
+                            break
+                    if len(videos) >= 6:
+                        break
+            except Exception:
+                pass
+
+        # Fallback: regex title scrape if JSON parse failed
+        if not videos:
+            for m in re.finditer(r'"title":\{"runs":\[\{"text":"([^"]{8,120})"', html):
+                t = m.group(1).strip()
+                if t and t not in ("YouTube", "Shorts") and not t.startswith("http"):
+                    videos.append(f'YouTube: "{t}"')
+                if len(videos) >= 5:
+                    break
+
+        return videos
+
+    except Exception as e:
+        logger.debug("YouTube search failed: %s", e)
+        return []
+
+
 # ── Main aggregator ───────────────────────────────────────────────────────────
 
 async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
@@ -312,8 +410,9 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
                 # Knowledge / background
                 _ddg_instant(q),
                 *wiki_coros,
-                # Community
+                # Community + video
                 _reddit_search(q),
+                _youtube_search(q),
                 return_exceptions=True,
             ),
             timeout=timeout,
@@ -342,6 +441,7 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     ddg        = _next()
     wiki_results = [_next() for _ in wiki_coros]
     reddit_h   = _next() or []
+    youtube_h  = _next() or []
 
     # Deduplicate and combine all headlines
     seen: set = set()
@@ -393,7 +493,14 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
             lines.append(f"  • {post}")
         blocks.append("\n".join(lines))
 
-    # 5. Prediction market cross-references
+    # 5. YouTube video search
+    if youtube_h:
+        lines = ["=== VIDEO COVERAGE (YouTube) ==="]
+        for vid in youtube_h[:6]:
+            lines.append(f"  • {vid}")
+        blocks.append("\n".join(lines))
+
+    # 6. Prediction market cross-references
     pm_lines = []
     if isinstance(manifold, str) and manifold:
         pm_lines.append(manifold)
@@ -405,12 +512,13 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     if blocks:
         total_sources = sum([
             bool(all_headlines), bool(wiki_text), bool(ddg),
-            bool(reddit_h), bool(pm_lines),
+            bool(reddit_h), bool(youtube_h), bool(pm_lines),
         ])
         logger.info(
-            "Web search: %d headlines | %d wiki | reddit=%s | pred_markets=%s | query='%s'",
+            "Web search: %d headlines | %d wiki | reddit=%s | youtube=%d | pred_markets=%s | query='%s'",
             len(all_headlines), len(wiki_text),
             "yes" if reddit_h else "no",
+            len(youtube_h),
             "yes" if pm_lines else "no",
             q[:60],
         )
