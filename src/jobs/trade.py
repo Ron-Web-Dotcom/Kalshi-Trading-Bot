@@ -520,7 +520,9 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 len(kalshi_candidates), len(poly_markets), open_count,
             )
 
-        if best and trades_this_cycle < max_trades:
+        # Live markets get one extra trade slot per cycle — they're time-sensitive
+        live_bonus = 1 if (best and best.get("market", {}).get("is_live")) else 0
+        if best and trades_this_cycle < max_trades + live_bonus:
             market   = best["market"]
             decision = best["decision"]
             poly_comp= best.get("poly_comp")
@@ -551,12 +553,21 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 size_multiplier = 0.25
                 size_tier       = "MIN (60–69% conf)"
             planned_size_usd = round(max(min_size, min(base * size_multiplier, max_size)), 2)
-            logger.info("Trade size: $%.2f [%s]", planned_size_usd, size_tier)
-            contracts_est    = (planned_size_usd / (price / 100)) if price > 0 else 0
-            exp_profit_usd   = contracts_est * (net_ev / 100) if net_ev is not None else None
-            roi_pct          = (exp_profit_usd / planned_size_usd * 100) if (exp_profit_usd and planned_size_usd) else None
-            min_roi = settings.trading.min_profit_roi_pct
-            min_abs = settings.trading.min_profit_abs_usd
+            is_live_market   = bool(market.get("is_live"))
+            logger.info("Trade size: $%.2f [%s]%s", planned_size_usd, size_tier,
+                        " [LIVE]" if is_live_market else "")
+            contracts_est  = (planned_size_usd / (price / 100)) if price > 0 else 0
+            exp_profit_usd = contracts_est * (net_ev / 100) if net_ev is not None else None
+            roi_pct        = (exp_profit_usd / planned_size_usd * 100) if (exp_profit_usd and planned_size_usd) else None
+
+            # Live markets resolve quickly — relax the profit gate (2% ROI / $0.50 min)
+            # Regular markets keep the standard gate (5% ROI / $1.00 min)
+            if is_live_market:
+                min_roi = max(2.0, settings.trading.min_profit_roi_pct * 0.4)
+                min_abs = max(0.50, settings.trading.min_profit_abs_usd * 0.5)
+            else:
+                min_roi = settings.trading.min_profit_roi_pct
+                min_abs = settings.trading.min_profit_abs_usd
 
             if exp_profit_usd is None or exp_profit_usd < min_abs or (roi_pct or 0) < min_roi:
                 skip_reason = (
