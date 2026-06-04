@@ -266,6 +266,7 @@ class TradingBot:
                     closed_trades = [dict(r) for r in (closed_rows or [])]
 
                     from src.utils.daily_stats import stats as daily_stats
+                    from src.jobs.live_market_manager import _live_slots, MAX_LIVE_POSITIONS
                     await discord.hourly_heartbeat(
                         markets_scanned=markets_total,
                         kalshi_count=kalshi_count,
@@ -282,6 +283,8 @@ class TradingBot:
                         total_pnl=total_pnl,
                         total_closed=total_closed,
                         best_pick=daily_stats.best_pick(),
+                        live_slots=len(_live_slots),
+                        live_slots_max=MAX_LIVE_POSITIONS,
                     )
                 except Exception as e:
                     logger.error("Hourly heartbeat error: %s", e)

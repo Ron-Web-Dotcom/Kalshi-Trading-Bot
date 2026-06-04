@@ -616,6 +616,8 @@ class DiscordAlerter:
         total_pnl: float = 0.0,
         total_closed: int = 0,
         best_pick: Optional[Dict] = None,
+        live_slots: int = 0,
+        live_slots_max: int = 3,
     ) -> None:
         """Hourly heartbeat — clean stats, watching section, best pick."""
         from src.utils.eastern_time import format_et, et_label
@@ -669,7 +671,9 @@ class DiscordAlerter:
                 "value":  (
                     f"**{open_positions}** open | "
                     f"Realised: **${pnl_sign}{paper_pnl:.2f}** | "
-                    f"Unrealised: **${'+'if unrealised_pnl>=0 else ''}{unrealised_pnl:.2f}**"
+                    f"Unrealised: **${'+'if unrealised_pnl>=0 else ''}{unrealised_pnl:.2f}**\n"
+                    f"⚡ Live slots: **{live_slots}/{live_slots_max}** active "
+                    f"{'— scanning for in-play markets' if live_slots < live_slots_max else '— all filled'}"
                 ),
                 "inline": False,
             },

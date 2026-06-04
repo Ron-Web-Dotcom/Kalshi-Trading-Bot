@@ -234,7 +234,7 @@ async def _fill_slots(
     except Exception:
         pass
 
-    live_k = [m for m in live_k if m.get("ticker") not in open_tickers and 2 < (m.get("yes_ask") or 0) < 98]
+    live_k = [m for m in live_k if m.get("ticker") not in open_tickers and 1 < (m.get("yes_ask") or 0) < 99]
     live_p = [m for m in live_p if m.get("ticker") not in open_tickers and m.get("yes_ask", 0) > 1]
     all_live = live_k + live_p
 
