@@ -219,12 +219,14 @@ async def _fill_slots(
     live_k, live_p = [], []
     try:
         live_k = await kalshi.get_live_markets(max_hours=LIVE_WINDOW_HOURS, max_markets=60)
+        logger.info("Kalshi live fetch: %d markets (window=%.1fh)", len(live_k), LIVE_WINDOW_HOURS)
     except Exception as e:
-        logger.debug("Kalshi live fetch: %s", e)
+        logger.warning("Kalshi live fetch FAILED: %s", e)
     try:
         live_p = await poly_client.get_live_markets(max_hours=LIVE_WINDOW_HOURS, max_markets=60)
+        logger.info("Polymarket live fetch: %d markets (window=%.1fh)", len(live_p), LIVE_WINDOW_HOURS)
     except Exception as e:
-        logger.debug("Polymarket live fetch: %s", e)
+        logger.warning("Polymarket live fetch FAILED: %s", e)
 
     # Exclude already-open tickers
     open_tickers = set(_live_slots.keys())
@@ -234,12 +236,17 @@ async def _fill_slots(
     except Exception:
         pass
 
+    raw_k, raw_p = len(live_k), len(live_p)
     live_k = [m for m in live_k if m.get("ticker") not in open_tickers and 1 < (m.get("yes_ask") or 0) < 99]
     live_p = [m for m in live_p if m.get("ticker") not in open_tickers and m.get("yes_ask", 0) > 1]
+    logger.info(
+        "After price/dedup filter: %d/%d Kalshi + %d/%d Polymarket eligible",
+        len(live_k), raw_k, len(live_p), raw_p,
+    )
     all_live = live_k + live_p
 
     if not all_live:
-        logger.info("No fresh live markets available for slot fill")
+        logger.info("No fresh live markets available for slot fill — all filtered out")
         return 0
 
     logger.info(
