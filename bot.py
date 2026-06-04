@@ -589,7 +589,7 @@ class TradingBot:
             from src.alerts.discord import DiscordAlerter
             from src.utils.daily_stats import stats as _da
             from src.jobs.live_market_manager import _live_slots as _ls
-            from src.data.sports_fetcher import is_event_live_now
+            from src.data.live_event_detector import is_event_live_now
 
             _alerted: dict = {}
             _alerted_date  = datetime.now(timezone.utc).date()
