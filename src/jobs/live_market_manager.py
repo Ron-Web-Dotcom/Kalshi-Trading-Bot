@@ -100,14 +100,20 @@ async def _close_position(db, ticker: str, reason: str) -> None:
 
 # ── Price fetching ────────────────────────────────────────────────────────────
 
-async def _fetch_kalshi_price(ticker: str, kalshi) -> Optional[float]:
+async def _fetch_kalshi_market(ticker: str, kalshi) -> Optional[Dict]:
     try:
         data = await kalshi._request("GET", f"/markets/{ticker}")
-        market = data.get("market") or data
-        yes_ask = market.get("yes_ask") or market.get("last_price") or 0
-        return float(yes_ask)
+        return data.get("market") or data
     except Exception:
         return None
+
+
+async def _fetch_kalshi_price(ticker: str, kalshi) -> Optional[float]:
+    m = await _fetch_kalshi_market(ticker, kalshi)
+    if not m:
+        return None
+    yes_ask = m.get("yes_ask") or m.get("last_price") or 0
+    return float(yes_ask)
 
 
 async def _fetch_poly_price(ticker: str, db) -> Optional[float]:
@@ -141,14 +147,20 @@ async def _check_and_exit(
     side     = slot.get("side", "yes")
     entry    = float(slot.get("avg_price") or slot.get("entry_price") or 0)
 
-    # a) Close time passed?
+    # Fetch current price for both resolution check and stop-loss
+    if platform == "kalshi":
+        current = await _fetch_kalshi_price(ticker, kalshi)
+    else:
+        current = await _fetch_poly_price(ticker, db)
+
+    # a) Close time passed → market resolved, check win/loss from final price
     close_time = slot.get("close_time") or ""
     if close_time:
         hl = _hours_left(close_time)
         if hl is not None and hl <= 0:
             logger.info("LIVE EXIT %s — market resolved (close_time passed)", ticker)
             await _close_position(db, ticker, reason_override or "market_resolved")
-            await _send_exit_alert(discord, slot, reason="Market resolved ✅", current_price=None)
+            await _send_resolution_alert(discord, slot, final_price=current)
             return True
 
     if reason_override:
@@ -156,11 +168,6 @@ async def _check_and_exit(
         return True
 
     # b) Stop-loss check
-    if platform == "kalshi":
-        current = await _fetch_kalshi_price(ticker, kalshi)
-    else:
-        current = await _fetch_poly_price(ticker, db)
-
     if current is None or entry <= 0:
         return False
 
@@ -175,11 +182,7 @@ async def _check_and_exit(
             ticker, entry, current, loss_pct, STOP_LOSS_PCT,
         )
         await _close_position(db, ticker, f"stop_loss:{loss_pct:.1f}%")
-        await _send_exit_alert(
-            discord, slot,
-            reason=f"Stop-loss triggered — {loss_pct:.1f}% loss",
-            current_price=current,
-        )
+        await _send_stopout_alert(discord, slot, current_price=current, loss_pct=loss_pct)
         return True
 
     return False
@@ -336,41 +339,146 @@ async def _fill_slots(
     return entered
 
 
-# ── Exit alert ────────────────────────────────────────────────────────────────
+# ── Exit alerts ───────────────────────────────────────────────────────────────
 
-async def _send_exit_alert(discord, slot: Dict, reason: str, current_price: Optional[float]) -> None:
+def _calc_pnl(slot: Dict, exit_price: float) -> tuple:
+    """Return (pnl_dollars, pnl_pct, capital_in) for a slot."""
+    entry     = float(slot.get("entry_price") or slot.get("avg_price") or 0)
+    contracts = int(slot.get("contracts") or 1)
+    side      = (slot.get("side") or "yes").lower()
+    size_usd  = float(slot.get("size_usd") or (entry * contracts / 100))
+
+    if side == "yes":
+        pnl = (exit_price - entry) / 100 * contracts
+    else:
+        pnl = (entry - exit_price) / 100 * contracts
+
+    pnl_pct = (pnl / size_usd * 100) if size_usd else 0
+    return round(pnl, 2), round(pnl_pct, 1), round(size_usd, 2)
+
+
+async def _send_resolution_alert(discord, slot: Dict, final_price: Optional[float]) -> None:
+    """Alert when a live market resolves naturally (we stayed in — opted in)."""
     try:
-        entry   = float(slot.get("entry_price") or slot.get("avg_price") or 0)
-        ticker  = slot.get("ticker", "")
-        title   = slot.get("title") or ticker
-        side    = (slot.get("side") or "yes").upper()
-        plat    = slot.get("platform", "kalshi")
+        from src.utils.eastern_time import format_et, et_label
+        entry     = float(slot.get("entry_price") or slot.get("avg_price") or 0)
+        ticker    = slot.get("ticker", "")
+        title     = slot.get("title") or ticker
+        side      = (slot.get("side") or "yes").upper()
+        contracts = int(slot.get("contracts") or 1)
+        plat      = slot.get("platform", "kalshi")
         plat_icon = "🟦" if plat == "kalshi" else "🟣"
-        pnl_str = ""
-        if current_price and entry:
-            contracts = int(slot.get("contracts") or 1)
-            raw_pnl   = (current_price - entry) / 100 * contracts if side == "YES" else (entry - current_price) / 100 * contracts
-            pnl_str   = f" | PnL ≈ ${raw_pnl:+.2f}"
+        conf      = float(slot.get("confidence") or 0)
+        size_usd  = float(slot.get("size_usd") or 0)
+        et_time   = format_et(fmt="%I:%M %p") + f" {et_label()}"
+
+        # Determine win/loss from final price
+        # YES wins when yes_ask → ~95-100¢  |  NO wins when yes_ask → ~0-5¢
+        if final_price is not None:
+            if side == "YES":
+                won = final_price >= 85
+            else:
+                won = final_price <= 15
+            pnl, pnl_pct, _ = _calc_pnl(slot, final_price)
+            exit_str = f"{final_price:.0f}¢"
+        else:
+            # Can't fetch final price — estimate from market side
+            won = None
+            pnl, pnl_pct = 0.0, 0.0
+            exit_str = "resolving…"
+
+        if won is True:
+            result_emoji = "✅"
+            result_label = "WON — We stayed in and it paid off!"
+            color        = 0x00FF7F
+            pnl_line     = f"**+${pnl:.2f}** (+{pnl_pct:.1f}%)"
+        elif won is False:
+            result_emoji = "❌"
+            result_label = "LOST — Market resolved against us"
+            color        = 0xFF4444
+            pnl_line     = f"**${pnl:.2f}** ({pnl_pct:.1f}%)"
+        else:
+            result_emoji = "⏳"
+            result_label = "Market closed — result pending settlement"
+            color        = 0xAAAAAA
+            pnl_line     = "Pending"
+
+        max_payout = contracts * (100 - entry) / 100 if side == "YES" else contracts * entry / 100
 
         payload = {
             "embeds": [{
-                "title": f"🔴 LIVE EXIT — {reason}",
-                "description": f"{plat_icon} **{title[:80]}**",
-                "color": 0xFF4444,
+                "title": f"{result_emoji} LIVE RESULT — {result_label}",
+                "description": f"{plat_icon} **{title[:90]}**",
+                "color": color,
                 "fields": [
-                    {"name": "Ticker",   "value": ticker[:30],                                "inline": True},
-                    {"name": "Your Bet", "value": f"BUY {side}",                              "inline": True},
-                    {"name": "Entry",    "value": f"{entry:.0f}¢",                            "inline": True},
-                    {"name": "Exit",     "value": f"{current_price:.0f}¢{pnl_str}" if current_price else "—", "inline": True},
-                    {"name": "Reason",   "value": reason,                                     "inline": False},
+                    {"name": "📌 Ticker",      "value": ticker[:30],        "inline": True},
+                    {"name": "🎯 Our Bet",     "value": f"BUY {side}",      "inline": True},
+                    {"name": "🏦 Platform",    "value": plat.capitalize(),   "inline": True},
+                    {"name": "💵 Capital In",  "value": f"${size_usd:.2f}", "inline": True},
+                    {"name": "📈 Entry Price", "value": f"{entry:.0f}¢",    "inline": True},
+                    {"name": "🏁 Exit Price",  "value": exit_str,           "inline": True},
+                    {"name": "💰 Result",      "value": pnl_line,           "inline": True},
+                    {"name": "🎰 Max Payout",  "value": f"${max_payout:.2f}", "inline": True},
+                    {"name": "🤖 AI Conf",     "value": f"{conf:.0f}%",     "inline": True},
                 ],
                 "timestamp": _now_utc().isoformat(),
-                "footer": {"text": "Scanning for replacement…"},
+                "footer": {"text": f"Opted in — held to resolution • {et_time} • Scanning for next opportunity…"},
             }]
         }
         await discord._post(payload)
+        logger.info(
+            "LIVE RESULT %s | %s | entry=%.0f¢ exit=%s pnl=%s",
+            ticker, "WIN" if won else "LOSS" if won is False else "PENDING",
+            entry, exit_str, pnl_line,
+        )
     except Exception as e:
-        logger.debug("Exit alert error: %s", e)
+        logger.debug("Resolution alert error: %s", e)
+
+
+async def _send_stopout_alert(discord, slot: Dict, current_price: float, loss_pct: float) -> None:
+    """Alert when we exit early via stop-loss (opted out)."""
+    try:
+        from src.utils.eastern_time import format_et, et_label
+        entry     = float(slot.get("entry_price") or slot.get("avg_price") or 0)
+        ticker    = slot.get("ticker", "")
+        title     = slot.get("title") or ticker
+        side      = (slot.get("side") or "yes").upper()
+        plat      = slot.get("platform", "kalshi")
+        plat_icon = "🟦" if plat == "kalshi" else "🟣"
+        conf      = float(slot.get("confidence") or 0)
+        pnl, pnl_pct, size_usd = _calc_pnl(slot, current_price)
+        et_time   = format_et(fmt="%I:%M %p") + f" {et_label()}"
+
+        payload = {
+            "embeds": [{
+                "title": f"🛑 LIVE OPT-OUT — Stop-Loss Triggered",
+                "description": (
+                    f"{plat_icon} **{title[:90]}**\n"
+                    f"Price moved **{loss_pct:.1f}%** against us — cutting losses before it gets worse."
+                ),
+                "color": 0xFF8C00,
+                "fields": [
+                    {"name": "📌 Ticker",       "value": ticker[:30],           "inline": True},
+                    {"name": "🎯 Our Bet",      "value": f"BUY {side}",         "inline": True},
+                    {"name": "🏦 Platform",     "value": plat.capitalize(),      "inline": True},
+                    {"name": "💵 Capital In",   "value": f"${size_usd:.2f}",    "inline": True},
+                    {"name": "📈 Entry Price",  "value": f"{entry:.0f}¢",       "inline": True},
+                    {"name": "📉 Exit Price",   "value": f"{current_price:.0f}¢", "inline": True},
+                    {"name": "💸 Loss",         "value": f"**${pnl:.2f}** ({pnl_pct:.1f}%)", "inline": True},
+                    {"name": "🛑 Stop Trigger", "value": f"{loss_pct:.1f}% drop (limit: {STOP_LOSS_PCT:.0f}%)", "inline": True},
+                    {"name": "🤖 AI Conf Was",  "value": f"{conf:.0f}%",        "inline": True},
+                ],
+                "timestamp": _now_utc().isoformat(),
+                "footer": {"text": f"Opted out — stop-loss exit • {et_time} • Scanning for replacement…"},
+            }]
+        }
+        await discord._post(payload)
+        logger.info(
+            "LIVE STOP-OUT %s | entry=%.0f¢ exit=%.0f¢ loss=$%.2f (%.1f%%)",
+            ticker, entry, current_price, pnl, pnl_pct,
+        )
+    except Exception as e:
+        logger.debug("Stop-out alert error: %s", e)
 
 
 # ── Main manager loop ─────────────────────────────────────────────────────────
