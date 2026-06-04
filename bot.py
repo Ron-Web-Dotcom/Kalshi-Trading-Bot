@@ -170,14 +170,17 @@ class TradingBot:
                 await asyncio.sleep(TRADE_INTERVAL)
 
         async def hourly_heartbeat_loop():
-            """Send an hourly heartbeat to Discord with scan stats and top candidates."""
+            """Send an hourly heartbeat to Discord at the top of every ET hour."""
             from src.alerts.discord import DiscordAlerter
-            # Fire first heartbeat quickly after startup so user sees immediate status
-            await asyncio.sleep(90)
+            from src.utils.eastern_time import now_et as _now_et
+            from datetime import timedelta as _hb_td
+            # Sleep until the next top-of-hour ET, then fire every 3600s on the clock
+            _et_now = _now_et()
+            _next_hour = _et_now.replace(minute=0, second=0, microsecond=0) + _hb_td(hours=1)
+            await asyncio.sleep((_next_hour - _et_now).total_seconds())
             while not self._shutdown.is_set():
                 try:
                     discord = DiscordAlerter()
-                    from src.utils.eastern_time import now_et as _now_et
                     today = _now_et().date().isoformat()
 
                     # Total markets in DB
@@ -290,7 +293,10 @@ class TradingBot:
                 except Exception as e:
                     logger.error("Hourly heartbeat error: %s", e)
 
-                await asyncio.sleep(HEARTBEAT_INTERVAL)
+                # Sleep until the next top-of-hour ET
+                _et_now = _now_et()
+                _next_hour = _et_now.replace(minute=0, second=0, microsecond=0) + _hb_td(hours=1)
+                await asyncio.sleep((_next_hour - _et_now).total_seconds())
 
         async def daytime_summary_loop():
             """Post position digests at 12 AM, 6 AM, 12 PM, 6 PM Eastern time."""
