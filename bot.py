@@ -318,10 +318,17 @@ class TradingBot:
                     break
 
                 try:
-                    discord     = DiscordAlerter()
+                    from datetime import timedelta as _td2
+                    discord      = DiscordAlerter()
                     from src.utils.eastern_time import now_et as _now_et_sum
-                    today       = _now_et_sum().date().isoformat()
-                    _paper_flag = 0 if settings.trading.live_trading_enabled else 1
+                    _et_sum      = _now_et_sum()
+                    _paper_flag  = 0 if settings.trading.live_trading_enabled else 1
+
+                    # At midnight (hour=0) we report on yesterday; other periods report today
+                    if period == "Midnight":
+                        pnl_date = (_et_sum - _td2(days=1)).date().isoformat()
+                    else:
+                        pnl_date = _et_sum.date().isoformat()
 
                     open_pos = await self.db.fetchall(
                         "SELECT * FROM positions WHERE status='open' ORDER BY opened_at DESC"
@@ -337,7 +344,7 @@ class TradingBot:
                     pnl_row = await self.db.fetchone(
                         "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
                         "WHERE executed_at >= ? AND pnl IS NOT NULL AND paper_trade=?",
-                        (today + "T00:00:00", _paper_flag)
+                        (pnl_date + "T00:00:00", _paper_flag)
                     )
                     today_pnl = (pnl_row or {}).get("pnl", 0.0)
 
@@ -394,9 +401,10 @@ class TradingBot:
                             )
                     except Exception:
                         pass
-                    last_summary_at = datetime.now(timezone.utc).isoformat()
                 except Exception as e:
                     logger.error("Daytime summary error: %s", e)
+                finally:
+                    last_summary_at = datetime.now(timezone.utc).isoformat()
 
         async def daily_summary_loop():
             """Post midnight daily report to Discord, then reset daily stats."""
@@ -414,13 +422,16 @@ class TradingBot:
                 await asyncio.sleep(secs_until + 120)  # +2 min to avoid collision with daytime summary
 
                 try:
-                    discord     = DiscordAlerter()
-                    today       = now_et().date().isoformat()
-                    snap        = daily_stats.snapshot()
-                    paper       = not settings.trading.live_trading_enabled
-                    _paper_flag = 0 if settings.trading.live_trading_enabled else 1
+                    from datetime import timedelta as _td
+                    discord      = DiscordAlerter()
+                    _et_now      = now_et()
+                    # Report covers the day that just ended — use yesterday's date
+                    report_date  = (_et_now - _td(days=1)).date().isoformat()
+                    snap         = daily_stats.snapshot()
+                    paper        = not settings.trading.live_trading_enabled
+                    _paper_flag  = 0 if settings.trading.live_trading_enabled else 1
 
-                    # Win/loss record
+                    # Win/loss record (all-time — no date filter)
                     wl = await self.db.fetchone(
                         "SELECT COUNT(*) as total, "
                         "SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
@@ -428,15 +439,16 @@ class TradingBot:
                         "COALESCE(SUM(pnl),0) as total_pnl "
                         "FROM positions WHERE status='closed' AND pnl IS NOT NULL"
                     ) or {}
+                    # Today's (yesterday's) realized PnL — query the day that just ended
                     today_pnl_row = await self.db.fetchone(
                         "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
-                        "WHERE executed_at >= ? AND pnl IS NOT NULL AND paper_trade=?",
-                        (today + "T00:00:00", _paper_flag)
+                        "WHERE executed_at >= ? AND executed_at < ? AND pnl IS NOT NULL AND paper_trade=?",
+                        (report_date + "T00:00:00", report_date + "T23:59:59", _paper_flag)
                     ) or {}
                     closed_today = await self.db.fetchall(
-                        "SELECT ticker, side, pnl, close_reason FROM positions "
-                        "WHERE status='closed' AND closed_at >= ? ORDER BY closed_at DESC",
-                        (today + "T00:00:00",)
+                        "SELECT ticker, side, pnl, close_reason, title FROM positions "
+                        "WHERE status='closed' AND closed_at >= ? AND closed_at < ? ORDER BY closed_at DESC",
+                        (report_date + "T00:00:00", report_date + "T23:59:59")
                     ) or []
                     open_row = await self.db.fetchone(
                         "SELECT COUNT(*) as n FROM positions WHERE status='open'"
@@ -447,7 +459,7 @@ class TradingBot:
                     unrealised_pnl = float(unrealised_row.get("pnl", 0.0) or 0.0)
 
                     await discord.midnight_daily_summary(
-                        date=today,
+                        date=report_date,
                         snap=snap,
                         wins=wl.get("wins", 0) or 0,
                         losses=wl.get("losses", 0) or 0,

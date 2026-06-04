@@ -509,11 +509,9 @@ class DiscordAlerter:
             avg_price = float(p.get("avg_price") or 0)
             cur_price = float(p.get("current_price") or avg_price)
             size_usd  = float(p.get("size_usd") or 0) or round(avg_price * contracts / 100, 2)
-            # Recalculate PnL from live prices (don't trust stale DB value of 0)
-            if side_raw == "yes":
-                pnl = (cur_price - avg_price) * contracts / 100
-            else:
-                pnl = (avg_price - cur_price) * contracts / 100
+            # avg_price and current_price are always in the position's own side price
+            # (YES price for YES bets, NO price for NO bets) so formula is the same for both
+            pnl = (cur_price - avg_price) * contracts / 100
             total_pnl += pnl
             pnl_sign  = "+" if pnl >= 0 else ""
             pct       = ((cur_price - avg_price) / avg_price * 100) if avg_price else 0
@@ -912,7 +910,6 @@ class DiscordAlerter:
             wr_emoji = "🆕"
         else:
             wr_emoji = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
-            all_pnl_sign = "+"
             wr_str = f"**{win_rate:.0f}% win rate** — {total_wins}W / {total_losses}L / {total_closed} closed"
         fields.append({"name": f"{wr_emoji} Track Record", "value": wr_str, "inline": False})
 
@@ -964,10 +961,7 @@ class DiscordAlerter:
                 cur_price = float(p.get("current_price") or avg_price)
                 contracts = int(p.get("contracts") or 0)
                 size_usd  = float(p.get("size_usd") or 0) or round(avg_price * contracts / 100, 2)
-                if side_raw == "yes":
-                    pnl = (cur_price - avg_price) * contracts / 100
-                else:
-                    pnl = (avg_price - cur_price) * contracts / 100
+                pnl = (cur_price - avg_price) * contracts / 100
                 total_unrealised += pnl
                 pnl_s = "+" if pnl >= 0 else ""
                 mv    = "📈" if pnl >= 0 else "📉"
