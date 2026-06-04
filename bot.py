@@ -574,22 +574,18 @@ class TradingBot:
 
         async def bot_alert_loop():
             """
-            Every 10 minutes: fire ONE bundled BOT ALERT only for LIVE/SHORT-TERM
-            predictions — events happening RIGHT NOW or expiring within 6 hours.
-            Long-term bets (days/weeks out) are never included here.
-            Stays completely silent if nothing qualifies — no spam.
+            Every 10 minutes: fire ONE bundled BOT ALERT when the bot has active
+            live slots — events happening RIGHT NOW that the bot entered.
+            Long-term predictions appear in the hourly report instead.
+            Stays completely silent when no live events are active.
             """
             from src.alerts.discord import DiscordAlerter
-            from src.utils.daily_stats import stats as _da
             from src.jobs.live_market_manager import _live_slots as _ls
-            from datetime import timezone as _tz
 
             _alerted: dict = {}          # ticker → confidence band already sent
             _alerted_date = datetime.now(timezone.utc).date()
 
             BOT_ALERT_INTERVAL = 600     # 10 minutes between checks
-            MIN_CONF_FOR_ALERT = 63.0
-            LIVE_WINDOW_HOURS  = 6.0     # only markets closing within 6 hours qualify
 
             await asyncio.sleep(120)
             while not self._shutdown.is_set():
@@ -603,45 +599,17 @@ class TradingBot:
                         _alerted.clear()
                         _alerted_date = today
 
-                    discord  = DiscordAlerter()
-                    mode     = "PAPER" if not settings.trading.live_trading_enabled else "LIVE"
-                    now_utc  = datetime.now(timezone.utc)
+                    discord   = DiscordAlerter()
+                    mode      = "PAPER" if not settings.trading.live_trading_enabled else "LIVE"
                     new_picks: list = []
 
-                    def _hours_left(ct: str) -> float:
-                        """Hours until market closes. Returns 999 if unknown."""
-                        if not ct:
-                            return 999.0
-                        try:
-                            cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
-                            if cd.tzinfo is None:
-                                cd = cd.replace(tzinfo=_tz.utc)
-                            return (cd - now_utc).total_seconds() / 3600
-                        except Exception:
-                            return 999.0
-
-                    # 1. Active live slots — always qualify (game/event IN PROGRESS)
+                    # BOT ALERT = LIVE SLOTS ONLY — events the bot entered that
+                    # are happening RIGHT NOW. Long-term picks appear in the
+                    # hourly report's "What The Bot Is Watching" section instead.
                     for ticker, slot in list(_ls.items()):
                         band = int(slot.get("confidence", 0) / 10) * 10
                         if _alerted.get(ticker) != band:
                             new_picks.append({**slot, "is_live": True})
-                            _alerted[ticker] = band
-
-                    # 2. BUY evaluations where market closes within 6 hours
-                    for ev in list(_da.all_evaluations):
-                        if ev.get("action") != "BUY":
-                            continue
-                        conf   = ev.get("confidence", 0)
-                        ticker = ev.get("ticker", "")
-                        if conf < MIN_CONF_FOR_ALERT or not ticker:
-                            continue
-                        # STRICT: only predictions resolving very soon
-                        hrs = _hours_left(ev.get("close_time", ""))
-                        if hrs > LIVE_WINDOW_HOURS:
-                            continue   # long-term — skip, not a BOT ALERT pick
-                        band = int(conf / 10) * 10
-                        if _alerted.get(ticker) != band:
-                            new_picks.append(ev)
                             _alerted[ticker] = band
 
                     if not new_picks:
