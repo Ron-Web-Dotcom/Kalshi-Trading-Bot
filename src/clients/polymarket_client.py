@@ -195,43 +195,38 @@ class PolymarketTradingClient:
     async def get_live_markets(self, max_hours: float = 6.0, max_markets: int = 60) -> List[Dict]:
         """
         Fetch ALL active Polymarket markets closing within max_hours — every category.
-        Covers sports, crypto, politics, weather, economics, pop culture, and anything else
-        that happens to resolve soon.  No category filter — time is the only gate.
+        Reuses the same reliable fetch path as get_markets() then filters by close time.
         """
-        import datetime as _dt
+        from datetime import datetime, timezone
         try:
-            r = await self._client().get(
-                f"{GAMMA_BASE}/markets",
-                params={"active": "true", "closed": "false", "limit": 500},
-            )
-            if r.status_code != 200:
+            # Use the same pagination approach as get_markets for reliability
+            all_markets = await self.get_markets(limit=500)
+            if not all_markets:
+                logger.info("Polymarket live markets: get_markets returned 0 — API may be down")
                 return []
-            raw = r.json()
-            items = raw if isinstance(raw, list) else raw.get("data") or raw.get("markets") or []
 
-            now  = _dt.datetime.now(_dt.timezone.utc)
+            now  = datetime.now(timezone.utc)
             live = []
-            for m in items:
-                end_date = m.get("endDate") or m.get("endDateIso") or ""
+            for m in all_markets:
+                ct = m.get("close_time") or ""
+                if not ct:
+                    continue
                 try:
-                    close_dt = _dt.datetime.fromisoformat(str(end_date).replace("Z", "+00:00"))
+                    close_dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
                     if close_dt.tzinfo is None:
-                        close_dt = close_dt.replace(tzinfo=_dt.timezone.utc)
+                        close_dt = close_dt.replace(tzinfo=timezone.utc)
                     hours_left = (close_dt - now).total_seconds() / 3600
                     if not (0 < hours_left <= max_hours):
                         continue
                 except Exception:
                     continue
-
-                parsed = self._parse_market(m)
-                if parsed:
-                    parsed["is_live"] = True
-                    parsed["hours_to_close"] = round(hours_left, 2)
-                    live.append(parsed)
+                m["is_live"]       = True
+                m["hours_to_close"] = round(hours_left, 2)
+                live.append(m)
 
             logger.info(
-                "Polymarket live markets (all categories, closing ≤%.0fh): %d found",
-                max_hours, len(live),
+                "Polymarket live markets (all categories, closing ≤%.0fh): %d of %d total",
+                max_hours, len(live), len(all_markets),
             )
             return live[:max_markets]
         except Exception as e:
