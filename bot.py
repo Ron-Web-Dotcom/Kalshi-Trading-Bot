@@ -282,14 +282,6 @@ class TradingBot:
                 except Exception as e:
                     logger.error("Hourly heartbeat error: %s", e)
 
-                # ── Near-miss digest (separate message) ───────────────────
-                try:
-                    await discord.near_miss_digest(
-                        paper=not settings.trading.live_trading_enabled
-                    )
-                except Exception:
-                    pass
-
                 # ── Active position monitor (separate message) ────────────
                 try:
                     open_pos = await self.db.fetchall(
@@ -373,6 +365,7 @@ class TradingBot:
                     total_losses = wl.get("losses",0) or 0
                     win_rate     = (total_wins / total_closed * 100) if total_closed > 0 else 0.0
 
+                    from src.utils.daily_stats import stats as daily_stats_sum
                     await discord.daytime_summary(
                         period=period,
                         open_positions=open_pos,
@@ -385,6 +378,7 @@ class TradingBot:
                         total_losses=total_losses,
                         total_closed=total_closed,
                         paper=not settings.trading.live_trading_enabled,
+                        near_misses=daily_stats_sum.top_near_misses(n=5),
                     )
                     last_summary_at = datetime.now(timezone.utc).isoformat()
                 except Exception as e:
