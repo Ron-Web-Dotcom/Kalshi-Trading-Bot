@@ -209,6 +209,7 @@ class DailyStats:
         self.poly_matches = 0
         self.suspicious_matches = []
         self.consecutive_losses = 0
+        self.all_evaluations = []
         logger.info("Daily stats reset for new day.")
 
     def snapshot(self) -> Dict:

@@ -405,11 +405,11 @@ class TradingBot:
                 from datetime import timedelta
                 next_midnight = midnight_et + timedelta(days=1)
                 secs_until    = (next_midnight - et_now).total_seconds()
-                await asyncio.sleep(secs_until)
+                await asyncio.sleep(secs_until + 120)  # +2 min to avoid collision with daytime summary
 
                 try:
                     discord     = DiscordAlerter()
-                    today       = now.date().isoformat()
+                    today       = now_et().date().isoformat()
                     snap        = daily_stats.snapshot()
                     paper       = not settings.trading.live_trading_enabled
                     _paper_flag = 0 if settings.trading.live_trading_enabled else 1
@@ -554,7 +554,7 @@ async def main():
     if args.once:
         await bot.startup()
         await bot.run_cycle()
-        await run_evaluation(db=bot.db)
+        # run_evaluation removed — single cycle complete
         logger.info("--once complete.")
     else:
         await bot.run_loop()

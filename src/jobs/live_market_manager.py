@@ -85,7 +85,7 @@ async def _load_live_positions(db) -> List[Dict]:
         """)
         return [dict(r) for r in rows] if rows else []
     except Exception as e:
-        logger.debug("_load_live_positions error: %s", e)
+        logger.warning("_load_live_positions error: %s", e)
         return []
 
 
@@ -98,7 +98,7 @@ async def _close_position(db, ticker: str, reason: str) -> None:
              WHERE ticker=? AND status='open'
         """, (_now_utc().isoformat(), reason[:200], ticker))
     except Exception as e:
-        logger.debug("_close_position error %s: %s", ticker, e)
+        logger.warning("_close_position error %s: %s", ticker, e)
 
 
 # ── Price fetching ────────────────────────────────────────────────────────────
@@ -439,7 +439,7 @@ async def _send_resolution_alert(discord, slot: Dict, final_price: Optional[floa
             entry, exit_str, pnl_line,
         )
     except Exception as e:
-        logger.debug("Resolution alert error: %s", e)
+        logger.warning("Resolution alert error: %s", e)
 
 
 async def _send_stopout_alert(discord, slot: Dict, current_price: float, loss_pct: float) -> None:
@@ -485,7 +485,7 @@ async def _send_stopout_alert(discord, slot: Dict, current_price: float, loss_pc
             ticker, entry, current_price, pnl, pnl_pct,
         )
     except Exception as e:
-        logger.debug("Stop-out alert error: %s", e)
+        logger.warning("Stop-out alert error: %s", e)
 
 
 async def _send_live_positions_update(discord, slots: Dict) -> None:
@@ -565,7 +565,7 @@ async def _send_live_positions_update(discord, slots: Dict) -> None:
         await discord._post(payload)
         logger.info("Live position update sent (%d positions changed)", len(changed))
     except Exception as e:
-        logger.debug("Live positions update alert error: %s", e)
+        logger.warning("Live positions update alert error: %s", e)
 
 
 # ── Main manager loop ─────────────────────────────────────────────────────────
@@ -606,17 +606,22 @@ async def run_live_manager_cycle(db, discord, settings, kalshi_trader, poly_trad
                         close_time = (raw.get("market") or raw).get("close_time") or ""
                     except Exception:
                         pass
+                entry_p = float(p.get("avg_price") or 0)
                 _live_slots[t] = {
-                    "ticker":      t,
-                    "side":        p.get("side", "yes"),
-                    "entry_price": p.get("avg_price", 0),
-                    "platform":    p.get("platform", "kalshi"),
-                    "title":       p.get("title", ""),
-                    "contracts":   p.get("contracts", 0),
-                    "close_time":  close_time,
-                    "confidence":  0,
-                    "size_usd":    0,
+                    "ticker":        t,
+                    "side":          p.get("side", "yes"),
+                    "entry_price":   entry_p,
+                    "current_price": float(p.get("current_price") or entry_p),
+                    "platform":      p.get("platform", "kalshi"),
+                    "title":         p.get("title", ""),
+                    "contracts":     p.get("contracts", 0),
+                    "close_time":    close_time,
+                    "confidence":    0,
+                    "size_usd":      0,
                 }
+                # Seed last-reported price so restart doesn't fire a fake update
+                if t not in _last_reported_price:
+                    _last_reported_price[t] = float(p.get("current_price") or entry_p)
 
         logger.info("Live slots active: %d/%d", len(_live_slots), MAX_LIVE_POSITIONS)
 

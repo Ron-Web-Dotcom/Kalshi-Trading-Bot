@@ -61,12 +61,13 @@ class DiscordAlerter:
 
     async def test_alert(self, mode: str = "PAPER") -> bool:
         """Send a connectivity test message. Returns True if delivered."""
+        from src.utils.eastern_time import format_et, et_label
         payload = self._embed(
             title="✅ Kalshi Bot — Connection Test",
             description=(
                 f"Discord webhook is working!\n"
                 f"Mode: **{mode}**\n"
-                f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+                f"Time: {format_et()} {et_label()}"
             ),
             color=0x00BFFF,
             fields=[
@@ -871,7 +872,7 @@ class DiscordAlerter:
         total_closed: int,
         paper: bool = True,
     ) -> None:
-        """Morning (9 AM) or Afternoon (3 PM) UTC digest — positions + today's PnL."""
+        """Scheduled digest at 12am/6am/12pm/6pm ET — positions + today's PnL."""
         from src.utils.eastern_time import format_et, et_label
         mode_tag  = "📝 PAPER" if paper else "💰 LIVE"
         pnl_sign  = "+" if today_pnl >= 0 else ""
