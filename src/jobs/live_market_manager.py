@@ -258,9 +258,25 @@ async def _fill_slots(
     except Exception:
         pass
 
+    def _kalshi_price(m: Dict) -> float:
+        """Best available price for a Kalshi market — yes_ask with last_price fallback."""
+        p = float(m.get("yes_ask") or 0)
+        if not p:
+            p = float(m.get("last_price") or 0)
+        return p
+
     raw_k, raw_p = len(live_k), len(live_p)
-    live_k = [m for m in live_k if m.get("ticker") not in open_tickers and 1 < (m.get("yes_ask") or 0) < 99]
+    for m in live_k:
+        if not (m.get("yes_ask") or 0) and (m.get("last_price") or 0):
+            m["yes_ask"] = float(m["last_price"])
+            m["no_ask"]  = round(100.0 - float(m["last_price"]), 1)
+    live_k = [m for m in live_k if m.get("ticker") not in open_tickers and 1 < _kalshi_price(m) < 99]
     live_p = [m for m in live_p if m.get("ticker") not in open_tickers and m.get("yes_ask", 0) > 1]
+
+    if not live_k and raw_k:
+        logger.warning("Kalshi: %d live markets fetched but all filtered out (0 price or already open)", raw_k)
+    if not live_p and raw_p:
+        logger.warning("Polymarket: %d live markets fetched but all filtered out (0 price or already open)", raw_p)
     logger.info(
         "After price/dedup filter: %d/%d Kalshi + %d/%d Polymarket eligible",
         len(live_k), raw_k, len(live_p), raw_p,
