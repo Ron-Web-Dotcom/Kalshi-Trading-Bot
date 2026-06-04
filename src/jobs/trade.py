@@ -106,8 +106,22 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
     )
     open_count   = len(open_positions_rows)
     open_tickers = {p["ticker"] for p in open_positions_rows}
-    # Also block by normalized title so the same question on a different platform is skipped
-    open_titles  = {(p.get("title") or "").strip().lower() for p in open_positions_rows if p.get("title")}
+    # Block same question across platforms — but only for long-duration positions (open > 1 hour)
+    # Short-duration trades (5min/10min/hourly) resolve fast so re-entry on a new cycle is fine
+    from datetime import datetime as _now_dt, timezone as _now_tz, timedelta as _now_td
+    _now = _now_dt.now(_now_tz.utc)
+    open_titles = set()
+    for p in open_positions_rows:
+        if not p.get("title"):
+            continue
+        try:
+            opened = _now_dt.fromisoformat((p.get("opened_at") or "").replace("Z", "+00:00"))
+            if opened.tzinfo is None:
+                opened = opened.replace(tzinfo=_now_tz.utc)
+            if (_now - opened) > _now_td(hours=1):
+                open_titles.add(p["title"].strip().lower())
+        except Exception:
+            open_titles.add(p["title"].strip().lower())
     if open_count > 0:
         logger.info("── Open Positions (%d) ──────────────────────────────────────────", open_count)
         for _p in open_positions_rows:
