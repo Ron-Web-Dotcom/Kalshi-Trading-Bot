@@ -194,7 +194,7 @@ async def build_market_context(
     is_live = market.get("is_live") or market.get("platform") == "polymarket"
     if is_live:
         from src.data.web_search import fetch_live_context
-        tasks["web_search"] = fetch_live_context(title, timeout=timeout_seconds - 2)
+        tasks["web_search"] = fetch_live_context(title, timeout=timeout_seconds - 3)
 
     # Metaculus: optional community prediction
     if include_community:

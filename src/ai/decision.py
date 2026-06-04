@@ -237,7 +237,7 @@ HARD RULES — violating these means a bad trade:
         try:
             from src.data.context_builder import build_market_context
             is_live = market.get("is_live") or market.get("platform") == "polymarket"
-            context = await build_market_context(market, timeout_seconds=12.0 if is_live else 8.0)
+            context = await build_market_context(market, timeout_seconds=15.0 if is_live else 8.0)
         except Exception:
             context = ""
 
