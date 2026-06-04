@@ -180,20 +180,16 @@ class TradingBot:
                     today = datetime.now(timezone.utc).date().isoformat()
 
                     # Total markets in DB
-                    mkt_row = await self.db.fetchone(
-                        "SELECT COUNT(*) as n FROM markets"
-                    )
-                    markets_total = (mkt_row or {}).get("n", 0)
-
-                    # Kalshi vs Polymarket split
+                    # Kalshi vs Polymarket split — open markets only
                     kal_row = await self.db.fetchone(
-                        "SELECT COUNT(*) as n FROM markets WHERE platform='kalshi' OR platform IS NULL"
+                        "SELECT COUNT(*) as n FROM markets WHERE (platform='kalshi' OR platform IS NULL) AND (status='open' OR status='')"
                     )
                     poly_row = await self.db.fetchone(
-                        "SELECT COUNT(*) as n FROM markets WHERE platform='polymarket'"
+                        "SELECT COUNT(*) as n FROM markets WHERE platform='polymarket' AND (status='open' OR status='')"
                     )
-                    kalshi_count = (kal_row or {}).get("n", 0)
-                    poly_count   = (poly_row or {}).get("n", 0)
+                    kalshi_count  = (kal_row  or {}).get("n", 0)
+                    poly_count    = (poly_row or {}).get("n", 0)
+                    markets_total = kalshi_count + poly_count
 
                     # Open positions
                     open_row = await self.db.fetchone(
@@ -356,10 +352,10 @@ class TradingBot:
                     today_pnl = (pnl_row or {}).get("pnl", 0.0)
 
                     kal_row  = await self.db.fetchone(
-                        "SELECT COUNT(*) as n FROM markets WHERE platform='kalshi' OR platform IS NULL"
+                        "SELECT COUNT(*) as n FROM markets WHERE (platform='kalshi' OR platform IS NULL) AND (status='open' OR status='')"
                     )
                     poly_row = await self.db.fetchone(
-                        "SELECT COUNT(*) as n FROM markets WHERE platform='polymarket'"
+                        "SELECT COUNT(*) as n FROM markets WHERE platform='polymarket' AND (status='open' OR status='')"
                     )
                     kalshi_count = (kal_row  or {}).get("n", 0)
                     poly_count   = (poly_row or {}).get("n", 0)
