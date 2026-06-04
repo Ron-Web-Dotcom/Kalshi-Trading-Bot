@@ -113,21 +113,35 @@ async def _fetch_kalshi_market(ticker: str, kalshi) -> Optional[Dict]:
         return None
 
 
-async def _fetch_kalshi_price(ticker: str, kalshi) -> Optional[float]:
+async def _fetch_kalshi_price(ticker: str, kalshi, side: str = "yes") -> Optional[float]:
+    """Return the current ask price for the given side (yes_ask or no_ask)."""
     m = await _fetch_kalshi_market(ticker, kalshi)
     if not m:
         return None
-    yes_ask = m.get("yes_ask") or m.get("last_price") or 0
-    return float(yes_ask)
+    bid_key = "yes_ask" if side == "yes" else "no_ask"
+    price = m.get(bid_key) or 0
+    if not price:
+        price = m.get("last_price") or 0
+        if price and side == "no":
+            price = 100.0 - float(price)  # approximate NO from last_price
+    return float(price) if price else None
 
 
-async def _fetch_poly_price(ticker: str, db) -> Optional[float]:
+async def _fetch_poly_price(ticker: str, db, side: str = "yes") -> Optional[float]:
     """Read last known price from DB markets table (updated by trade job)."""
     try:
+        col = "yes_ask" if side == "yes" else "no_ask"
         row = await db.fetchone(
-            "SELECT yes_ask FROM markets WHERE ticker=?", (ticker,)
+            f"SELECT yes_ask, no_ask FROM markets WHERE ticker=?", (ticker,)
         )
-        return float((row or {}).get("yes_ask") or 0) or None
+        if not row:
+            return None
+        price = float((row or {}).get(col) or 0)
+        if not price:
+            other = float((row or {}).get("yes_ask" if side == "no" else "no_ask") or 0)
+            if other:
+                price = 100.0 - other
+        return price or None
     except Exception:
         return None
 
@@ -152,11 +166,11 @@ async def _check_and_exit(
     side     = slot.get("side", "yes")
     entry    = float(slot.get("avg_price") or slot.get("entry_price") or 0)
 
-    # Fetch current price for both resolution check and stop-loss
+    # Fetch current price for the position's own side (YES or NO)
     if platform == "kalshi":
-        current = await _fetch_kalshi_price(ticker, kalshi)
+        current = await _fetch_kalshi_price(ticker, kalshi, side=side)
     else:
-        current = await _fetch_poly_price(ticker, db)
+        current = await _fetch_poly_price(ticker, db, side=side)
 
     # Keep slot's current_price fresh for the live position update alert
     if current is not None:
@@ -180,10 +194,9 @@ async def _check_and_exit(
     if current is None or entry <= 0:
         return False
 
-    if side == "yes":
-        loss_pct = (entry - current) / entry * 100
-    else:
-        loss_pct = (current - entry) / entry * 100  # NO: we lose if YES price goes up
+    # current is the side's own price (NO ask for NO bets, YES ask for YES bets)
+    # We lose when our side's price falls below entry
+    loss_pct = (entry - current) / entry * 100 if entry else 0
 
     if loss_pct >= STOP_LOSS_PCT:
         logger.warning(
@@ -364,10 +377,8 @@ def _calc_pnl(slot: Dict, exit_price: float) -> tuple:
     side      = (slot.get("side") or "yes").lower()
     size_usd  = float(slot.get("size_usd") or (entry * contracts / 100))
 
-    if side == "yes":
-        pnl = (exit_price - entry) / 100 * contracts
-    else:
-        pnl = (entry - exit_price) / 100 * contracts
+    # exit_price is always the position's own side price — same formula for YES and NO
+    pnl = (exit_price - entry) / 100 * contracts
 
     pnl_pct = (pnl / size_usd * 100) if size_usd else 0
     return round(pnl, 2), round(pnl_pct, 1), round(size_usd, 2)
@@ -388,13 +399,10 @@ async def _send_resolution_alert(discord, slot: Dict, final_price: Optional[floa
         size_usd  = float(slot.get("size_usd") or 0)
         et_time   = format_et(fmt="%I:%M %p") + f" {et_label()}"
 
-        # Determine win/loss from final price
-        # YES wins when yes_ask → ~95-100¢  |  NO wins when yes_ask → ~0-5¢
+        # Determine win/loss from final price — final_price is the position's own side price
+        # Both YES and NO win when their own side price rises to ~100¢
         if final_price is not None:
-            if side == "YES":
-                won = final_price >= 85
-            else:
-                won = final_price <= 15
+            won = final_price >= 85
             pnl, pnl_pct, _ = _calc_pnl(slot, final_price)
             exit_str = f"{final_price:.0f}¢"
         else:
@@ -419,7 +427,7 @@ async def _send_resolution_alert(discord, slot: Dict, final_price: Optional[floa
             color        = 0xAAAAAA
             pnl_line     = "Pending"
 
-        max_payout = contracts * (100 - entry) / 100 if side == "YES" else contracts * entry / 100
+        max_payout = contracts * (100 - entry) / 100  # max profit = contracts × (1 - entry_cost)
 
         payload = {
             "embeds": [{
