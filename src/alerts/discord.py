@@ -51,13 +51,13 @@ class DiscordAlerter:
 
     @staticmethod
     def _display_ticker(ticker: str, title: str = "") -> str:
-        """Return a human-readable label — never expose raw 0x hex condition IDs."""
+        """Return a human-readable label — never expose raw hex condition IDs."""
         if title and not title.startswith("0x"):
-            return title[:50]
+            return title[:80]
         if ticker and not ticker.startswith("0x"):
-            return ticker[:30]
-        # Polymarket hex conditionId — use last 6 chars as short ID
-        return f"poly-{ticker[-6:]}" if ticker else "unknown"
+            return ticker[:60]
+        # Polymarket hex conditionId — strip entirely, use title or generic label
+        return title[:80] if title else "Polymarket Market"
 
     async def test_alert(self, mode: str = "PAPER") -> bool:
         """Send a connectivity test message. Returns True if delivered."""
@@ -308,7 +308,7 @@ class DiscordAlerter:
         mode_tag  = "📝 PAPER" if mode == "PAPER" else "💰 LIVE"
         now_utc   = datetime.now(timezone.utc)
 
-        title_str = (pick.get("title") or pick.get("ticker") or "")[:60]
+        title_str = self._display_ticker(pick.get("ticker", ""), pick.get("title", "") or "")[:80]
         side      = (pick.get("side") or "YES").upper()
         entry     = float(pick.get("price_cents") or pick.get("yes_ask") or 0)
         conf      = pick.get("confidence", 0)
@@ -400,20 +400,21 @@ class DiscordAlerter:
         """Alert for arbitrage signal detected (only if ALERT_ON_SIGNAL=true)."""
         if not self.cfg.alert_on_signal:
             return
+        label = self._display_ticker(ticker)
         if signal_type == "internal_arb":
             desc = (
-                f"**Internal arb** on `{ticker}`\n"
+                f"**Internal arb** on _{label}_\n"
                 f"YES + NO = {kalshi_price + poly_price:.0f}¢ (should be 100¢)\n"
                 f"Gross edge: **{gross_edge:.1f}¢** | Net after fees: **{net_edge:.1f}¢**"
             )
         else:
             desc = (
-                f"**Cross-market arb** on `{ticker}`\n"
+                f"**Cross-market arb** on _{label}_\n"
                 f"Kalshi={kalshi_price:.0f}¢  Poly={poly_price:.0f}¢\n"
                 f"Buy **{side.upper()}** on Kalshi | Net edge: **{net_edge:.1f}¢**"
             )
         payload = self._embed(
-            title=f"📡 Arb Signal — {ticker}",
+            title=f"📡 Arb Signal — {label}",
             description=desc,
             color=0xFFAA00,
         )
@@ -425,7 +426,7 @@ class DiscordAlerter:
         if not self.cfg.alert_on_signal:
             return
         payload = self._embed(
-            title=f"📡 Signal: {ticker}",
+            title=f"📡 Signal: {self._display_ticker(ticker)}",
             description=f"Type: **{signal_type}** | Diff: **{diff_pct:.1f}%** | Edge: **{edge_cents:.1f}¢**",
             color=0xFFAA00,
         )
@@ -498,7 +499,7 @@ class DiscordAlerter:
             explanation   = ""
 
         fields = [
-            {"name": "Question",  "value": (market_title or ticker)[:80], "inline": False},
+            {"name": "Question",  "value": self._display_ticker(ticker, market_title)[:80], "inline": False},
             {"name": "Your Bet",  "value": f"**{side.upper()}**",          "inline": True},
             {"name": "Contracts", "value": str(contracts),                 "inline": True},
             {"name": "Entry",     "value": f"{entry_cents:.0f}¢",          "inline": True},
@@ -511,9 +512,10 @@ class DiscordAlerter:
         if ai_reason:
             fields.append({"name": "🤖 AI's Exact Reasoning", "value": ai_reason[:300], "inline": False})
 
+        display = self._display_ticker(ticker, market_title)
         payload = self._embed(
             title=f"{trigger_emoji} {mode_tag} Position Closed — {'Profit' if pnl >= 0 else 'Loss'} ${pnl_sign}{abs(pnl):.2f}",
-            description=f"`{ticker}` · **{side.upper()}** · {contracts} contracts",
+            description=f"_{display}_ · **{side.upper()}** · {contracts} contracts",
             color=color,
             fields=fields,
         )
@@ -535,7 +537,7 @@ class DiscordAlerter:
         ev_str     = f"{net_ev:.1f}¢" if net_ev is not None else "n/a"
         profit_str = f"${exp_profit:.2f}" if exp_profit is not None else "n/a"
 
-        title_line = market_title[:100] if market_title else ticker
+        title_line = self._display_ticker(ticker, market_title)[:100]
         poly_check = ""
         if poly_yes is not None and poly_no is not None:
             poly_check = (
@@ -560,7 +562,7 @@ class DiscordAlerter:
             })
 
         payload = self._embed(
-            title=f"🎯 {mode_tag} Trade Placed — BUY {side.upper()} on {ticker}",
+            title=f"🎯 {mode_tag} Trade Placed — BUY {side.upper()} on {title_line}",
             description=(
                 f"The AI found a profitable edge and is placing a bet.{poly_check}\n\n"
                 f"**If this resolves {side.upper()}, you profit. If not, you lose your stake.**"
@@ -772,10 +774,11 @@ class DiscordAlerter:
             return
         color    = 0x5865F2   # Discord blurple — neutral
         mode_tag = "📝 PAPER" if paper else "💰 LIVE"
+        reeval_label = self._display_ticker(ticker)
         payload  = self._embed(
-            title=f"🤖 {mode_tag} AI Re-eval: HOLD — {ticker}",
+            title=f"🤖 {mode_tag} AI Re-eval: HOLD — {reeval_label}",
             description=(
-                f"AI reviewed `{ticker}` ({side.upper()}) and decided to **HOLD**.\n"
+                f"AI reviewed _{reeval_label}_ ({side.upper()}) and decided to **HOLD**.\n"
                 f"Unrealised: **{pct_change:+.1f}%**\n\n"
                 f"_{reasoning[:300]}_"
             ),
@@ -817,7 +820,7 @@ class DiscordAlerter:
                     "AI opt-out" if why.startswith("ai_reeval") else why
                 )
                 trade_lines.append(
-                    f"{icon} `{t.get('ticker','')}` {t.get('side','').upper()} — "
+                    f"{icon} {self._display_ticker(t.get('ticker',''), t.get('title',''))} {t.get('side','').upper()} — "
                     f"**${sign}{t_pnl:.2f}** ({label})"
                 )
             fields.append({
@@ -1513,7 +1516,7 @@ class DiscordAlerter:
 
         platform_tag = "🟣 Polymarket" if platform.lower() == "polymarket" else "🟦 Kalshi"
         payload = self._embed(
-            title=f"🔍 Trade Advisor — {ticker} [{platform_tag}]",
+            title=f"🔍 Trade Advisor — {self._display_ticker(ticker)} [{platform_tag}]",
             description=desc,
             color=color,
             fields=fields,
