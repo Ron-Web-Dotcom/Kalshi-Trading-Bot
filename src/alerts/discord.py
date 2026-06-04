@@ -481,6 +481,23 @@ class DiscordAlerter:
         mode_tag = "📝 PAPER" if paper else "💰 LIVE"
         lines = []
         total_pnl = 0.0
+        # Deduplicate: same side+contracts+avg_price on same platform = same position stored twice
+        seen_keys: set = set()
+        deduped = []
+        for p in positions:
+            title = (p.get("title") or "").strip()
+            dedup_key = (
+                p.get("platform", "kalshi"),
+                p.get("side", ""),
+                p.get("contracts", 0),
+                round(float(p.get("avg_price") or 0)),
+                title[:40] if title else p.get("ticker", ""),
+            )
+            if dedup_key in seen_keys:
+                continue
+            seen_keys.add(dedup_key)
+            deduped.append(p)
+        positions = deduped
         for p in positions:
             ticker    = p.get("ticker", "?")
             title     = p.get("title", "") or ""
@@ -503,7 +520,7 @@ class DiscordAlerter:
             )
         total_sign = "+" if total_pnl >= 0 else ""
         payload = self._embed(
-            title=f"📊 {mode_tag} Active Position Monitor — {len(positions)} Open Trade(s)",
+            title=f"📊 {mode_tag} Active Position Monitor — {len(deduped)} Open Trade(s)",
             description=(
                 "\n\n".join(lines)
                 + f"\n\n**Total Unrealised PnL: ${total_sign}{total_pnl:.2f}**"
