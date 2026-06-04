@@ -870,7 +870,6 @@ class DiscordAlerter:
         total_losses: int,
         total_closed: int,
         paper: bool = True,
-        near_misses: Optional[List[Dict]] = None,   # top missed trades to embed
     ) -> None:
         """Morning (9 AM) or Afternoon (3 PM) UTC digest — positions + today's PnL."""
         from src.utils.eastern_time import format_et, et_label
@@ -970,32 +969,6 @@ class DiscordAlerter:
                 "value":  "_No open positions — cash held_",
                 "inline": False,
             })
-
-        # Missed trades section — top 5, deduped, only new ones tagged 🆕
-        if near_misses:
-            prev_tickers = self.__class__._last_missed_tickers
-            current_tickers = frozenset(nm.get("ticker", "") for nm in near_misses)
-            new_tickers = current_tickers - prev_tickers
-            self.__class__._last_missed_tickers = current_tickers
-            miss_lines = []
-            for i, nm in enumerate(near_misses[:5], 1):
-                plat    = "🟣" if nm.get("platform") == "polymarket" else "🟦"
-                title_  = self._display_ticker(nm.get("ticker", ""), nm.get("title", "") or "")[:55]
-                conf    = nm.get("confidence", 0)
-                ev_str  = f" EV {nm['net_ev']:+.1f}¢" if nm.get("net_ev") is not None else ""
-                side_   = (nm.get("side") or "yes").upper()
-                skip_r  = (nm.get("skip_reason") or "confidence below threshold")[:60]
-                new_tag = " 🆕" if nm.get("ticker", "") in new_tickers else ""
-                miss_lines.append(
-                    f"**#{i}{new_tag} {plat} {title_}** — BUY {side_} {conf:.0f}%{ev_str}\n"
-                    f"↳ _{skip_r}_"
-                )
-            if miss_lines:
-                fields.append({
-                    "name":   "🟡 Trades Bot Passed On (Top 5)",
-                    "value":  "\n\n".join(miss_lines),
-                    "inline": False,
-                })
 
         payload = self._embed(
             title=f"{icon} {mode_tag} {period} Summary — {now_utc}",
