@@ -190,6 +190,12 @@ async def build_market_context(
     # News: always fetch — relevant to every market type
     tasks["headlines"] = fetch_headlines(news_kws, category=category, max_headlines=8)
 
+    # Web search: always include for live/Polymarket markets — gives AI real-world context
+    is_live = market.get("is_live") or market.get("platform") == "polymarket"
+    if is_live:
+        from src.data.web_search import fetch_live_context
+        tasks["web_search"] = fetch_live_context(title, timeout=timeout_seconds - 2)
+
     # Metaculus: optional community prediction
     if include_community:
         tasks["community"] = fetch_community_prediction(title)
@@ -230,6 +236,10 @@ async def build_market_context(
     headlines = results.get("headlines")
     if isinstance(headlines, list) and headlines:
         blocks.append(format_headlines(headlines))
+
+    web_search = results.get("web_search")
+    if isinstance(web_search, str) and web_search:
+        blocks.append(f"=== WEB SEARCH RESULTS ===\n{web_search}\n=== END WEB SEARCH ===")
 
     community = results.get("community")
     if isinstance(community, str) and community:

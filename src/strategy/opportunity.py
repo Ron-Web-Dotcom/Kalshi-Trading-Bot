@@ -224,6 +224,37 @@ class OpportunityHunter:
         if not live_markets:
             return []
 
+        # Price momentum — detect markets where price moved significantly vs stored value
+        momentum_tickers: dict = {}
+        if self.db:
+            try:
+                for market in live_markets:
+                    ticker  = market.get("ticker", "")
+                    cur_ask = float(market.get("yes_ask") or 0)
+                    if not cur_ask or not ticker:
+                        continue
+                    row = await self.db.fetchone(
+                        "SELECT yes_ask, last_price FROM markets WHERE ticker=?", (ticker,)
+                    )
+                    if row:
+                        stored = float(row.get("yes_ask") or row.get("last_price") or 0)
+                        if stored > 0:
+                            move_pct = abs(cur_ask - stored) / stored * 100
+                            if move_pct >= 5.0:
+                                direction = "yes" if cur_ask > stored else "no"
+                                momentum_tickers[ticker] = {
+                                    "move_pct": move_pct,
+                                    "direction": direction,
+                                    "stored": stored,
+                                    "current": cur_ask,
+                                }
+                                logger.info(
+                                    "  [MOMENTUM] %s: %.0f¢→%.0f¢ (%+.1f%%) → trade %s",
+                                    ticker[:40], stored, cur_ask, cur_ask - stored, direction.upper()
+                                )
+            except Exception as e:
+                logger.debug("Momentum check error: %s", e)
+
         # Pre-score — give live markets an extra boost for being time-sensitive
         prescored = []
         for market in live_markets:
@@ -234,6 +265,11 @@ class OpportunityHunter:
             if not title or len(title) < 5 or title.startswith("0x"):
                 continue
             pre = _pre_score(market) * 1.5   # live boost
+            # Extra boost for price momentum markets
+            ticker = market.get("ticker", "")
+            if ticker in momentum_tickers:
+                pre *= (1 + momentum_tickers[ticker]["move_pct"] / 50)
+                market["_momentum"] = momentum_tickers[ticker]
             prescored.append((pre, market))
 
         prescored.sort(key=lambda x: x[0], reverse=True)
@@ -261,6 +297,27 @@ class OpportunityHunter:
                 "  [LIVE-AI] %-36s conf=%d%% ev=%.1f¢ → %s",
                 (market.get("title") or ticker)[:36], conf, net_ev, action,
             )
+
+            # Momentum override: if price moved strongly and AI is neutral, trade the momentum
+            mom = market.get("_momentum")
+            if mom and action != "BUY" and conf <= 55 and mom["move_pct"] >= 8.0:
+                action   = "BUY"
+                conf     = min(60.0, 50.0 + mom["move_pct"])
+                net_ev   = mom["move_pct"] * 0.5   # estimated EV from momentum
+                decision["action"]     = action
+                decision["side"]       = mom["direction"]
+                decision["confidence"] = conf
+                decision["net_ev"]     = net_ev
+                decision["reasoning"]  = (
+                    f"[MOMENTUM] Price moved {mom['move_pct']:.1f}% "
+                    f"({mom['stored']:.0f}¢→{mom['current']:.0f}¢) — "
+                    f"trading {mom['direction'].upper()} with momentum. " + decision.get("reasoning", "")
+                )[:500]
+                logger.info(
+                    "  [MOMENTUM-TRADE] %-36s move=%.1f%% → BUY %s conf=%.0f%%",
+                    (market.get("title") or ticker)[:36], mom["move_pct"],
+                    mom["direction"].upper(), conf,
+                )
 
             if action != "BUY" or conf < min_confidence or net_ev <= 0:
                 logger.info(
