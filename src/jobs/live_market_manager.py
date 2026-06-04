@@ -29,11 +29,11 @@ logger = logging.getLogger("trading.live_manager")
 
 MAX_LIVE_POSITIONS   = 3     # keep exactly this many in-play trades at a time
 SCAN_INTERVAL        = 300   # seconds between manager cycles (5 minutes)
-LIVE_WINDOW_HOURS    = 3.0   # markets closing within this window qualify as "live"
+LIVE_WINDOW_HOURS    = 6.0   # markets closing within this window qualify as "live"
 STOP_LOSS_PCT        = 40.0  # exit if current_price dropped this % from entry (YES side)
-AI_EVAL_N            = 8     # how many pre-scored markets to send to AI per fill cycle
-MIN_ROI_PCT          = 2.0   # minimum ROI% for live trades (lower than regular)
-MIN_ABS_USD          = 0.50  # minimum absolute expected profit per live trade
+AI_EVAL_N            = 12    # how many pre-scored markets to send to AI per fill cycle
+MIN_ROI_PCT          = 1.0   # minimum ROI% for live trades (relaxed — live markets resolve fast)
+MIN_ABS_USD          = 0.25  # minimum absolute expected profit per live trade
 
 # in-memory slot registry — ticker → slot dict
 _live_slots: Dict[str, Dict] = {}

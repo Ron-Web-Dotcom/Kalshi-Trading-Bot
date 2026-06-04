@@ -499,7 +499,7 @@ class TradingBot:
                         risk          = self.risk,
                     )
                 except Exception as e:
-                    logger.debug("Live manager loop error: %s", e)
+                    logger.warning("Live manager loop error: %s", e, exc_info=True)
                 await asyncio.sleep(SCAN_INTERVAL)
 
         async def manual_trade_monitor_loop():

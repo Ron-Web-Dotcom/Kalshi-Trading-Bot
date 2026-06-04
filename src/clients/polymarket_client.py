@@ -192,7 +192,7 @@ class PolymarketTradingClient:
             logger.debug("Polymarket parse error: %s — %s", e, str(m)[:100])
             return None
 
-    async def get_live_markets(self, max_hours: float = 2.0, max_markets: int = 60) -> List[Dict]:
+    async def get_live_markets(self, max_hours: float = 6.0, max_markets: int = 60) -> List[Dict]:
         """
         Fetch ALL active Polymarket markets closing within max_hours — every category.
         Covers sports, crypto, politics, weather, economics, pop culture, and anything else
