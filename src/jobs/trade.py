@@ -473,8 +473,29 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             ticker   = market.get("ticker", "")
             net_ev   = decision.get("net_ev")
 
-            # Profit gate — None net_ev is treated as failing (not bypassing)
-            planned_size_usd = scaler.current_size
+            # Confidence-tiered sizing:
+            #   60–69%  → minimum size (25% of base) — small exploratory bet
+            #   70–79%  → half size  (50% of base) — medium conviction
+            #   80–89%  → full size  (100% of base) — high conviction
+            #   90–100% → max size   (150% of base, capped) — very high conviction
+            confidence = float(decision.get("confidence", 0))
+            base       = scaler.current_size
+            min_size   = settings.trading.min_trade_size_dollars
+            max_size   = settings.trading.max_trade_size_dollars
+            if confidence >= 90:
+                size_multiplier = 1.5
+                size_tier       = "MAX (90%+ conf)"
+            elif confidence >= 80:
+                size_multiplier = 1.0
+                size_tier       = "FULL (80–89% conf)"
+            elif confidence >= 70:
+                size_multiplier = 0.5
+                size_tier       = "HALF (70–79% conf)"
+            else:
+                size_multiplier = 0.25
+                size_tier       = "MIN (60–69% conf)"
+            planned_size_usd = round(max(min_size, min(base * size_multiplier, max_size)), 2)
+            logger.info("Trade size: $%.2f [%s]", planned_size_usd, size_tier)
             contracts_est    = (planned_size_usd / (price / 100)) if price > 0 else 0
             exp_profit_usd   = contracts_est * (net_ev / 100) if net_ev is not None else None
             roi_pct          = (exp_profit_usd / planned_size_usd * 100) if (exp_profit_usd and planned_size_usd) else None
