@@ -27,7 +27,7 @@ from typing import Dict, List, Optional, Tuple
 from src.data.price_feeds      import get_prices_for_keywords, format_prices, CRYPTO_IDS, EQUITY_SYMBOLS
 from src.data.news_fetcher     import fetch_headlines, fetch_community_prediction, format_headlines
 from src.data.weather_fetcher  import extract_cities, fetch_weather, format_weather
-from src.data.sports_fetcher   import fetch_sports_context, detect_league
+from src.data.sports_fetcher   import fetch_sports_context, detect_league, extract_teams, TEAM_ALIASES
 from src.data.economic_fetcher import fetch_economic_context, detect_economic_topics
 
 logger = logging.getLogger("trading.context_builder")
@@ -130,7 +130,7 @@ def _news_keywords(title: str) -> List[str]:
 async def build_market_context(
     market: Dict,
     include_community: bool = False,
-    timeout_seconds: float = 10.0,
+    timeout_seconds: float = 14.0,
 ) -> str:
     """
     Build a real-world context block for ANY Kalshi market.
@@ -173,10 +173,25 @@ async def build_market_context(
             # No city detected but category says weather — try news only
             pass
 
-    # Sports: fetch for sports markets; detect soccer specifically for news feed routing
+    # Sports: fetch for sports markets with comprehensive multi-source data
     detected_league = detect_league(title)
     if category == "sports" or detected_league:
-        tasks["sports"] = fetch_sports_context(title)
+        league = detected_league or "nfl"
+        # Use comprehensive multi-source sports data module
+        try:
+            from src.data.sports_data import fetch_comprehensive_sports_context, ESPN_LEAGUES
+            teams = extract_teams(title)  # team abbreviations
+            # Build full team display names from aliases
+            t_lower = title.lower()
+            team_names = []
+            for alias, abbr in TEAM_ALIASES.items():
+                if abbr in teams and re.search(r'\b' + re.escape(alias) + r'\b', t_lower):
+                    team_names.append(alias.title())
+            tasks["sports"] = fetch_comprehensive_sports_context(
+                title, league, teams, team_names, timeout=min(timeout_seconds - 2, 8.0)
+            )
+        except ImportError:
+            tasks["sports"] = fetch_sports_context(title)
         # Use soccer-specific news feeds for soccer markets
         if detected_league in ("epl", "laliga", "bundesliga", "seriea", "ligue1",
                                "mls", "ucl", "uel", "uecl", "worldcup", "euros",
@@ -190,13 +205,12 @@ async def build_market_context(
     # News: always fetch — relevant to every market type
     tasks["headlines"] = fetch_headlines(news_kws, category=category, max_headlines=8)
 
-    # Web search: always include for live/Polymarket markets — gives AI real-world context
-    is_live = market.get("is_live") or market.get("platform") == "polymarket"
-    if is_live:
-        from src.data.web_search import fetch_live_context
-        tasks["web_search"] = fetch_live_context(title, timeout=timeout_seconds - 3)
+    # Web search: ALWAYS run for every market — this is what gives AI real-world context
+    # to make confident decisions. Without this, AI defaults to conf≤50 and never bids.
+    from src.data.web_search import fetch_live_context
+    tasks["web_search"] = fetch_live_context(title, timeout=timeout_seconds - 2)
 
-    # Metaculus: optional community prediction
+    # Metaculus: optional community prediction (web_search already covers Manifold+Metaculus)
     if include_community:
         tasks["community"] = fetch_community_prediction(title)
 
@@ -228,6 +242,8 @@ async def build_market_context(
     sports = results.get("sports")
     if isinstance(sports, str) and sports:
         blocks.append(sports)
+    elif isinstance(sports, Exception):
+        logger.debug("Sports fetch error: %s", sports)
 
     economics = results.get("economics")
     if isinstance(economics, str) and economics:
@@ -239,7 +255,7 @@ async def build_market_context(
 
     web_search = results.get("web_search")
     if isinstance(web_search, str) and web_search:
-        blocks.append(f"=== WEB SEARCH RESULTS ===\n{web_search}\n=== END WEB SEARCH ===")
+        blocks.append(web_search)
 
     community = results.get("community")
     if isinstance(community, str) and community:
@@ -247,11 +263,10 @@ async def build_market_context(
 
     if blocks:
         context = "\n\n".join(blocks)
-        logger.debug(
-            "Context for %s [%s]: %d block(s) — %s",
-            ticker, category,
-            len(blocks),
-            ", ".join(k for k in results if not isinstance(results[k], Exception) and results[k]),
+        sources_hit = [k for k in results if not isinstance(results.get(k), Exception) and results.get(k)]
+        logger.info(
+            "Context for %s [%s]: %d block(s) — sources: %s",
+            ticker, category, len(blocks), ", ".join(sources_hit),
         )
         return context
 
