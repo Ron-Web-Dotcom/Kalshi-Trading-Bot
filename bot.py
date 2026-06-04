@@ -244,12 +244,16 @@ class TradingBot:
                     kal_cand = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform FROM markets "
                         "WHERE yes_ask > 5 AND yes_ask < 95 "
-                        "AND (platform='kalshi' OR platform IS NULL) ORDER BY volume DESC LIMIT 2"
+                        "AND (platform='kalshi' OR platform IS NULL) "
+                        "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
+                        "ORDER BY volume DESC LIMIT 2"
                     )
                     poly_cand = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform FROM markets "
                         "WHERE yes_ask > 5 AND yes_ask < 95 "
-                        "AND platform='polymarket' ORDER BY volume DESC LIMIT 2"
+                        "AND platform='polymarket' "
+                        "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
+                        "ORDER BY volume DESC LIMIT 2"
                     )
                     top_candidates = _cand_rows(kal_cand) + _cand_rows(poly_cand)
 
@@ -281,19 +285,6 @@ class TradingBot:
                     )
                 except Exception as e:
                     logger.error("Hourly heartbeat error: %s", e)
-
-                # ── Active position monitor (separate message) ────────────
-                try:
-                    open_pos = await self.db.fetchall(
-                        "SELECT * FROM positions WHERE status='open' ORDER BY opened_at DESC"
-                    )
-                    if open_pos:
-                        await discord.position_monitor(
-                            positions=open_pos,
-                            paper=not settings.trading.live_trading_enabled,
-                        )
-                except Exception:
-                    pass
 
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
 
@@ -383,6 +374,18 @@ class TradingBot:
                         await discord.near_miss_digest(
                             paper=not settings.trading.live_trading_enabled
                         )
+                    except Exception:
+                        pass
+                    # Open position monitor — separate message at same 4 scheduled times only
+                    try:
+                        all_pos = await self.db.fetchall(
+                            "SELECT * FROM positions WHERE status='open' ORDER BY opened_at DESC"
+                        )
+                        if all_pos:
+                            await discord.position_monitor(
+                                positions=all_pos,
+                                paper=not settings.trading.live_trading_enabled,
+                            )
                     except Exception:
                         pass
                     last_summary_at = datetime.now(timezone.utc).isoformat()
