@@ -601,6 +601,46 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             and (m.get("title") or "")
         ][:max_scan // 2]
 
+        # ── Category-wide sweep: scan ALL categories + sub-categories ─────────
+        # Runs in background and merges into candidate pools for broader coverage.
+        # This is what lets the bot find "cheeky bids" across every market type.
+        try:
+            from src.data.category_scanner import CategoryScanner
+            cat_scanner = CategoryScanner(db=db)
+            cat_markets = await cat_scanner.scan_all_categories(
+                max_per_tag=10,
+                max_total=200,
+                include_bulk=True,
+            )
+            # Separate Kalshi and Polymarket results from category scan
+            cat_kalshi = [
+                m for m in cat_markets
+                if m.get("platform", "kalshi") != "polymarket"
+                and m.get("ticker") not in arb_tickers
+                and not _already_open(m)
+                and 2 < _tradeable_price(m) < 98
+            ]
+            cat_poly = [
+                m for m in cat_markets
+                if m.get("platform") == "polymarket"
+                and not _already_open(m)
+                and m.get("yes_ask", 0) > 1
+            ]
+            # Merge category-scanned markets in, deduplicating by ticker
+            existing_kalshi_tickers = {m.get("ticker") for m in long_term + short_term + live_kalshi}
+            existing_poly_tickers   = {m.get("ticker") for m in poly_markets}
+            cat_kalshi_new = [m for m in cat_kalshi if m.get("ticker") not in existing_kalshi_tickers]
+            cat_poly_new   = [m for m in cat_poly   if m.get("ticker") not in existing_poly_tickers]
+            # Add to pools — category markets go after existing candidates (which came from DB volume-sort)
+            long_term   = long_term   + cat_kalshi_new[:max_scan]
+            poly_markets = poly_markets + cat_poly_new[:max_scan]
+            logger.info(
+                "Category sweep added: +%d Kalshi candidates, +%d Polymarket candidates",
+                len(cat_kalshi_new), len(cat_poly_new),
+            )
+        except Exception as _cat_err:
+            logger.debug("Category sweep error (non-fatal): %s", _cat_err)
+
         # Live markets go FIRST — they're time-sensitive and get AI evaluated before regular markets
         live_kalshi_tickers = {m.get("ticker") for m in live_kalshi}
         long_term  = [m for m in long_term  if m.get("ticker") not in live_kalshi_tickers]
