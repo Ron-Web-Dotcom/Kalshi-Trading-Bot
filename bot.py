@@ -386,6 +386,7 @@ class TradingBot:
                         all_pos = await self.db.fetchall(
                             "SELECT * FROM positions WHERE status='open' ORDER BY opened_at DESC"
                         )
+                        all_pos = [dict(r) for r in (all_pos or [])]
                         if all_pos:
                             await discord.position_monitor(
                                 positions=all_pos,

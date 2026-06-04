@@ -476,7 +476,7 @@ class DiscordAlerter:
         await self._post(payload)
 
     async def position_monitor(self, positions: list, paper: bool = True) -> None:
-        """Send hourly active position monitor — one message showing all open trades."""
+        """Send active position monitor — one message showing all open trades (4x daily)."""
         if not positions:
             return
         mode_tag = "📝 PAPER" if paper else "💰 LIVE"

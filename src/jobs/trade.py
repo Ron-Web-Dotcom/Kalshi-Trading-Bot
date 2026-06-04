@@ -231,6 +231,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                             f"(should be 100¢). Net edge after fees={net:.1f}¢"
                         ),
                         signal_source="internal_arb",
+                        market_title=(market.get("title") or ticker) if market else ticker,
                     )
                     if rec:
                         trades_this_cycle += 1
@@ -370,9 +371,9 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 logger.warning("Polymarket market load failed: %s", pe)
                 poly_markets = []
 
-        # ── 6. Daily trade gate — sit out if already traded today ────────────────
-        from datetime import date as _date
-        today = _date.today().isoformat()
+        # ── 6. Daily trade gate — sit out if already traded today (ET day boundary) ─
+        from src.utils.eastern_time import now_et as _now_et_trade
+        today = _now_et_trade().date().isoformat()
         paper_flag = 0 if live_mode else 1   # live trades recorded as paper_trade=0
         trades_today_row = await db.fetchone(
             "SELECT COUNT(*) AS n FROM trade_logs WHERE paper_trade=? AND executed_at >= ?",
@@ -577,9 +578,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                             "hours_to_close": m.get("hours_to_close", 0),
                         })
 
-                # Alert only for trades that actually executed (not skipped)
-                if executed_live_trades:
-                    await discord.live_trades_alert(executed_live_trades, mode=mode_label)
+                # live_trades_alert is owned by live_market_manager — skip here to avoid duplicate alerts
 
         # Long-term pool: higher-volume markets (any close time)
         long_term = [

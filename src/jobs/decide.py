@@ -109,7 +109,7 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
         )
         # Record real near-misses (AI said BUY but conf fell short) into daily stats.
         # They appear in the hourly report — no individual Discord spam.
-        if action == "BUY" and decision.model != "rule_based" and net_ev is not None:
+        if action == "BUY" and decision.model != "rule_based":
             try:
                 from src.utils.daily_stats import stats as daily_stats
                 skip_reason = (

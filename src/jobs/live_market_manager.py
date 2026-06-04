@@ -663,6 +663,6 @@ async def run_live_manager_cycle(db, discord, settings, kalshi_trader, poly_trad
     finally:
         await kalshi.close()
         try:
-            await poly_client._client().aclose()
+            await poly_client.close()
         except Exception:
             pass
