@@ -167,18 +167,37 @@ class AIDecisionEngine:
         spread         = yes_ask + no_ask - 100
         liquidity      = "LOW" if volume < 100 else "HIGH" if volume > 10000 else "MEDIUM"
         # Warn AI if no live price data was fetched for asset markets
+        # Count how many context blocks we got — used to calibrate confidence ceiling
+        context_source_count = context.count("===") // 2 if context else 0
+        has_rich_context = context_source_count >= 2
+        has_pred_markets = "Manifold" in context or "Metaculus" in context
+        has_news = "Recent news" in context or "RECENT NEWS" in context
+        has_wiki = "Wikipedia" in context
+        has_reddit = "Reddit" in context
+
+        context_block  = f"\n\n--- REAL-WORLD CONTEXT (live data fetched right now from {context_source_count} sources) ---\n{context}\n--- END CONTEXT ---" if context else ""
+        no_context_warning = "\n⚠️ NO LIVE DATA AVAILABLE — default confidence to ≤ 50. Do NOT guess." if not context else ""
         _no_price_warn = ""
         if not context and any(k in title.lower() for k in ["bitcoin", "btc", "eth", "crypto", "price", "$"]):
             _no_price_warn = "\n⚠️ WARNING: Live price fetch failed — your training data prices may be STALE. Do NOT cite specific prices unless you are certain they are current. Be extra conservative."
-        context_block  = f"\n\n--- REAL-WORLD CONTEXT (live data fetched right now) ---\n{context}\n--- END CONTEXT ---" if context else _no_price_warn
-        bot_block      = f"\n\n{bot_context}" if bot_context else ""
-        no_context_warning = "\n⚠️ NO LIVE DATA AVAILABLE — default confidence to ≤ 50. Do NOT guess." if not context else ""
+        if _no_price_warn and not context:
+            context_block = _no_price_warn
 
-        return f"""You are a professional prediction market trader managing real money. Your job is to find high-conviction bets backed by real-world evidence — NOT to trade for the sake of trading.
+        bot_block = f"\n\n{bot_context}" if bot_context else ""
 
-GOLDEN RULE: A confident HOLD is always better than a weak BUY. Cash is a position.
-MINIMUM BAR: Only BUY when you have specific, verifiable facts that justify your probability estimate.
-TARGET: Reach confidence 75–100 only when real-world data clearly supports it. Never inflate confidence.
+        # Dynamic confidence ceiling based on how much context we have
+        if has_rich_context and has_news and (has_pred_markets or has_wiki):
+            conf_ceiling = "You have rich multi-source context — confidence up to 90% is justified when evidence clearly points one way."
+        elif has_news or has_wiki:
+            conf_ceiling = "You have some context — confidence up to 75% is justified when evidence is consistent."
+        else:
+            conf_ceiling = "Context is limited — cap confidence at 55% and lean HOLD."
+
+        return f"""You are a professional prediction market trader managing real money. Your job is to find high-conviction bets backed by real-world evidence.
+
+GOLDEN RULE: Use ALL the context provided — news, Wikipedia, Reddit, prediction markets. The more sources agree, the higher your confidence CAN go.
+KEY INSIGHT: When multiple independent sources (news + Reddit + Manifold/Metaculus) all point the same direction, that is strong signal. Trust it.
+{conf_ceiling}
 
 === MARKET ===
 Ticker:   {ticker}
@@ -195,20 +214,27 @@ BUY YES @ {yes_ask:.0f}¢ → profit {yes_ev_if_true:.1f}¢ if YES resolves  |  
 BUY NO  @ {no_ask:.0f}¢ → profit {no_ev_if_true:.1f}¢ if NO resolves   |  lose {no_ask:.0f}¢ if YES |  break-even = {no_ask/98*100:.1f}% true prob
 {arb_text}{context_block}{bot_block}{no_context_warning}
 
-=== HOW TO SCORE CONFIDENCE ===
-90–100% → You have direct, current, unambiguous data (live score, official result, real-time price)
-75–89%  → Strong evidence from multiple sources clearly pointing one way
-60–74%  → Good evidence but some uncertainty remains
-50–59%  → Weak evidence or conflicting signals — lean HOLD
-< 50%   → No real edge — always HOLD
+=== HOW TO SCORE CONFIDENCE (based on evidence quality) ===
+90–100% → Multiple independent sources (news + community + prediction markets) all clearly agree
+75–89%  → Strong evidence from 2+ sources pointing the same direction
+60–74%  → Good evidence from at least 1 reliable source with reasonable certainty
+50–59%  → Weak or conflicting signals — lean HOLD
+< 50%   → No real evidence — always HOLD
+
+=== HOW TO USE THE CONTEXT ===
+• Wikipedia/DDG background → use for base rate and historical context
+• News headlines → check if any directly confirm or deny the question
+• Reddit posts → community sentiment and on-the-ground reports
+• Manifold/Metaculus → other informed traders' probability estimates (strong signal)
+• If Manifold/Metaculus probability differs significantly from market price → strong edge signal
 
 === YOUR TASK ===
-Step 1 — Read the REAL-WORLD CONTEXT carefully. Extract every specific fact relevant to this question.
-Step 2 — Estimate TRUE P(YES) based ONLY on those facts. If context is missing, default to 50%.
-Step 3 — Check Polymarket price (if shown) — large gaps between platforms signal mispricing.
+Step 1 — Read ALL context sections. Extract every specific fact relevant to the question.
+Step 2 — Check Manifold/Metaculus predictions — if they differ from market price by >10%, that IS an edge.
+Step 3 — Estimate TRUE P(YES) based on combined evidence. More agreeing sources = higher confidence.
 Step 4 — Compute net EV = (true_prob/100 - market_price/100) × 98¢ for the better side.
-Step 5 — BUY only if: net_ev > 2¢ AND confidence ≥ {self.trading_cfg.min_ai_confidence:.0f}% AND you can cite specific facts.
-Step 6 — HOLD if: no strong evidence, conflicting data, context missing, or EV is marginal.
+Step 5 — BUY if: net_ev > 2¢ AND confidence ≥ {self.trading_cfg.min_ai_confidence:.0f}% AND you can cite specific facts.
+Step 6 — HOLD only if: truly no evidence, strongly conflicting data, or EV is clearly marginal.
 
 Respond ONLY with this exact JSON (no markdown):
 {{
@@ -216,16 +242,15 @@ Respond ONLY with this exact JSON (no markdown):
   "action": "BUY" | "HOLD",
   "side": "yes" | "no" | null,
   "net_ev_cents": <expected profit per contract after fee, negative = unfavourable>,
-  "confidence": <integer 0-100 — how certain you are in your true_prob, based on evidence quality>,
-  "reasoning": "<3-4 sentences. Quote specific facts from context. State what evidence drove your estimate and what would change your mind.>"
+  "confidence": <integer 0-100 — reflects EVIDENCE QUALITY from all sources combined>,
+  "reasoning": "<3-4 sentences. Quote specific facts from context. Name which sources support your view. State what would change your mind.>"
 }}
 
-HARD RULES — violating these means a bad trade:
-- confidence must reflect EVIDENCE QUALITY, not how exciting the trade looks
-- No context available = confidence ≤ 50, action = HOLD
-- If Polymarket and Kalshi agree on price, there's likely no edge — be skeptical
-- Minimum net_ev to BUY = 2¢ (small edges get eaten by variance)
-- confidence ≥ {self.trading_cfg.min_ai_confidence:.0f} required — if you can't reach it, HOLD and say why"""
+HARD RULES:
+- No context at all = confidence ≤ 50, action = HOLD
+- Confidence reflects evidence quality — with rich multi-source context, 70-85% is appropriate when evidence is clear
+- Minimum net_ev to BUY = 2¢
+- confidence ≥ {self.trading_cfg.min_ai_confidence:.0f} required to BUY"""
 
     async def decide(self, market: Dict, signals: List[Dict] = []) -> AIDecision:
         ticker = market.get("ticker", "UNKNOWN")
