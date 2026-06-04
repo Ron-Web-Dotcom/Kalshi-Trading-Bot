@@ -25,11 +25,11 @@ from src.config.settings import settings
 
 logger = get_trading_logger("main")
 
-# Cycle intervals (seconds)
-INGEST_INTERVAL  = 300   # refresh market data every 5 min
-TRACK_INTERVAL   = 120   # check position PnL every 2 min
-EVAL_INTERVAL    = 300   # print performance snapshot every 5 min
-TRADE_INTERVAL   = 60    # run trading cycle every 60 s
+# Cycle intervals (seconds) — bot runs 24/7 continuously
+INGEST_INTERVAL    = 180   # refresh market data every 3 min
+TRACK_INTERVAL     = 60    # check position PnL every 1 min
+EVAL_INTERVAL      = 300   # print performance snapshot every 5 min
+TRADE_INTERVAL     = 45    # run trading cycle every 45 s
 HEARTBEAT_INTERVAL = 3600  # send hourly heartbeat every 60 min
 
 

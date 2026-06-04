@@ -371,23 +371,23 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 logger.warning("Polymarket market load failed: %s", pe)
                 poly_markets = []
 
-        # ── 6. Daily trade gate — sit out if already traded today (ET day boundary) ─
+        # ── 6. Daily trade gate — sit out TRADING if limit hit, but keep scanning ─
         from src.utils.eastern_time import now_et as _now_et_trade
         today = _now_et_trade().date().isoformat()
-        paper_flag = 0 if live_mode else 1   # live trades recorded as paper_trade=0
+        paper_flag = 0 if live_mode else 1
         trades_today_row = await db.fetchone(
             "SELECT COUNT(*) AS n FROM trade_logs WHERE paper_trade=? AND executed_at >= ?",
             (paper_flag, today + "T00:00:00",)
         )
-        trades_today = (trades_today_row or {}).get("n", 0)
-        max_per_day  = settings.trading.max_trades_per_day
+        trades_today  = (trades_today_row or {}).get("n", 0)
+        max_per_day   = settings.trading.max_trades_per_day
+        trade_gate_on = (trades_today >= max_per_day and trades_this_cycle == 0)
 
-        if trades_today >= max_per_day and trades_this_cycle == 0:
+        if trade_gate_on:
             logger.info(
-                "Daily trade limit reached (%d/%d today) — sitting out this cycle",
+                "Daily trade limit reached (%d/%d) — SCANNING continues, trading paused",
                 trades_today, max_per_day,
             )
-            return results
 
         # ── 7. Best-opportunity hunt across BOTH platforms ────────────────────
         from src.strategy.opportunity import OpportunityHunter
@@ -678,7 +678,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
         # Live markets get one extra trade slot per cycle — they're time-sensitive
         live_bonus = 1 if (best and best.get("market", {}).get("is_live")) else 0
-        if best and trades_this_cycle < max_trades + live_bonus:
+        if best and not trade_gate_on and trades_this_cycle < max_trades + live_bonus:
             market   = best["market"]
             decision = best["decision"]
             poly_comp= best.get("poly_comp")

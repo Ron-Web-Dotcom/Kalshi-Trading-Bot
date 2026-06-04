@@ -30,16 +30,22 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
     from src.ai.decision import AIDecisionEngine
     from src.config.settings import settings
 
-    # AI cost budget gate — prevent runaway API spend
+    # AI cost budget gate — log when approaching limit but never fully stop scanning
     tcfg = settings.trading
     if tcfg.enable_daily_cost_limiting:
         spent = await _get_daily_ai_spend(db)
-        if spent >= tcfg.daily_ai_budget:
+        if spent >= tcfg.daily_ai_budget * 1.5:
+            # Hard stop only at 150% of budget — gives breathing room for live events
             logger.warning(
-                "Daily AI budget exhausted ($%.4f >= $%.2f) — skipping AI call",
+                "AI spend $%.4f exceeds 150%% of daily budget $%.2f — pausing AI calls",
                 spent, tcfg.daily_ai_budget,
             )
             return None
+        elif spent >= tcfg.daily_ai_budget:
+            logger.info(
+                "AI spend $%.4f at daily budget $%.2f — continuing for live events",
+                spent, tcfg.daily_ai_budget,
+            )
 
     engine = AIDecisionEngine(db=db)
     try:

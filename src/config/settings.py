@@ -75,9 +75,9 @@ class TradingConfig:
     avoid_overtrading_minutes: int = field(default_factory=lambda: _env_int("OVERTRADE_COOLDOWN_MINUTES", 5))
 
     # Cycle limits (configurable without code changes)
-    max_trades_per_cycle: int = field(default_factory=lambda: _env_int("MAX_TRADES_PER_CYCLE", 3))
-    max_trades_per_day: int   = field(default_factory=lambda: _env_int("MAX_TRADES_PER_DAY", 10))
-    max_markets_to_scan: int  = field(default_factory=lambda: _env_int("MAX_MARKETS_TO_SCAN", 5))
+    max_trades_per_cycle: int = field(default_factory=lambda: _env_int("MAX_TRADES_PER_CYCLE", 5))
+    max_trades_per_day: int   = field(default_factory=lambda: _env_int("MAX_TRADES_PER_DAY", 50))
+    max_markets_to_scan: int  = field(default_factory=lambda: _env_int("MAX_MARKETS_TO_SCAN", 20))
     min_market_volume: float  = field(default_factory=lambda: _env_float("MIN_MARKET_VOLUME", 0.0))
 
     # Kelly criterion
@@ -96,7 +96,7 @@ class TradingConfig:
     reeval_min_confidence: float = field(default_factory=lambda: _env_float("REEVAL_MIN_CONFIDENCE", 75.0))
 
     # AI budget
-    daily_ai_budget: float = field(default_factory=lambda: _env_float("DAILY_AI_BUDGET", 1.0))
+    daily_ai_budget: float = field(default_factory=lambda: _env_float("DAILY_AI_BUDGET", 5.0))
     enable_daily_cost_limiting: bool = field(default_factory=lambda: _env_bool("ENABLE_COST_LIMITING", True))
     sleep_when_limit_reached: bool = field(default_factory=lambda: _env_bool("SLEEP_ON_LIMIT", True))
 
