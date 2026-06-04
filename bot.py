@@ -574,28 +574,119 @@ class TradingBot:
 
         async def bot_alert_loop():
             """
-            Every 10 minutes: fire ONE bundled BOT ALERT for events happening
-            RIGHT NOW. Two sources qualify:
+            Every 10 minutes: fire ONE bundled BOT ALERT for live events happening
+            RIGHT NOW. Then, ~1 minute after each alerted pick resolves or the bot
+            takes an action, fire a color-coded follow-up result:
 
-            1. Active live slots — the bot already entered a live in-play trade.
-            2. Any BUY evaluation (regardless of close_time) where the UNDERLYING
-               REAL-WORLD EVENT is currently live — e.g. France playing a World
-               Cup match, election night vote counting, NBA Finals game in progress.
-               Detected via SofaScore live feed + entity matching on the title.
+              🟢 WE GOT THE BAG        — position closed in profit
+              🔴 WE LOST BUT WE KEEP   — position closed at a loss
+              🟡 HAVE TO OPT OUT       — bot exited early (conditions changed)
+              🟤 I SAW A SWEET BID     — new high-confidence bid just entered
 
-            Long-term predictions with no live event stay in the hourly report.
-            Silent when nothing qualifies.
+            Two sources qualify for the initial alert:
+              1. Active live slots — bot already entered an in-play trade.
+              2. BUY evaluations where the underlying event is confirmed live NOW.
             """
             from src.alerts.discord import DiscordAlerter
             from src.utils.daily_stats import stats as _da
             from src.jobs.live_market_manager import _live_slots as _ls
             from src.data.live_event_detector import is_event_live_now
 
+            # ticker → {band, pick_snapshot, alerted_at, result_sent}
             _alerted: dict = {}
             _alerted_date  = datetime.now(timezone.utc).date()
 
-            BOT_ALERT_INTERVAL = 600
+            BOT_ALERT_INTERVAL = 600   # scan every 10 min
+            RESULT_CHECK_DELAY = 60    # check results 60s after alert
             MIN_CONF           = 60.0
+
+            async def _check_and_post_results(discord, mode: str):
+                """
+                For every previously alerted pick, check if outcome is now known
+                and post a colour-coded result message (once per ticker).
+                """
+                now = datetime.now(timezone.utc)
+                for ticker, info in list(_alerted.items()):
+                    if info.get("result_sent"):
+                        continue
+                    alerted_at = info.get("alerted_at")
+                    if not alerted_at:
+                        continue
+                    elapsed = (now - alerted_at).total_seconds()
+                    if elapsed < RESULT_CHECK_DELAY:
+                        continue
+
+                    pick = info.get("pick", {})
+
+                    try:
+                        # Check DB for this position's outcome
+                        pos = await self.db.fetchone(
+                            "SELECT status, pnl, close_reason, current_price, avg_price "
+                            "FROM positions WHERE ticker=? ORDER BY opened_at DESC LIMIT 1",
+                            (ticker,)
+                        )
+
+                        outcome = None
+                        extra   = {}
+
+                        if pos:
+                            status = pos.get("status", "")
+                            pnl    = pos.get("pnl")
+                            reason = pos.get("close_reason", "") or ""
+                            exit_p = pos.get("current_price") or pos.get("avg_price")
+
+                            if status == "closed" and pnl is not None:
+                                extra["pnl"]        = float(pnl)
+                                extra["exit_price"] = float(exit_p or 0)
+                                if float(pnl) > 0:
+                                    outcome = "profit"
+                                    extra["result_reason"] = f"Closed at ${float(pnl):+.2f}. {reason}"
+                                else:
+                                    # Check if this was an early exit vs natural loss
+                                    if any(k in reason.lower() for k in ["exit","early","stop","cut"]):
+                                        outcome = "exit"
+                                        extra["result_reason"] = f"Opted out early. {reason}"
+                                    else:
+                                        outcome = "loss"
+                                        extra["result_reason"] = f"Closed at ${float(pnl):+.2f}. {reason}. Next one's ours."
+
+                            elif status == "open":
+                                # Position still open — check if bot just added a new entry
+                                # (new bid detected = optin signal)
+                                pass  # will check below
+
+                        # If no closed position, check if a new high-conf BUY just fired
+                        # on a DIFFERENT ticker (optin scenario)
+                        if outcome is None:
+                            for ev in list(_da.all_evaluations)[:5]:
+                                if ev.get("action") != "BUY":
+                                    continue
+                                ev_ticker = ev.get("ticker", "")
+                                ev_conf   = ev.get("confidence", 0)
+                                if ev_ticker == ticker or ev_conf < 70:
+                                    continue
+                                if ev_ticker not in _alerted:
+                                    # New high-conf pick not yet alerted — flag it as optin
+                                    outcome = "optin"
+                                    extra = {
+                                        "ticker":        ev_ticker,
+                                        "title":         ev.get("title", ""),
+                                        "side":          ev.get("side", "YES"),
+                                        "price_cents":   ev.get("yes_ask", 0),
+                                        "confidence":    ev_conf,
+                                        "net_ev":        ev.get("net_ev"),
+                                        "result_reason": ev.get("reasoning", "")[:150],
+                                    }
+                                    break
+
+                        if outcome:
+                            result_pick = {**pick, **extra}
+                            await discord.bot_alert_result(result_pick, outcome=outcome, mode=mode)
+                            _alerted[ticker]["result_sent"] = True
+                            logger.info("BOT ALERT RESULT fired: %s → %s", ticker, outcome)
+
+                    except Exception as _re:
+                        logger.debug("Result check error for %s: %s", ticker, _re)
 
             await asyncio.sleep(120)
             while not self._shutdown.is_set():
@@ -611,17 +702,21 @@ class TradingBot:
 
                     discord   = DiscordAlerter()
                     mode      = "PAPER" if not settings.trading.live_trading_enabled else "LIVE"
+                    now_utc   = datetime.now(timezone.utc)
                     new_picks: list = []
 
                     # 1. Active live slots — already entered, highest urgency
                     for ticker, slot in list(_ls.items()):
                         band = int(slot.get("confidence", 0) / 10) * 10
-                        if _alerted.get(ticker) != band:
-                            new_picks.append({**slot, "is_live": True})
-                            _alerted[ticker] = band
+                        if _alerted.get(ticker, {}).get("band") != band:
+                            pick = {**slot, "is_live": True, "ticker": ticker}
+                            new_picks.append(pick)
+                            _alerted[ticker] = {
+                                "band": band, "pick": pick,
+                                "alerted_at": now_utc, "result_sent": False,
+                            }
 
                     # 2. BUY evaluations where the underlying event is LIVE RIGHT NOW
-                    # (regardless of whether the market itself is "long-term")
                     for ev in list(_da.all_evaluations):
                         if ev.get("action") != "BUY":
                             continue
@@ -629,7 +724,7 @@ class TradingBot:
                         ticker = ev.get("ticker", "")
                         if conf < MIN_CONF or not ticker:
                             continue
-                        if ticker in _ls:        # already covered by slot check above
+                        if ticker in _ls:
                             continue
                         title = ev.get("title", "") or ""
                         try:
@@ -637,21 +732,25 @@ class TradingBot:
                         except Exception:
                             live_now = False
                         if not live_now:
-                            continue             # event not happening yet — stay quiet
+                            continue
                         band = int(conf / 10) * 10
-                        if _alerted.get(ticker) != band:
-                            new_picks.append({**ev, "is_live": True})
-                            _alerted[ticker] = band
+                        if _alerted.get(ticker, {}).get("band") != band:
+                            pick = {**ev, "is_live": True}
+                            new_picks.append(pick)
+                            _alerted[ticker] = {
+                                "band": band, "pick": pick,
+                                "alerted_at": now_utc, "result_sent": False,
+                            }
 
-                    if not new_picks:
-                        continue   # nothing new — stay quiet
+                    if new_picks:
+                        new_picks.sort(
+                            key=lambda x: (0 if x.get("is_live") else 1, -x.get("confidence", 0))
+                        )
+                        await discord.bot_alert(new_picks[:6], mode=mode)
+                        logger.info("BOT ALERT fired: %d picks", len(new_picks))
 
-                    # Sort: live first, then by confidence descending
-                    new_picks.sort(
-                        key=lambda x: (0 if x.get("is_live") else 1, -x.get("confidence", 0))
-                    )
-                    await discord.bot_alert(new_picks[:6], mode=mode)
-                    logger.info("BOT ALERT fired: %d picks", len(new_picks))
+                    # Check results for previously alerted picks
+                    await _check_and_post_results(discord, mode)
 
                 except Exception as e:
                     logger.error("Bot alert loop error: %s", e)

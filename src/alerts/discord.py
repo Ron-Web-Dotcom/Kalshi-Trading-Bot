@@ -284,6 +284,67 @@ class DiscordAlerter:
         }
         await self._post(payload)
 
+    async def bot_alert_result(self, pick: Dict, outcome: str, mode: str = "PAPER") -> None:
+        """
+        Follow-up result message 1 minute after a BOT ALERT resolves.
+
+        outcome must be one of:
+          "profit"  → 🟢 WE GOT THE BAG
+          "loss"    → 🔴 WE LOST BUT WE KEEP ON MOVING
+          "exit"    → 🟡 HAVE TO OPT OUT
+          "optin"   → 🟤 I SAW A SWEET BID I HAVE TO OPT IN
+
+        pick dict: same shape as bot_alert picks — ticker, title, side,
+                   price_cents/yes_ask, confidence, net_ev, reasoning,
+                   pnl (optional), exit_price (optional), reason (optional)
+        """
+        outcome_map = {
+            "profit": (0x00C853, "🟢 WE GOT THE BAG",            "WINNER"),
+            "loss":   (0xFF1744, "🔴 WE LOST BUT WE KEEP ON MOVING", "LOSS"),
+            "exit":   (0xFFD600, "🟡 HAVE TO OPT OUT",            "EXITED"),
+            "optin":  (0x6D4C41, "🟤 I SAW A SWEET BID — OPTING IN", "NEW BID"),
+        }
+        color, headline, badge = outcome_map.get(outcome, (0x888888, "⚪ RESULT", "RESULT"))
+        mode_tag  = "📝 PAPER" if mode == "PAPER" else "💰 LIVE"
+        now_utc   = datetime.now(timezone.utc)
+
+        title_str = (pick.get("title") or pick.get("ticker") or "")[:60]
+        side      = (pick.get("side") or "YES").upper()
+        entry     = float(pick.get("price_cents") or pick.get("yes_ask") or 0)
+        conf      = pick.get("confidence", 0)
+        pnl       = pick.get("pnl")
+        exit_p    = pick.get("exit_price")
+        reason    = (pick.get("result_reason") or pick.get("reasoning") or "")[:200]
+        ev        = pick.get("net_ev")
+
+        # Build the result body
+        body_lines = [f"**{title_str}**"]
+        body_lines.append(f"Side: **{side}** | Entry: **{entry:.0f}¢**{f' → Exit: **{exit_p:.0f}¢**' if exit_p else ''}")
+        body_lines.append(f"Confidence was: **{conf:.0f}%**{f' | EV was: {ev:+.1f}¢' if ev is not None else ''}")
+
+        if outcome == "profit" and pnl is not None:
+            body_lines.append(f"💰 **Profit: +${pnl:.2f}** — that's what we came for!")
+        elif outcome == "loss" and pnl is not None:
+            body_lines.append(f"📉 **Loss: ${pnl:.2f}** — shake it off, next one's ours.")
+        elif outcome == "exit":
+            body_lines.append("🚪 Conditions changed — cutting before resolution is the smart move.")
+        elif outcome == "optin":
+            body_lines.append("👀 Fresh signal spotted — jumping in now.")
+
+        if reason:
+            body_lines.append(f"\n_{reason}_")
+
+        payload = {
+            "embeds": [{
+                "title":       f"{headline}  [{badge}]  [{mode_tag}]",
+                "description": "\n".join(body_lines),
+                "color":       color,
+                "timestamp":   now_utc.isoformat(),
+                "footer":      {"text": "Bot result — 1 min after alert fired"},
+            }]
+        }
+        await self._post(payload)
+
     async def live_trades_alert(self, trades: List[Dict], mode: str = "PAPER") -> None:
         """
         Single Discord embed announcing live in-play trades being entered right now.
