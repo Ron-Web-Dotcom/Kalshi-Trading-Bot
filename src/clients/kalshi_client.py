@@ -190,7 +190,7 @@ class KalshiClient:
                         live.append(m)
                 except Exception:
                     continue
-            logger.info("Kalshi live markets (closing ≤%.0fh): %d found", max_hours, len(live))
+            logger.info("Kalshi live markets (closing ≤%.0fh): %d of %d total", max_hours, len(live), len(markets))
             return live[:max_markets]
         except Exception as e:
             logger.warning("Failed to fetch Kalshi live markets: %s", e)

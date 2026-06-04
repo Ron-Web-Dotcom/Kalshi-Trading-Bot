@@ -177,7 +177,8 @@ class TradingBot:
             while not self._shutdown.is_set():
                 try:
                     discord = DiscordAlerter()
-                    today = datetime.now(timezone.utc).date().isoformat()
+                    from src.utils.eastern_time import now_et as _now_et
+                    today = _now_et().date().isoformat()
 
                     # Total markets in DB
                     # Kalshi vs Polymarket split — open markets only
@@ -318,7 +319,8 @@ class TradingBot:
 
                 try:
                     discord     = DiscordAlerter()
-                    today       = datetime.now(timezone.utc).date().isoformat()
+                    from src.utils.eastern_time import now_et as _now_et_sum
+                    today       = _now_et_sum().date().isoformat()
                     _paper_flag = 0 if settings.trading.live_trading_enabled else 1
 
                     open_pos = await self.db.fetchall(

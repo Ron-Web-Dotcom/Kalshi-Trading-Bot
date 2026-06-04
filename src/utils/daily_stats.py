@@ -209,7 +209,8 @@ class DailyStats:
         self.poly_matches = 0
         self.suspicious_matches = []
         self.consecutive_losses = 0
-        self.all_evaluations = []
+        # all_evaluations intentionally NOT cleared — best_pick stays valid
+        # until new evaluations come in. Stale pick is better than blank pick.
         logger.info("Daily stats reset for new day.")
 
     def snapshot(self) -> Dict:
