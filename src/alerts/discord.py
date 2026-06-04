@@ -482,21 +482,26 @@ class DiscordAlerter:
         mode_tag = "📝 PAPER" if paper else "💰 LIVE"
         lines = []
         total_pnl = 0.0
-        # Deduplicate: same side+contracts+avg_price on same platform = same position stored twice
+        # Deduplicate: same platform+side+contracts+avg_price = same position stored twice
+        # (Polymarket ticker can change between API cycles — conditionId vs slug vs id)
         seen_keys: set = set()
+        seen_titles: set = set()
         deduped = []
         for p in positions:
-            title = (p.get("title") or "").strip()
+            title = (p.get("title") or "").strip().lower()
             dedup_key = (
                 p.get("platform", "kalshi"),
                 p.get("side", ""),
                 p.get("contracts", 0),
                 round(float(p.get("avg_price") or 0)),
-                title[:40] if title else p.get("ticker", ""),
             )
             if dedup_key in seen_keys:
                 continue
+            if title and title not in ("", "unknown") and title in seen_titles:
+                continue
             seen_keys.add(dedup_key)
+            if title:
+                seen_titles.add(title)
             deduped.append(p)
         positions = deduped
         for p in positions:
@@ -939,16 +944,23 @@ class DiscordAlerter:
             })
 
         # All currently open positions — deduplicate same trade stored under two tickers
+        # (Polymarket ticker drifts between conditionId/slug/id across API cycles)
         if open_positions:
             _seen: set = set()
+            _seen_titles: set = set()
             _deduped_open = []
             for p in open_positions:
+                _title = (p.get("title") or "").strip().lower()
                 _key = (p.get("platform",""), p.get("side",""), p.get("contracts",0),
-                        round(float(p.get("avg_price") or 0)),
-                        (p.get("title") or p.get("ticker",""))[:40])
-                if _key not in _seen:
-                    _seen.add(_key)
-                    _deduped_open.append(p)
+                        round(float(p.get("avg_price") or 0)))
+                if _key in _seen:
+                    continue
+                if _title and _title not in ("", "unknown") and _title in _seen_titles:
+                    continue
+                _seen.add(_key)
+                if _title:
+                    _seen_titles.add(_title)
+                _deduped_open.append(p)
             open_positions = _deduped_open
         if open_positions:
             lines = []

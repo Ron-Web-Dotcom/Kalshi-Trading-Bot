@@ -90,6 +90,8 @@ class PolyPaperTrader:
         now        = datetime.now(timezone.utc).isoformat()
 
         # Duplicate guard BEFORE placing any live order
+        # Primary check: same ticker+side (catches same API session)
+        # Secondary check: same title+side (catches ticker drift between API cycles — conditionId vs slug vs id)
         if self.db:
             existing = await self.db.fetchone(
                 "SELECT id FROM positions WHERE ticker=? AND side=? AND platform='polymarket' AND status='open'",
@@ -98,6 +100,14 @@ class PolyPaperTrader:
             if existing:
                 logger.info("POLY SKIP %s %s: open position exists (id=%s)", ticker, side, existing["id"])
                 return None
+            if market_title:
+                title_existing = await self.db.fetchone(
+                    "SELECT id FROM positions WHERE title=? AND side=? AND platform='polymarket' AND status='open'",
+                    ((market_title or "")[:200], side)
+                )
+                if title_existing:
+                    logger.info("POLY SKIP %s %s: open position with same title exists (id=%s)", ticker, side, title_existing["id"])
+                    return None
 
         # Live mode: place real order only after dup check passes
         if self.poly_cfg.live_trading_enabled:
