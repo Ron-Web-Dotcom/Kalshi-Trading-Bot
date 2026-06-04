@@ -755,6 +755,202 @@ class TradingBot:
                 except Exception as e:
                     logger.error("Bot alert loop error: %s", e)
 
+        async def live_miss_scan_loop():
+            """
+            LIVE SCAN — runs every 5 minutes.
+
+            Finds markets where a real-world event is happening RIGHT NOW,
+            evaluates each with full context (web search + sports/crypto data),
+            and records any the bot can't/won't trade as a live miss.
+
+            Two scan types are tracked separately:
+              LIVE     — events confirmed happening right now (SofaScore, CoinGecko, news)
+              REGULAR  — everything else (handled by the main trade loop)
+
+            Resolution checker runs every 5 min too: when a tracked market settles,
+            records whether the bot's predicted side was correct.
+            Hourly digest fires at the top of every hour with fresh correct misses.
+            """
+            from src.alerts.discord import DiscordAlerter
+            from src.utils.live_miss_tracker import live_miss_tracker
+            from src.data.live_event_detector import is_event_live_now
+            from src.data.context_builder import build_market_context
+            from src.ai.decision import AIDecisionEngine
+            from src.utils.eastern_time import now_et
+            from datetime import timedelta as _td
+
+            LIVE_SCAN_INTERVAL  = 300   # 5 min
+            _last_hour_digest   = None
+
+            await asyncio.sleep(90)   # let bot warm up first
+            logger.info("Live miss scan loop started — scanning every %ds", LIVE_SCAN_INTERVAL)
+
+            while not self._shutdown.is_set():
+                await asyncio.sleep(LIVE_SCAN_INTERVAL)
+                if self._shutdown.is_set():
+                    break
+
+                try:
+                    mode = "PAPER" if not settings.trading.live_trading_enabled else "LIVE"
+
+                    # ── 1. RESOLUTION CHECK — did any tracked miss resolve? ─────
+                    pending = live_miss_tracker.pending_resolution()
+                    for entry in pending:
+                        ticker = entry.get("ticker", "")
+                        if not ticker:
+                            continue
+                        try:
+                            # Check DB: did this market close?
+                            row = await self.db.fetchone(
+                                "SELECT status, last_price, yes_ask, no_ask "
+                                "FROM markets WHERE ticker=? LIMIT 1",
+                                (ticker,)
+                            )
+                            if not row:
+                                continue
+                            status   = row.get("status", "")
+                            yes_ask  = float(row.get("yes_ask") or row.get("last_price") or 0)
+                            # A market is resolved when yes_ask hits near 0 or near 100
+                            if status == "closed" or yes_ask <= 3 or yes_ask >= 97:
+                                actual = "yes" if yes_ask >= 97 else "no" if yes_ask <= 3 else None
+                                if actual:
+                                    live_miss_tracker.mark_resolved(ticker, actual)
+                        except Exception:
+                            pass
+
+                    # ── 2. LIVE EVENT SCAN — find markets for events live right now ─
+                    try:
+                        # Pull candidates from DB — short-closing and any open market
+                        candidates = await self.db.fetchall(
+                            "SELECT ticker, title, yes_ask, no_ask, volume, platform, "
+                            "close_time, category FROM markets "
+                            "WHERE (status='open' OR status='') "
+                            "AND yes_ask > 3 AND yes_ask < 97 "
+                            "AND title IS NOT NULL AND title != '' "
+                            "ORDER BY "
+                            "  CASE WHEN close_time IS NOT NULL AND close_time != '' THEN 1 ELSE 2 END, "
+                            "  close_time ASC, volume DESC "
+                            "LIMIT 60"
+                        ) or []
+                    except Exception:
+                        candidates = []
+
+                    # Filter to markets where the underlying event is live RIGHT NOW
+                    already_tracked  = {t for t in live_miss_tracker._misses}
+                    already_position = set()
+                    try:
+                        pos_rows = await self.db.fetchall(
+                            "SELECT ticker FROM positions WHERE status='open'"
+                        ) or []
+                        already_position = {r["ticker"] for r in pos_rows}
+                    except Exception:
+                        pass
+
+                    live_candidates = []
+                    for m in candidates:
+                        ticker = m.get("ticker", "")
+                        title  = m.get("title", "") or ""
+                        if not ticker or not title:
+                            continue
+                        if ticker in already_position:
+                            continue   # already in a position — not a miss
+                        try:
+                            is_live = await is_event_live_now(title)
+                        except Exception:
+                            is_live = False
+                        if is_live:
+                            live_candidates.append(dict(m))
+
+                    if not live_candidates:
+                        # Still run hourly digest even if no new live markets
+                        pass
+                    else:
+                        logger.info(
+                            "Live miss scan: %d live-event markets found out of %d candidates",
+                            len(live_candidates), len(candidates),
+                        )
+
+                    # ── 3. AI-EVALUATE live candidates — record misses ─────────
+                    engine = AIDecisionEngine(db=self.db)
+                    for m in live_candidates[:8]:   # cap at 8 per cycle to control AI cost
+                        ticker = m.get("ticker", "")
+                        title  = m.get("title", "")
+
+                        # Skip if already tracked with fresh data (< 10 min ago)
+                        existing = live_miss_tracker._misses.get(ticker)
+                        if existing and not existing.get("resolved_at"):
+                            try:
+                                scanned = datetime.fromisoformat(existing["scanned_at"])
+                                if scanned.tzinfo is None:
+                                    scanned = scanned.replace(tzinfo=timezone.utc)
+                                if (datetime.now(timezone.utc) - scanned).total_seconds() < 600:
+                                    continue   # re-evaluated within last 10 min, skip
+                            except Exception:
+                                pass
+
+                        try:
+                            # Build rich context for this live market
+                            m["is_live"] = True
+                            context = await build_market_context(m, timeout_seconds=12.0)
+                            decision = await engine.decide(m, signals=[])
+
+                            action = decision.action
+                            conf   = decision.confidence
+                            side   = decision.side or "yes"
+                            ev     = decision.net_ev
+
+                            # Determine skip reason
+                            if ticker in already_position:
+                                skip_reason = "already in position"
+                            elif action == "HOLD":
+                                skip_reason = f"AI said HOLD (conf={conf:.0f}%)"
+                            elif conf < settings.trading.min_ai_confidence:
+                                skip_reason = f"conf {conf:.0f}% < {settings.trading.min_ai_confidence:.0f}% required"
+                            elif ev is not None and ev <= 0:
+                                skip_reason = f"EV {ev:+.1f}¢ not positive"
+                            else:
+                                # Bot COULD have traded but daily limit / risk gate blocked it
+                                skip_reason = "daily trade limit or risk gate"
+
+                            # Record as live miss regardless of outcome
+                            # (we'll know if it was correct when it resolves)
+                            live_miss_tracker.record(
+                                ticker      = ticker,
+                                title       = title,
+                                side        = side,
+                                confidence  = conf,
+                                yes_ask     = float(m.get("yes_ask", 0)),
+                                no_ask      = float(m.get("no_ask", 0)),
+                                reasoning   = decision.reasoning[:200],
+                                skip_reason = skip_reason,
+                                scan_type   = "live",
+                                net_ev      = ev,
+                                true_prob   = decision.true_prob,
+                                platform    = m.get("platform", "kalshi"),
+                            )
+                            logger.debug(
+                                "LiveMiss tracked: %s | %s/%s | conf=%.0f%% | %s",
+                                ticker[:35], action, side.upper(), conf, skip_reason[:40],
+                            )
+                        except Exception as _ev_err:
+                            logger.debug("LiveMiss eval error %s: %s", ticker[:30], _ev_err)
+
+                    # ── 4. HOURLY MISS DIGEST — top of every hour ─────────────
+                    et_now   = now_et()
+                    this_hour = et_now.replace(minute=0, second=0, microsecond=0)
+                    if _last_hour_digest != this_hour:
+                        _last_hour_digest = this_hour
+                        try:
+                            discord = DiscordAlerter()
+                            await discord.live_miss_digest(
+                                paper=not settings.trading.live_trading_enabled
+                            )
+                        except Exception as _de:
+                            logger.debug("Live miss digest error: %s", _de)
+
+                except Exception as e:
+                    logger.error("Live miss scan loop error: %s", e)
+
         tasks = [
             asyncio.create_task(ingest_loop(),                name="ingest"),
             asyncio.create_task(track_loop(),                 name="track"),
@@ -763,6 +959,7 @@ class TradingBot:
             asyncio.create_task(daytime_summary_loop(),       name="daytime_summary"),
             asyncio.create_task(daily_summary_loop(),         name="daily_summary"),
             asyncio.create_task(bot_alert_loop(),             name="bot_alert"),
+            asyncio.create_task(live_miss_scan_loop(),        name="live_miss_scan"),
             # asyncio.create_task(discord_command_loop(),      name="discord_commands"),  # enable when Discord bot token is set up
             asyncio.create_task(live_market_manager_loop(),    name="live_market_manager"),
             asyncio.create_task(manual_trade_monitor_loop(),  name="manual_trade_monitor"),

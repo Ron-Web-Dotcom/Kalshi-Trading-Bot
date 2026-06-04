@@ -593,6 +593,62 @@ class DiscordAlerter:
     # Tracks the set of tickers in the last sent missed-trade digest — never re-send same 5
     _last_missed_tickers: frozenset = frozenset()
 
+    async def live_miss_digest(self, paper: bool = True) -> None:
+        """
+        Hourly live-miss digest — shows ONLY misses from the LIVE SCAN
+        that resolved in the past hour and where the bot's prediction was CORRECT.
+
+        Rules:
+          - Only live-scan misses (events happening right now, not regular markets)
+          - Only resolved in the last 60 minutes
+          - Never repeats last hour's tickers — always fresh, rotating each hour
+          - Silent if nothing new resolved correctly this hour
+        """
+        from src.utils.live_miss_tracker import live_miss_tracker
+        from src.utils.eastern_time import format_et, et_label
+
+        misses = live_miss_tracker.new_confirmed_misses(window_hours=1.0, scan_type="live")
+        if not misses:
+            return
+
+        mode_tag = "📝 PAPER" if paper else "💰 LIVE"
+        et_time  = format_et(fmt="%I:%M %p") + f" {et_label()}"
+        lines    = []
+        total_left = 0.0
+
+        for i, m in enumerate(misses[:6], 1):
+            plat    = "🟣" if m.get("platform") == "polymarket" else "🟦"
+            title   = self._display_ticker(m.get("ticker", ""), m.get("title", "") or "")[:60]
+            side    = (m.get("side") or "yes").upper()
+            conf    = m.get("confidence", 0)
+            price   = m.get("yes_ask", 0) if side == "YES" else m.get("no_ask", 0)
+            skip_r  = (m.get("skip_reason") or "below threshold")[:70]
+            reason  = (m.get("reasoning") or "")[:120]
+            pnl     = m.get("potential_pnl") or 0
+            total_left += max(pnl, 0)
+
+            pnl_str = f" **+${pnl:.2f}** on $10" if pnl > 0 else ""
+            lines.append(
+                f"**#{i} {plat} {title}**\n"
+                f"Would have bought **{side}** @ **{price:.0f}¢** | **{conf:.0f}% conf**{pnl_str}\n"
+                f"Skipped because: _{skip_r}_\n"
+                f"_{reason}_"
+            )
+
+        summary = (
+            f"**{len(misses)} correct prediction{'s' if len(misses) > 1 else ''} the bot saw but didn't bet "
+            f"— could have earned **${total_left:.2f}** this hour**\n"
+            f"Only showing live-event misses. Rotates every hour — no repeats.\n\n"
+        )
+
+        payload = self._embed(
+            title=f"👀 MISSED TRADES — Live Events This Hour  [{mode_tag}]  {et_time}",
+            description=summary + "\n\n".join(lines),
+            color=0xFF6B00,
+        )
+        await self._post(payload)
+        live_miss_tracker.mark_digest_sent([m["ticker"] for m in misses])
+
     async def near_miss_digest(self, paper: bool = True) -> None:
         """
         Top-5 missed trades digest — single Discord block, no spam.
