@@ -563,7 +563,7 @@ class DiscordAlerter:
             {"name": f"{pnl_emoji} PnL",    "value": f"${pnl_sign}{pnl:.2f}",    "inline": True},
             {"name": "Open Positions",      "value": str(open_positions),         "inline": True},
             {"name": "Mode",                "value": "Paper (no real money)" if paper else "LIVE",  "inline": True},
-            {"name": "Next Summary",        "value": "Tomorrow 8PM UTC",          "inline": True},
+            {"name": "Next Summary",        "value": "Tomorrow midnight ET",      "inline": True},
         ]
 
         # Append each closed trade's result so you can review them
@@ -734,7 +734,7 @@ class DiscordAlerter:
             })
 
         payload = self._embed(
-            title=f"🔍 Hourly Scan Report — {hhmm} UTC",
+            title=f"🔍 Hourly Scan Report — {hhmm}",
             description="Bot alive ✅ | Scanning Kalshi + Polymarket every 60s",
             color=color,
             fields=fields,
