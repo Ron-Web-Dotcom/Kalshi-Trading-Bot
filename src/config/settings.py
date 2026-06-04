@@ -75,17 +75,17 @@ class TradingConfig:
     avoid_overtrading_minutes: int = field(default_factory=lambda: _env_int("OVERTRADE_COOLDOWN_MINUTES", 5))
 
     # Cycle limits (configurable without code changes)
-    max_trades_per_cycle: int = field(default_factory=lambda: _env_int("MAX_TRADES_PER_CYCLE", 5))
+    max_trades_per_cycle: int = field(default_factory=lambda: _env_int("MAX_TRADES_PER_CYCLE", 50))
     max_trades_per_day: int   = field(default_factory=lambda: _env_int("MAX_TRADES_PER_DAY", 50))
-    max_markets_to_scan: int  = field(default_factory=lambda: _env_int("MAX_MARKETS_TO_SCAN", 20))
+    max_markets_to_scan: int  = field(default_factory=lambda: _env_int("MAX_MARKETS_TO_SCAN", 999999))
     min_market_volume: float  = field(default_factory=lambda: _env_float("MIN_MARKET_VOLUME", 0.0))
 
     # Kelly criterion
     kelly_fraction: float = field(default_factory=lambda: _env_float("KELLY_FRACTION", 0.25))
 
-    # AI thresholds — paper mode: trade more to gather data, real-world reasoning required
-    min_ai_confidence: float = field(default_factory=lambda: _env_float("MIN_AI_CONFIDENCE", 50.0))
-    min_confidence_to_trade: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE_TO_TRADE", 0.35))
+    # AI thresholds — 70% minimum confidence requires deep research before any trade
+    min_ai_confidence: float = field(default_factory=lambda: _env_float("MIN_AI_CONFIDENCE", 70.0))
+    min_confidence_to_trade: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE_TO_TRADE", 0.70))
 
     # Minimum profit requirements — paper mode: just need any positive edge
     min_profit_roi_pct: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ROI_PCT", 0.01))
@@ -95,8 +95,9 @@ class TradingConfig:
     enable_ai_reeval: bool  = field(default_factory=lambda: _env_bool("ENABLE_AI_REEVAL", True))
     reeval_min_confidence: float = field(default_factory=lambda: _env_float("REEVAL_MIN_CONFIDENCE", 75.0))
 
-    # AI budget
+    # AI budget — $5 daily soft limit, $15 hard stop (150% of $10 cap)
     daily_ai_budget: float = field(default_factory=lambda: _env_float("DAILY_AI_BUDGET", 5.0))
+    daily_ai_hard_cap: float = field(default_factory=lambda: _env_float("DAILY_AI_HARD_CAP", 15.0))
     enable_daily_cost_limiting: bool = field(default_factory=lambda: _env_bool("ENABLE_COST_LIMITING", True))
     sleep_when_limit_reached: bool = field(default_factory=lambda: _env_bool("SLEEP_ON_LIMIT", True))
 

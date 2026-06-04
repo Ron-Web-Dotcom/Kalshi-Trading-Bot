@@ -187,11 +187,11 @@ class AIDecisionEngine:
 
         # Dynamic confidence ceiling based on how much context we have
         if has_rich_context and has_news and (has_pred_markets or has_wiki):
-            conf_ceiling = "You have rich multi-source context — confidence up to 90% is justified when evidence clearly points one way."
+            conf_ceiling = "You have rich multi-source context — confidence up to 95% justified when multiple independent sources agree. 70% is your FLOOR to trade, 85%+ for high conviction."
         elif has_news or has_wiki:
-            conf_ceiling = "You have some context — confidence up to 75% is justified when evidence is consistent."
+            conf_ceiling = "You have some context — confidence up to 80% is justified when evidence is consistent. Need 70%+ to trade; do NOT hit 70 without at least 3 agreeing sources."
         else:
-            conf_ceiling = "Context is limited — cap confidence at 55% and lean HOLD."
+            conf_ceiling = "Context is limited — cap confidence at 60% and HOLD. 70%+ requires real evidence you do not have here."
 
         return f"""You are a professional prediction market trader managing real money. Your job is to find high-conviction bets backed by real-world evidence.
 
@@ -233,8 +233,9 @@ Step 1 — Read ALL context sections. Extract every specific fact relevant to th
 Step 2 — Check Manifold/Metaculus predictions — if they differ from market price by >10%, that IS an edge.
 Step 3 — Estimate TRUE P(YES) based on combined evidence. More agreeing sources = higher confidence.
 Step 4 — Compute net EV = (true_prob/100 - market_price/100) × 98¢ for the better side.
-Step 5 — BUY if: confidence ≥ {self.trading_cfg.min_ai_confidence:.0f}% AND net_ev > 0¢ AND you can cite specific facts.
-         (Higher confidence = lower EV bar: conf≥75% needs only 0.5¢, conf≥65% needs 1¢, else 2¢)
+Step 5 — BUY if: confidence ≥ {self.trading_cfg.min_ai_confidence:.0f}% AND net_ev > 0¢ AND you can cite SPECIFIC verifiable facts.
+         (Higher confidence = lower EV bar: conf≥85% needs only 0.5¢, conf≥75% needs 1¢, conf≥70% needs 2¢)
+         DO NOT reach 70%+ without multiple agreeing independent sources. Deep research required.
 Step 6 — HOLD only if: truly no evidence, strongly conflicting data, or net_ev ≤ 0.
 
 Respond ONLY with this exact JSON (no markdown):
@@ -312,7 +313,7 @@ HARD RULES:
 
             # EV guard — scale minimum with confidence: high conf = lower EV required
             if action == "BUY" and net_ev is not None:
-                min_ev = 0.5 if confidence >= 75 else 1.0 if confidence >= 65 else 2.0
+                min_ev = 0.5 if confidence >= 85 else 1.0 if confidence >= 75 else 2.0
                 if net_ev < min_ev:
                     action = "HOLD"
                     reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < {min_ev:.1f}¢ min at conf={confidence:.0f}%] " + reasoning

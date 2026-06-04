@@ -364,7 +364,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     if m.get("yes_ask", 0) > 1
                     and m.get("ticker") not in open_tickers
                     and (m.get("title") or "").strip().lower() not in open_titles
-                ][:max_scan]
+                ]
                 logger.info("Polymarket: %d markets stored, %d tradeable",
                             len(raw_poly), len(poly_markets))
             except Exception as pe:
@@ -424,12 +424,12 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         live_kalshi_raw  = []
         live_poly_raw    = []
         try:
-            live_kalshi_raw = await kalshi.get_live_markets(max_hours=2.0, max_markets=30)
+            live_kalshi_raw = await kalshi.get_live_markets(max_hours=2.0, max_markets=500)
         except Exception as _le:
             logger.debug("Live Kalshi fetch skipped: %s", _le)
         if poly_enabled:
             try:
-                live_poly_raw = await poly_client.get_live_markets(max_hours=48.0, max_markets=30)
+                live_poly_raw = await poly_client.get_live_markets(max_hours=48.0, max_markets=500)
             except Exception as _le:
                 logger.debug("Live Polymarket fetch skipped: %s", _le)
 
@@ -588,7 +588,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             and 2 < _tradeable_price(m) < 98
             and m.get("volume", 0) >= min_vol
             and (m.get("title") or "")
-        ][:max_scan]
+        ]
 
         # Short-duration pool: closes within 24h — any volume, for 1min/5min/1hr/daily markets
         short_term = [
@@ -599,7 +599,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             and m.get("ticker") not in {x.get("ticker") for x in long_term}
             and _closes_within(m, 24)
             and (m.get("title") or "")
-        ][:max_scan // 2]
+        ]
 
         # ── Category-wide sweep: scan ALL categories + sub-categories ─────────
         # Runs in background and merges into candidate pools for broader coverage.
@@ -608,8 +608,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             from src.data.category_scanner import CategoryScanner
             cat_scanner = CategoryScanner(db=db)
             cat_markets = await cat_scanner.scan_all_categories(
-                max_per_tag=10,
-                max_total=200,
+                max_per_tag=50,
+                max_total=999999,
                 include_bulk=True,
             )
             # Separate Kalshi and Polymarket results from category scan
@@ -632,8 +632,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             cat_kalshi_new = [m for m in cat_kalshi if m.get("ticker") not in existing_kalshi_tickers]
             cat_poly_new   = [m for m in cat_poly   if m.get("ticker") not in existing_poly_tickers]
             # Add to pools — category markets go after existing candidates (which came from DB volume-sort)
-            long_term   = long_term   + cat_kalshi_new[:max_scan]
-            poly_markets = poly_markets + cat_poly_new[:max_scan]
+            long_term    = long_term    + cat_kalshi_new
+            poly_markets = poly_markets + cat_poly_new
             logger.info(
                 "Category sweep added: +%d Kalshi candidates, +%d Polymarket candidates",
                 len(cat_kalshi_new), len(cat_poly_new),

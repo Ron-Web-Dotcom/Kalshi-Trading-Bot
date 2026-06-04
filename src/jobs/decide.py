@@ -34,17 +34,17 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
     tcfg = settings.trading
     if tcfg.enable_daily_cost_limiting:
         spent = await _get_daily_ai_spend(db)
-        if spent >= tcfg.daily_ai_budget * 1.5:
-            # Hard stop only at 150% of budget — gives breathing room for live events
+        hard_cap = getattr(tcfg, "daily_ai_hard_cap", 15.0)
+        if spent >= hard_cap:
             logger.warning(
-                "AI spend $%.4f exceeds 150%% of daily budget $%.2f — pausing AI calls",
-                spent, tcfg.daily_ai_budget,
+                "AI spend $%.2f hit hard cap $%.2f — pausing AI calls",
+                spent, hard_cap,
             )
             return None
         elif spent >= tcfg.daily_ai_budget:
             logger.info(
-                "AI spend $%.4f at daily budget $%.2f — continuing for live events",
-                spent, tcfg.daily_ai_budget,
+                "AI spend $%.2f past soft budget $%.2f (hard cap $%.2f) — continuing",
+                spent, tcfg.daily_ai_budget, hard_cap,
             )
 
     engine = AIDecisionEngine(db=db)
