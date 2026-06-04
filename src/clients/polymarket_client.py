@@ -192,6 +192,66 @@ class PolymarketTradingClient:
             logger.debug("Polymarket parse error: %s — %s", e, str(m)[:100])
             return None
 
+    async def get_live_markets(self, max_hours: float = 2.0, max_markets: int = 50) -> List[Dict]:
+        """
+        Fetch Polymarket live sports/event markets — active and closing within max_hours.
+        Covers tennis, NBA, MLB, NHL, soccer and other in-play events.
+        """
+        import datetime as _dt
+        LIVE_CATEGORIES = {
+            "sports", "tennis", "nba", "mlb", "nhl", "soccer", "football",
+            "basketball", "baseball", "hockey", "mma", "ufc", "golf", "esports",
+        }
+        LIVE_KEYWORDS = [
+            "game 1", "game 2", "game 3", "game 4", "game 5", "game 6", "game 7",
+            "match", "vs.", " vs ", "series", "set ", " quarter", " half",
+            "tonight", "today", "this week",
+        ]
+        try:
+            r = await self._client().get(
+                f"{GAMMA_BASE}/markets",
+                params={"active": "true", "closed": "false", "limit": 500},
+            )
+            if r.status_code != 200:
+                return []
+            raw = r.json()
+            items = raw if isinstance(raw, list) else raw.get("data") or raw.get("markets") or []
+
+            now = _dt.datetime.now(_dt.timezone.utc)
+            live = []
+            for m in items:
+                # Category filter
+                cat = (m.get("category") or m.get("groupItemTitle") or "").lower()
+                question = (m.get("question") or m.get("description") or m.get("title") or "").lower()
+                is_sports_cat = any(c in cat for c in LIVE_CATEGORIES)
+                is_sports_kw  = any(kw in question for kw in LIVE_KEYWORDS)
+                if not (is_sports_cat or is_sports_kw):
+                    continue
+
+                # Time filter
+                end_date = m.get("endDate") or m.get("endDateIso") or ""
+                try:
+                    close_dt = _dt.datetime.fromisoformat(str(end_date).replace("Z", "+00:00"))
+                    if close_dt.tzinfo is None:
+                        close_dt = close_dt.replace(tzinfo=_dt.timezone.utc)
+                    hours_left = (close_dt - now).total_seconds() / 3600
+                    if not (0 < hours_left <= max_hours):
+                        continue
+                except Exception:
+                    continue
+
+                parsed = self._parse_market(m)
+                if parsed:
+                    parsed["is_live"] = True
+                    parsed["hours_to_close"] = round(hours_left, 2)
+                    live.append(parsed)
+
+            logger.info("Polymarket live markets (closing ≤%.0fh): %d found", max_hours, len(live))
+            return live[:max_markets]
+        except Exception as e:
+            logger.warning("Failed to fetch Polymarket live markets: %s", e)
+            return []
+
     # ── Balance check ──────────────────────────────────────────────────────────
 
     async def get_balance(self) -> Optional[float]:

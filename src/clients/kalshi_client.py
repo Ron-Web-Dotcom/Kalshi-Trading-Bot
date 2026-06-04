@@ -167,6 +167,35 @@ class KalshiClient:
 
         return markets[:max_markets]
 
+    async def get_live_markets(self, max_hours: float = 2.0, max_markets: int = 50) -> List[Dict]:
+        """
+        Fetch Kalshi "happening now" in-play markets — those closing within max_hours.
+        These are short-duration sports/event markets resolving in minutes or hours.
+        Returns normalised market dicts with is_live=True flag.
+        """
+        try:
+            markets = await self.get_all_markets(status="open", max_markets=500, sort_by_close=True)
+            now = datetime.now(timezone.utc)
+            live = []
+            for m in markets:
+                ct = m.get("close_time") or ""
+                try:
+                    close_dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                    if close_dt.tzinfo is None:
+                        close_dt = close_dt.replace(tzinfo=timezone.utc)
+                    hours_left = (close_dt - now).total_seconds() / 3600
+                    if 0 < hours_left <= max_hours:
+                        m["is_live"] = True
+                        m["hours_to_close"] = round(hours_left, 2)
+                        live.append(m)
+                except Exception:
+                    continue
+            logger.info("Kalshi live markets (closing ≤%.0fh): %d found", max_hours, len(live))
+            return live[:max_markets]
+        except Exception as e:
+            logger.warning("Failed to fetch Kalshi live markets: %s", e)
+            return []
+
     async def get_market(self, ticker: str) -> Dict:
         return await self._request("GET", f"/markets/{ticker}")
 

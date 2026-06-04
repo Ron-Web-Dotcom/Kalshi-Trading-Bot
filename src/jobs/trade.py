@@ -418,6 +418,52 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             t = (m.get("title") or "").strip().lower()
             return bool(t and t in open_titles)
 
+        # ── Live / in-play market pool (highest priority) ─────────────────────
+        # Fetch directly from both APIs — these are events resolving in <2 hours
+        live_kalshi_raw  = []
+        live_poly_raw    = []
+        try:
+            live_kalshi_raw = await kalshi.get_live_markets(max_hours=2.0, max_markets=30)
+        except Exception as _le:
+            logger.debug("Live Kalshi fetch skipped: %s", _le)
+        if poly_enabled:
+            try:
+                live_poly_raw = await poly_client.get_live_markets(max_hours=2.0, max_markets=30)
+            except Exception as _le:
+                logger.debug("Live Polymarket fetch skipped: %s", _le)
+
+        live_kalshi = [
+            m for m in live_kalshi_raw
+            if not _already_open(m)
+            and m.get("ticker") not in arb_tickers
+            and 2 < _tradeable_price(m) < 98
+            and (m.get("title") or "")
+        ]
+        live_poly = [
+            m for m in live_poly_raw
+            if not _already_open(m)
+            and m.get("ticker") not in open_tickers
+            and m.get("yes_ask", 0) > 1
+            and (m.get("title") or "")
+        ]
+        if live_kalshi or live_poly:
+            logger.info(
+                "── LIVE MARKETS: %d Kalshi in-play + %d Polymarket in-play (closing ≤2h) ─",
+                len(live_kalshi), len(live_poly),
+            )
+            for lm in live_kalshi[:5]:
+                logger.info(
+                    "  [LIVE-K] %s | %.0fh left | %.0f¢",
+                    (lm.get("title") or lm.get("ticker") or "?")[:60],
+                    lm.get("hours_to_close", 0), _tradeable_price(lm),
+                )
+            for lm in live_poly[:5]:
+                logger.info(
+                    "  [LIVE-P] %s | %.0fh left | %.0f¢",
+                    (lm.get("title") or lm.get("ticker") or "?")[:60],
+                    lm.get("hours_to_close", 0), lm.get("yes_ask", 0),
+                )
+
         # Long-term pool: higher-volume markets (any close time)
         long_term = [
             m for m in markets
@@ -439,11 +485,21 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             and (m.get("title") or "")
         ][:max_scan // 2]
 
-        kalshi_candidates = long_term + short_term
+        # Live markets go FIRST — they're time-sensitive and get AI evaluated before regular markets
+        live_kalshi_tickers = {m.get("ticker") for m in live_kalshi}
+        long_term  = [m for m in long_term  if m.get("ticker") not in live_kalshi_tickers]
+        short_term = [m for m in short_term if m.get("ticker") not in live_kalshi_tickers]
+        kalshi_candidates = live_kalshi + long_term + short_term
+
+        # Merge live Polymarket into poly_markets (deduplicate)
+        poly_tickers_existing = {m.get("ticker") for m in poly_markets}
+        live_poly_new = [m for m in live_poly if m.get("ticker") not in poly_tickers_existing]
+        poly_markets = live_poly_new + poly_markets   # live first
 
         logger.info(
-            "── Best-Opportunity Hunt: %d Kalshi (%d long-term + %d short-duration) + %d Polymarket ─",
-            len(kalshi_candidates), len(long_term), len(short_term), len(poly_markets),
+            "── Best-Opportunity Hunt: %d Kalshi (%d live + %d long + %d short) + %d Polymarket ─",
+            len(kalshi_candidates), len(live_kalshi), len(long_term),
+            len(short_term), len(poly_markets),
         )
 
         hunter = OpportunityHunter(db=db)
