@@ -661,9 +661,7 @@ async def run_live_manager_cycle(db, discord, settings, kalshi_trader, poly_trad
         else:
             logger.info("All %d live slots occupied — next check in %ds", MAX_LIVE_POSITIONS, SCAN_INTERVAL)
 
-        # 4. Live position update — fires only when price moved ≥ threshold
-        if _live_slots:
-            await _send_live_positions_update(discord, _live_slots)
+        # Price update alerts removed — Discord only notifies on entry and exit
 
     except Exception as e:
         logger.error("Live manager cycle error: %s", e, exc_info=True)
