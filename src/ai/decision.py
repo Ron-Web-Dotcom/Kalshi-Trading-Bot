@@ -233,8 +233,9 @@ Step 1 — Read ALL context sections. Extract every specific fact relevant to th
 Step 2 — Check Manifold/Metaculus predictions — if they differ from market price by >10%, that IS an edge.
 Step 3 — Estimate TRUE P(YES) based on combined evidence. More agreeing sources = higher confidence.
 Step 4 — Compute net EV = (true_prob/100 - market_price/100) × 98¢ for the better side.
-Step 5 — BUY if: net_ev > 2¢ AND confidence ≥ {self.trading_cfg.min_ai_confidence:.0f}% AND you can cite specific facts.
-Step 6 — HOLD only if: truly no evidence, strongly conflicting data, or EV is clearly marginal.
+Step 5 — BUY if: confidence ≥ {self.trading_cfg.min_ai_confidence:.0f}% AND net_ev > 0¢ AND you can cite specific facts.
+         (Higher confidence = lower EV bar: conf≥75% needs only 0.5¢, conf≥65% needs 1¢, else 2¢)
+Step 6 — HOLD only if: truly no evidence, strongly conflicting data, or net_ev ≤ 0.
 
 Respond ONLY with this exact JSON (no markdown):
 {{
@@ -248,9 +249,10 @@ Respond ONLY with this exact JSON (no markdown):
 
 HARD RULES:
 - No context at all = confidence ≤ 50, action = HOLD
-- Confidence reflects evidence quality — with rich multi-source context, 70-85% is appropriate when evidence is clear
-- Minimum net_ev to BUY = 2¢
-- confidence ≥ {self.trading_cfg.min_ai_confidence:.0f} required to BUY"""
+- With rich multi-source context, confidence 65-85% is appropriate when evidence is clear
+- net_ev must be > 0¢ to BUY (the more confident you are, the lower the EV bar)
+- confidence ≥ {self.trading_cfg.min_ai_confidence:.0f} required to BUY
+- If true_prob differs from market price: that gap IS the edge — compute EV from it"""
 
     async def decide(self, market: Dict, signals: List[Dict] = []) -> AIDecision:
         ticker = market.get("ticker", "UNKNOWN")
@@ -308,10 +310,12 @@ HARD RULES:
             if side not in ("yes", "no"):
                 side = "yes"
 
-            # Reject low/negative EV — need at least 2¢ edge to overcome variance
-            if action == "BUY" and net_ev is not None and net_ev < 2.0:
-                action = "HOLD"
-                reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < 2¢ minimum] " + reasoning
+            # EV guard — scale minimum with confidence: high conf = lower EV required
+            if action == "BUY" and net_ev is not None:
+                min_ev = 0.5 if confidence >= 75 else 1.0 if confidence >= 65 else 2.0
+                if net_ev < min_ev:
+                    action = "HOLD"
+                    reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < {min_ev:.1f}¢ min at conf={confidence:.0f}%] " + reasoning
 
             # Reject physically impossible EV given the market price
             if action == "BUY" and net_ev is not None:
