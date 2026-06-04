@@ -39,7 +39,9 @@ MIN_ABS_USD          = 0.25  # minimum absolute expected profit per live trade
 _live_slots: Dict[str, Dict] = {}
 # last price reported per ticker — used to suppress no-change spam
 _last_reported_price: Dict[str, float] = {}
-PRICE_CHANGE_THRESHOLD = 2.0   # percent — only report if price moved this much
+_last_price_alert_time: Optional[datetime] = None
+PRICE_CHANGE_THRESHOLD = 5.0   # percent — significant move threshold
+PRICE_ALERT_INTERVAL   = 600   # seconds — check at most every 10 min
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -502,7 +504,7 @@ async def _send_live_positions_update(discord, slots: Dict) -> None:
     the last report — prevents spam on quiet cycles.
     """
     if not slots or not discord:
-        return
+        return False
     try:
         from src.utils.eastern_time import format_et, et_label
         changed = []
@@ -513,7 +515,7 @@ async def _send_live_positions_update(discord, slots: Dict) -> None:
                 changed.append((ticker, slot, cur, last))
 
         if not changed:
-            return  # nothing moved enough — skip this cycle
+            return False  # nothing moved enough — skip this cycle
 
         lines = []
         total_pnl = 0.0
@@ -571,8 +573,10 @@ async def _send_live_positions_update(discord, slots: Dict) -> None:
         }
         await discord._post(payload)
         logger.info("Live position update sent (%d positions changed)", len(changed))
+        return True
     except Exception as e:
         logger.warning("Live positions update alert error: %s", e)
+        return False
 
 
 # ── Main manager loop ─────────────────────────────────────────────────────────
@@ -661,7 +665,15 @@ async def run_live_manager_cycle(db, discord, settings, kalshi_trader, poly_trad
         else:
             logger.info("All %d live slots occupied — next check in %ds", MAX_LIVE_POSITIONS, SCAN_INTERVAL)
 
-        # Price update alerts removed — Discord only notifies on entry and exit
+        # 4. Live position update — at most every 10 min, only if significant move
+        if _live_slots:
+            global _last_price_alert_time
+            now_utc = _now_utc()
+            elapsed = (now_utc - _last_price_alert_time).total_seconds() if _last_price_alert_time else PRICE_ALERT_INTERVAL + 1
+            if elapsed >= PRICE_ALERT_INTERVAL:
+                sent = await _send_live_positions_update(discord, _live_slots)
+                if sent:
+                    _last_price_alert_time = now_utc
 
     except Exception as e:
         logger.error("Live manager cycle error: %s", e, exc_info=True)
