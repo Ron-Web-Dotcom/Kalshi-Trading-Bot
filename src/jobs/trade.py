@@ -429,7 +429,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             logger.debug("Live Kalshi fetch skipped: %s", _le)
         if poly_enabled:
             try:
-                live_poly_raw = await poly_client.get_live_markets(max_hours=2.0, max_markets=30)
+                live_poly_raw = await poly_client.get_live_markets(max_hours=48.0, max_markets=30)
             except Exception as _le:
                 logger.debug("Live Polymarket fetch skipped: %s", _le)
 
@@ -449,7 +449,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         ]
         if live_kalshi or live_poly:
             logger.info(
-                "── LIVE MARKETS: %d Kalshi in-play + %d Polymarket in-play (closing ≤2h) ─",
+                "── LIVE MARKETS: %d Kalshi in-play (≤2h) + %d Polymarket in-play (≤48h) ─",
                 len(live_kalshi), len(live_poly),
             )
             for lm in live_kalshi[:5]:

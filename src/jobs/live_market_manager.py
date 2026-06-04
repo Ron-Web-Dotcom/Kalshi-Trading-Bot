@@ -29,7 +29,8 @@ logger = logging.getLogger("trading.live_manager")
 
 MAX_LIVE_POSITIONS   = 3     # keep exactly this many in-play trades at a time
 SCAN_INTERVAL        = 300   # seconds between manager cycles (5 minutes)
-LIVE_WINDOW_HOURS    = 6.0   # markets closing within this window qualify as "live"
+LIVE_WINDOW_HOURS    = 6.0   # Kalshi: markets closing within this window qualify as "live"
+POLY_LIVE_WINDOW_HOURS = 72.0  # Polymarket: markets close far in the future — use wider window
 STOP_LOSS_PCT        = 40.0  # exit if current_price dropped this % from entry (YES side)
 AI_EVAL_N            = 12    # how many pre-scored markets to send to AI per fill cycle
 MIN_ROI_PCT          = 1.0   # minimum ROI% for live trades (relaxed — live markets resolve fast)
@@ -234,12 +235,18 @@ async def _fill_slots(
     live_k, live_p = [], []
     try:
         live_k = await kalshi.get_live_markets(max_hours=LIVE_WINDOW_HOURS, max_markets=60)
-        logger.info("Kalshi live fetch: %d markets (window=%.1fh)", len(live_k), LIVE_WINDOW_HOURS)
+        if not live_k:
+            logger.warning("Kalshi live fetch: 0 markets in %.1fh window — no in-play Kalshi markets right now", LIVE_WINDOW_HOURS)
+        else:
+            logger.info("Kalshi live fetch: %d markets (window=%.1fh)", len(live_k), LIVE_WINDOW_HOURS)
     except Exception as e:
         logger.warning("Kalshi live fetch FAILED: %s", e)
     try:
-        live_p = await poly_client.get_live_markets(max_hours=LIVE_WINDOW_HOURS, max_markets=60)
-        logger.info("Polymarket live fetch: %d markets (window=%.1fh)", len(live_p), LIVE_WINDOW_HOURS)
+        live_p = await poly_client.get_live_markets(max_hours=POLY_LIVE_WINDOW_HOURS, max_markets=60)
+        if not live_p:
+            logger.warning("Polymarket live fetch: 0 markets in %.1fh window — check endDate fields in API response", POLY_LIVE_WINDOW_HOURS)
+        else:
+            logger.info("Polymarket live fetch: %d markets (window=%.1fh)", len(live_p), POLY_LIVE_WINDOW_HOURS)
     except Exception as e:
         logger.warning("Polymarket live fetch FAILED: %s", e)
 
