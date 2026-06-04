@@ -441,6 +441,10 @@ class TradingBot:
                     open_row = await self.db.fetchone(
                         "SELECT COUNT(*) as n FROM positions WHERE status='open'"
                     ) or {}
+                    unrealised_row = await self.db.fetchone(
+                        "SELECT COALESCE(SUM(pnl),0) as pnl FROM positions WHERE status='open'"
+                    ) or {}
+                    unrealised_pnl = float(unrealised_row.get("pnl", 0.0) or 0.0)
 
                     await discord.midnight_daily_summary(
                         date=today,
@@ -453,6 +457,7 @@ class TradingBot:
                         open_positions=open_row.get("n", 0) or 0,
                         closed_today=[dict(r) for r in closed_today],
                         paper=paper,
+                        unrealised_pnl=unrealised_pnl,
                     )
                     daily_stats.reset_for_new_day()
                     logger.info("Midnight daily summary sent and stats reset.")

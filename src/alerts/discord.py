@@ -764,6 +764,7 @@ class DiscordAlerter:
         open_positions: int,
         closed_today: list,
         paper: bool = True,
+        unrealised_pnl: float = 0.0,
     ) -> None:
         """Midnight daily report — full day recap posted to Discord."""
         mode_tag  = "📝 PAPER" if paper else "💰 LIVE"
@@ -796,9 +797,10 @@ class DiscordAlerter:
             {
                 "name":  "💰 Performance",
                 "value": (
-                    f"Today's PnL: **${pnl_sign}{today_pnl:.2f}**\n"
-                    f"All-time PnL: **${all_sign}{alltime_pnl:.2f}**\n"
-                    f"{wr_emoji} Win rate: **{win_rate:.0f}%** ({wins}W / {losses}L / {total_closed} total)\n"
+                    f"Today's realised PnL: **${pnl_sign}{today_pnl:.2f}**\n"
+                    f"Unrealised PnL (open): **${'+'if unrealised_pnl>=0 else ''}{unrealised_pnl:.2f}**\n"
+                    f"All-time realised PnL: **${all_sign}{alltime_pnl:.2f}**\n"
+                    f"{wr_emoji} Win rate: **{win_rate:.0f}%** ({wins}W / {losses}L / {total_closed} closed)\n"
                     f"Open positions: **{open_positions}**"
                 ),
                 "inline": False,
