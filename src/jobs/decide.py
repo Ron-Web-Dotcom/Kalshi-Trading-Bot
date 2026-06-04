@@ -112,6 +112,13 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
         if action == "BUY" and decision.model != "rule_based" and net_ev is not None:
             try:
                 from src.utils.daily_stats import stats as daily_stats
+                skip_reason = (
+                    f"conf {conf:.0f}% < {min_conf:.0f}% required"
+                    if conf < min_conf
+                    else f"EV {net_ev:+.1f}¢ below minimum"
+                    if (net_ev or 0) <= 0
+                    else "below profit gate"
+                )
                 daily_stats.record_near_miss(
                     ticker=ticker,
                     title=market.get("title", ""),
@@ -121,6 +128,7 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
                     true_prob=true_prob,
                     reasoning=decision.reasoning,
                     platform=market.get("platform", "kalshi"),
+                    skip_reason=skip_reason,
                 )
             except Exception:
                 pass

@@ -306,24 +306,26 @@ class TradingBot:
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
 
         async def daytime_summary_loop():
-            """Post position digests at 12 AM, 6 AM, 12 PM, 6 PM UTC."""
+            """Post position digests at 12 AM, 6 AM, 12 PM, 6 PM Eastern time."""
             from src.alerts.discord import DiscordAlerter
+            from src.utils.eastern_time import now_et
             from datetime import timedelta
 
             last_summary_at = datetime.now(timezone.utc).isoformat()
 
             while not self._shutdown.is_set():
-                now = datetime.now(timezone.utc)
-                targets = [
-                    now.replace(hour=0,  minute=0, second=0, microsecond=0),
-                    now.replace(hour=6,  minute=0, second=0, microsecond=0),
-                    now.replace(hour=12, minute=0, second=0, microsecond=0),
-                    now.replace(hour=18, minute=0, second=0, microsecond=0),
+                et_now = now_et()
+                # Target hours in Eastern time
+                targets_et = [
+                    et_now.replace(hour=0,  minute=0, second=0, microsecond=0),
+                    et_now.replace(hour=6,  minute=0, second=0, microsecond=0),
+                    et_now.replace(hour=12, minute=0, second=0, microsecond=0),
+                    et_now.replace(hour=18, minute=0, second=0, microsecond=0),
                 ]
-                upcoming = [t if t > now else t + timedelta(days=1) for t in targets]
-                next_time = min(upcoming)
-                period = {0: "Midnight", 6: "Morning", 12: "Afternoon", 18: "Evening"}[next_time.hour]
-                secs_until = (next_time - now).total_seconds()
+                upcoming_et = [t if t > et_now else t + timedelta(days=1) for t in targets_et]
+                next_et     = min(upcoming_et)
+                period      = {0: "Midnight", 6: "Morning", 12: "Afternoon", 18: "Evening"}[next_et.hour]
+                secs_until  = (next_et - et_now).total_seconds()
                 await asyncio.sleep(secs_until)
                 if self._shutdown.is_set():
                     break
@@ -391,15 +393,16 @@ class TradingBot:
         async def daily_summary_loop():
             """Post midnight daily report to Discord, then reset daily stats."""
             from src.alerts.discord import DiscordAlerter
+            from src.utils.eastern_time import now_et
             from src.utils.daily_stats import stats as daily_stats
 
             while not self._shutdown.is_set():
-                # Sleep until next midnight UTC
-                now = datetime.now(timezone.utc)
-                midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                # Sleep until next midnight Eastern time
+                et_now       = now_et()
+                midnight_et  = et_now.replace(hour=0, minute=0, second=0, microsecond=0)
                 from datetime import timedelta
-                next_midnight = midnight + timedelta(days=1)
-                secs_until = (next_midnight - now).total_seconds()
+                next_midnight = midnight_et + timedelta(days=1)
+                secs_until    = (next_midnight - et_now).total_seconds()
                 await asyncio.sleep(secs_until)
 
                 try:

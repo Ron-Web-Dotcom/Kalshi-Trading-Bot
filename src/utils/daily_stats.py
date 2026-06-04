@@ -81,27 +81,31 @@ class DailyStats:
         true_prob: Optional[float],
         reasoning: str,
         platform: str = "kalshi",
+        skip_reason: str = "",
+        recorded_at: str = "",
     ) -> None:
         """Record a BUY signal that didn't clear the confidence bar. Deduplicates by ticker."""
         # Remove any existing entry for this ticker (keep freshest)
         self.near_misses = [n for n in self.near_misses if n["ticker"] != ticker]
         self.near_misses.append({
-            "ticker":     ticker,
-            "title":      title or ticker[:32],
-            "side":       side,
-            "confidence": confidence,
-            "net_ev":     net_ev,
-            "true_prob":  true_prob,
-            "reasoning":  reasoning,
-            "platform":   platform,
+            "ticker":      ticker,
+            "title":       title or ticker[:32],
+            "side":        side,
+            "confidence":  confidence,
+            "net_ev":      net_ev,
+            "true_prob":   true_prob,
+            "reasoning":   reasoning,
+            "platform":    platform,
+            "skip_reason": skip_reason or "confidence below threshold",
+            "recorded_at": recorded_at or datetime.now(timezone.utc).isoformat(),
         })
-        # Keep top 5 by EV, deduplicated
-        self.near_misses.sort(key=lambda x: x.get("net_ev") or 0, reverse=True)
+        # Keep top 5 by confidence (highest-confidence misses are most interesting)
+        self.near_misses.sort(key=lambda x: x.get("confidence") or 0, reverse=True)
         self.near_misses = self.near_misses[:5]
 
-    def top_near_misses(self) -> List[Dict]:
-        """Return up to 3 best near-misses of the day."""
-        return self.near_misses[:3]
+    def top_near_misses(self, n: int = 5) -> List[Dict]:
+        """Return up to n best near-misses of the day, newest-first within same confidence."""
+        return self.near_misses[:n]
 
     def record_signal(self, ticker: str, confidence: float, net_ev: Optional[float], action: str) -> None:
         """Increment signals_generated if action is BUY."""

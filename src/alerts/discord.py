@@ -419,33 +419,54 @@ class DiscordAlerter:
         """Disabled — individual near-miss alerts replaced by hourly near_miss_digest."""
         return
 
+    # Tracks the set of tickers in the last sent missed-trade digest — never re-send same 5
+    _last_missed_tickers: frozenset = frozenset()
+
     async def near_miss_digest(self, paper: bool = True) -> None:
-        """Send a single hourly near-miss digest — top BUY signals that fell short."""
+        """
+        Top-5 missed trades digest — single Discord block, no spam.
+        Only fires if the list has changed since the last send.
+        Sorted newest-first; any new miss goes to the top.
+        """
         from src.utils.daily_stats import stats as _ds
-        misses = _ds.top_near_misses()
+        from src.utils.eastern_time import format_et, et_label
+        misses = _ds.top_near_misses(n=5)
         if not misses:
             return
+
+        current_tickers = frozenset(nm.get("ticker", "") for nm in misses)
+        if current_tickers == self.__class__._last_missed_tickers:
+            return   # nothing new — don't spam
+
+        self.__class__._last_missed_tickers = current_tickers
         mode_tag = "📝 PAPER" if paper else "💰 LIVE"
-        lines = []
+        et_time  = format_et(fmt="%I:%M %p") + f" {et_label()}"
+        lines    = []
+
         for i, nm in enumerate(misses, 1):
-            ev_str = f" | EV {nm['net_ev']:+.1f}¢" if nm.get("net_ev") is not None else ""
-            tp_str = f" | P(YES)={nm['true_prob']:.0f}%" if nm.get("true_prob") is not None else ""
-            plat   = "🟣 Polymarket" if nm.get("platform") == "polymarket" else "🟦 Kalshi"
-            title  = self._display_ticker(nm.get("ticker", ""), nm.get("title", "") or "")[:70]
-            reason = (nm.get("reasoning") or "")[:150]
+            ev_str  = f" EV {nm['net_ev']:+.1f}¢" if nm.get("net_ev") is not None else ""
+            plat    = "🟣" if nm.get("platform") == "polymarket" else "🟦"
+            title   = self._display_ticker(nm.get("ticker", ""), nm.get("title", "") or "")[:65]
+            reason  = (nm.get("reasoning") or "no reasoning")[:120]
+            conf    = nm.get("confidence", 0)
+            side    = (nm.get("side") or "yes").upper()
+            skip_r  = (nm.get("skip_reason") or "confidence below threshold")[:60]
+            new_tag = " 🆕" if i == 1 and len(current_tickers - (frozenset() if i == 1 else current_tickers)) > 0 else ""
             lines.append(
-                f"**#{i} — {plat}**\n"
-                f"_{title}_\n"
-                f"Conf: **{nm['confidence']:.0f}%** (need 50%){ev_str}{tp_str}\n"
-                f"BUY **{nm['side'].upper()}** — _{reason}_"
+                f"**#{i}{new_tag} {plat} {title}**\n"
+                f"BUY {side} — **{conf:.0f}% conf**{ev_str}\n"
+                f"Skipped: _{skip_r}_\n"
+                f"_{reason}_"
             )
+
+        description = (
+            f"Top 5 opportunities the bot passed on • {et_time}\n"
+            "New misses appear at top. Won't re-alert if the same trades reappear.\n\n"
+            + "\n\n".join(lines)
+        )
         payload = self._embed(
-            title=f"🟡 {mode_tag} Near-Miss Digest — Top Signals That Didn't Trade",
-            description=(
-                "AI found edge but confidence fell short. "
-                "These are the best opportunities missed this hour.\n\n"
-                + "\n\n─────────────────\n\n".join(lines)
-            ),
+            title=f"🟡 Missed Trades — Top 5  [{mode_tag}]",
+            description=description,
             color=0xFFAA00,
         )
         await self._post(payload)
@@ -576,8 +597,9 @@ class DiscordAlerter:
         best_pick: Optional[Dict] = None,
     ) -> None:
         """Hourly heartbeat — clean stats, watching section, best pick."""
+        from src.utils.eastern_time import format_et, et_label
         now_utc  = datetime.now(timezone.utc)
-        hhmm     = now_utc.strftime("%H:%M")
+        hhmm     = format_et(now_utc, "%I:%M %p") + f" {et_label()}"
         pnl_sign = "+" if paper_pnl >= 0 else ""
         color    = 0x5865F2  # Discord blurple
 
@@ -830,13 +852,14 @@ class DiscordAlerter:
         paper: bool = True,
     ) -> None:
         """Morning (9 AM) or Afternoon (3 PM) UTC digest — positions + today's PnL."""
+        from src.utils.eastern_time import format_et, et_label
         mode_tag  = "📝 PAPER" if paper else "💰 LIVE"
         pnl_sign  = "+" if today_pnl >= 0 else ""
         icons  = {"Midnight": "🌙", "Morning": "🌅", "Afternoon": "🌇", "Evening": "🌆"}
         colors = {"Midnight": 0x2C2F33, "Morning": 0x00BFFF, "Afternoon": 0xFFA500, "Evening": 0xFF6B35}
         icon  = icons.get(period, "🕐")
         color = colors.get(period, 0x5865F2)
-        now_utc   = datetime.now(timezone.utc).strftime("%H:%M UTC")
+        now_utc   = format_et(fmt="%I:%M %p") + f" {et_label()}"
 
         fields = []
 
