@@ -131,6 +131,13 @@ class PolymarketTradingClient:
                     no_price  = p1 * 100 if p1 <= 1.0 else p1
                 except (TypeError, ValueError):
                     pass
+            elif len(raw_prices) == 1:
+                try:
+                    p0 = float(raw_prices[0])
+                    yes_price = p0 * 100 if p0 <= 1.0 else p0
+                    no_price  = 100 - yes_price
+                except (TypeError, ValueError):
+                    pass
 
             # Fallback to bestBid/bestAsk
             if yes_price == 0:
@@ -140,8 +147,16 @@ class PolymarketTradingClient:
                 yes_price = val * 100 if val <= 1.0 else val
                 no_price  = 100 - yes_price
 
+            # Fallback to last traded price
+            if yes_price == 0:
+                lp = m.get("lastTradePrice") or m.get("lastPrice") or 0
+                val = float(lp or 0)
+                yes_price = val * 100 if val <= 1.0 else val
+                no_price  = 100 - yes_price
+
+            # Default to 50/50 if completely missing — market exists but no quotes yet
             if yes_price == 0 and no_price == 0:
-                return None
+                yes_price, no_price = 50.0, 50.0
 
             # Volume — Gamma returns in USDC as string or float
             raw_vol = m.get("volume") or m.get("volumeNum") or 0
@@ -227,9 +242,10 @@ class PolymarketTradingClient:
             if not live and all_markets:
                 sample = all_markets[0]
                 logger.warning(
-                    "Polymarket live: 0/%d pass time filter. Sample close_time fields: endDate=%s endDateIso=%s end_date=%s",
+                    "Polymarket live: 0/%d pass time filter. Sample: close_time=%r yes_ask=%.1f title=%s",
                     len(all_markets),
-                    sample.get("endDate"), sample.get("endDateIso"), sample.get("end_date"),
+                    sample.get("close_time"), sample.get("yes_ask", 0),
+                    (sample.get("title") or "")[:60],
                 )
             else:
                 logger.info(
