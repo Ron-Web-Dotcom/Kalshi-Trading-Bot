@@ -281,6 +281,16 @@ async def _reddit_search(q: str) -> List[str]:
         return []
 
 
+async def _youtube_deep(q: str, timeout: float) -> Optional[str]:
+    """Kick off deep YouTube research — transcripts + descriptions."""
+    try:
+        from src.data.youtube_research import deep_youtube_research
+        return await deep_youtube_research(q, timeout=min(timeout - 2, 16.0))
+    except Exception as e:
+        logger.debug("YouTube deep research error: %s", e)
+        return None
+
+
 async def _youtube_search(q: str) -> List[str]:
     """
     YouTube video search — scrapes titles, channels, and view counts
@@ -410,9 +420,11 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
                 # Knowledge / background
                 _ddg_instant(q),
                 *wiki_coros,
-                # Community + video
+                # Community + video titles (fast)
                 _reddit_search(q),
                 _youtube_search(q),
+                # YouTube deep research — transcripts + descriptions (slower, high value)
+                _youtube_deep(q, timeout),
                 return_exceptions=True,
             ),
             timeout=timeout,
@@ -440,8 +452,9 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     metaculus  = _next()
     ddg        = _next()
     wiki_results = [_next() for _ in wiki_coros]
-    reddit_h   = _next() or []
-    youtube_h  = _next() or []
+    reddit_h      = _next() or []
+    youtube_h     = _next() or []
+    youtube_deep  = _next()   # full transcript/description block or None
 
     # Deduplicate and combine all headlines
     seen: set = set()
@@ -493,9 +506,12 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
             lines.append(f"  • {post}")
         blocks.append("\n".join(lines))
 
-    # 5. YouTube video search
-    if youtube_h:
-        lines = ["=== VIDEO COVERAGE (YouTube) ==="]
+    # 5. YouTube — deep research (transcripts + descriptions) takes priority
+    if isinstance(youtube_deep, str) and youtube_deep:
+        blocks.append(youtube_deep)
+    elif youtube_h:
+        # Fallback: title-only if deep research timed out
+        lines = ["=== VIDEO COVERAGE (YouTube — titles only) ==="]
         for vid in youtube_h[:6]:
             lines.append(f"  • {vid}")
         blocks.append("\n".join(lines))
@@ -512,13 +528,13 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     if blocks:
         total_sources = sum([
             bool(all_headlines), bool(wiki_text), bool(ddg),
-            bool(reddit_h), bool(youtube_h), bool(pm_lines),
+            bool(reddit_h), bool(youtube_deep or youtube_h), bool(pm_lines),
         ])
         logger.info(
-            "Web search: %d headlines | %d wiki | reddit=%s | youtube=%d | pred_markets=%s | query='%s'",
+            "Web search: %d headlines | %d wiki | reddit=%s | youtube_deep=%s | pred_markets=%s | query='%s'",
             len(all_headlines), len(wiki_text),
             "yes" if reddit_h else "no",
-            len(youtube_h),
+            "yes" if youtube_deep else f"{len(youtube_h)} titles",
             "yes" if pm_lines else "no",
             q[:60],
         )
