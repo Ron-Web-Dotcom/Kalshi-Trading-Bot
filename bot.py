@@ -472,6 +472,36 @@ class TradingBot:
         #             logger.debug("Discord command poll error: %s", e)
         #         await asyncio.sleep(10)
 
+        async def live_market_manager_loop():
+            """Always-on loop — maintains up to 3 live in-play positions at all times."""
+            from src.jobs.live_market_manager import run_live_manager_cycle, SCAN_INTERVAL
+            from src.alerts.discord import DiscordAlerter
+            from src.execution.paper_trader import PaperTrader
+            from src.execution.poly_paper_trader import PolyPaperTrader
+            from src.clients.kalshi_client import KalshiClient
+
+            await asyncio.sleep(60)   # let ingest and trade loops warm up first
+            discord_lm = DiscordAlerter()
+            logger.info("Live market manager started — scanning every %ds for in-play opportunities", SCAN_INTERVAL)
+            while not self._shutdown.is_set():
+                try:
+                    _kalshi_tmp = KalshiClient()
+                    _k_trader = PaperTrader(db=self.db, discord=None, scaler=self.scaler, risk=self.risk)
+                    _p_trader = PolyPaperTrader(db=self.db, discord=None, scaler=self.scaler, risk=self.risk)
+                    await run_live_manager_cycle(
+                        db            = self.db,
+                        discord       = discord_lm,
+                        settings      = settings,
+                        kalshi_trader = _k_trader,
+                        poly_trader   = _p_trader,
+                        scaler        = self.scaler,
+                        risk          = self.risk,
+                    )
+                    await _kalshi_tmp.close()
+                except Exception as e:
+                    logger.debug("Live manager loop error: %s", e)
+                await asyncio.sleep(SCAN_INTERVAL)
+
         async def manual_trade_monitor_loop():
             """Check for user-placed manual trades every 60 seconds (live mode only)."""
             from src.jobs.manual_trade_monitor import check_manual_trades
@@ -493,6 +523,7 @@ class TradingBot:
             asyncio.create_task(daytime_summary_loop(),       name="daytime_summary"),
             asyncio.create_task(daily_summary_loop(),         name="daily_summary"),
             # asyncio.create_task(discord_command_loop(),      name="discord_commands"),  # enable when Discord bot token is set up
+            asyncio.create_task(live_market_manager_loop(),    name="live_market_manager"),
             asyncio.create_task(manual_trade_monitor_loop(),  name="manual_trade_monitor"),
         ]
 

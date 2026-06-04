@@ -167,7 +167,7 @@ class KalshiClient:
 
         return markets[:max_markets]
 
-    async def get_live_markets(self, max_hours: float = 2.0, max_markets: int = 50) -> List[Dict]:
+    async def get_live_markets(self, max_hours: float = 3.0, max_markets: int = 60) -> List[Dict]:
         """
         Fetch Kalshi "happening now" in-play markets — those closing within max_hours.
         These are short-duration sports/event markets resolving in minutes or hours.
