@@ -37,6 +37,9 @@ MIN_ABS_USD          = 0.25  # minimum absolute expected profit per live trade
 
 # in-memory slot registry — ticker → slot dict
 _live_slots: Dict[str, Dict] = {}
+# last price reported per ticker — used to suppress no-change spam
+_last_reported_price: Dict[str, float] = {}
+PRICE_CHANGE_THRESHOLD = 2.0   # percent — only report if price moved this much
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -152,6 +155,10 @@ async def _check_and_exit(
         current = await _fetch_kalshi_price(ticker, kalshi)
     else:
         current = await _fetch_poly_price(ticker, db)
+
+    # Keep slot's current_price fresh for the live position update alert
+    if current is not None:
+        slot["current_price"] = current
 
     # a) Close time passed → market resolved, check win/loss from final price
     close_time = slot.get("close_time") or ""
@@ -481,6 +488,86 @@ async def _send_stopout_alert(discord, slot: Dict, current_price: float, loss_pc
         logger.debug("Stop-out alert error: %s", e)
 
 
+async def _send_live_positions_update(discord, slots: Dict) -> None:
+    """
+    Send a compact live-positions update embed.
+    Only fires when at least one slot has moved >= PRICE_CHANGE_THRESHOLD since
+    the last report — prevents spam on quiet cycles.
+    """
+    if not slots or not discord:
+        return
+    try:
+        from src.utils.eastern_time import format_et, et_label
+        changed = []
+        for ticker, slot in slots.items():
+            cur = float(slot.get("current_price") or slot.get("entry_price") or 0)
+            last = _last_reported_price.get(ticker, cur)
+            if last > 0 and abs(cur - last) / last * 100 >= PRICE_CHANGE_THRESHOLD:
+                changed.append((ticker, slot, cur, last))
+
+        if not changed:
+            return  # nothing moved enough — skip this cycle
+
+        lines = []
+        total_pnl = 0.0
+        for ticker, slot, cur, last in changed:
+            entry     = float(slot.get("entry_price") or slot.get("avg_price") or cur)
+            contracts = int(slot.get("contracts") or 1)
+            side      = (slot.get("side") or "yes").upper()
+            plat      = slot.get("platform", "kalshi")
+            plat_icon = "🟦" if plat == "kalshi" else "🟣"
+            title     = (slot.get("title") or ticker)[:50]
+            pct_from_entry = ((cur - entry) / entry * 100) if entry else 0
+            pct_sign  = "+" if pct_from_entry >= 0 else ""
+            pnl, _, _ = _calc_pnl(slot, cur)
+            total_pnl += pnl
+            pnl_sign  = "+" if pnl >= 0 else ""
+            move_icon = "📈" if cur >= last else "📉"
+            move_pct  = (cur - last) / last * 100 if last else 0
+            lines.append(
+                f"{move_icon} {plat_icon} **{title}** | {side}\n"
+                f"   {last:.0f}¢ → **{cur:.0f}¢** ({move_pct:+.1f}% this update) | "
+                f"Entry {entry:.0f}¢ ({pct_sign}{pct_from_entry:.1f}%) | PnL **${pnl_sign}{pnl:.2f}**"
+            )
+            _last_reported_price[ticker] = cur
+
+        # Also show unchanged slots quietly
+        unchanged = [(t, s) for t, s in slots.items() if t not in {c[0] for c in changed}]
+        for ticker, slot in unchanged:
+            cur   = float(slot.get("current_price") or slot.get("entry_price") or 0)
+            entry = float(slot.get("entry_price") or slot.get("avg_price") or cur)
+            side  = (slot.get("side") or "yes").upper()
+            plat_icon = "🟦" if slot.get("platform") == "kalshi" else "🟣"
+            title = (slot.get("title") or ticker)[:50]
+            pct   = ((cur - entry) / entry * 100) if entry else 0
+            pnl, _, _ = _calc_pnl(slot, cur)
+            total_pnl += pnl
+            pnl_sign = "+" if pnl >= 0 else ""
+            lines.append(
+                f"➡️ {plat_icon} **{title}** | {side}\n"
+                f"   {cur:.0f}¢ (no change) | Entry {entry:.0f}¢ ({pct:+.1f}%) | PnL **${pnl_sign}{pnl:.2f}**"
+            )
+
+        total_sign = "+" if total_pnl >= 0 else ""
+        et_time = format_et(fmt="%I:%M %p") + f" {et_label()}"
+        payload = {
+            "embeds": [{
+                "title": f"⚡ Live Position Update — {len(slots)} active",
+                "description": (
+                    "\n\n".join(lines)
+                    + f"\n\n**Total Live PnL: ${total_sign}{total_pnl:.2f}**"
+                ),
+                "color": 0x00BFFF,
+                "timestamp": _now_utc().isoformat(),
+                "footer": {"text": f"Live monitor • {et_time} • Updates when price moves >{PRICE_CHANGE_THRESHOLD:.0f}%"},
+            }]
+        }
+        await discord._post(payload)
+        logger.info("Live position update sent (%d positions changed)", len(changed))
+    except Exception as e:
+        logger.debug("Live positions update alert error: %s", e)
+
+
 # ── Main manager loop ─────────────────────────────────────────────────────────
 
 async def run_live_manager_cycle(db, discord, settings, kalshi_trader, poly_trader, scaler, risk) -> None:
@@ -561,6 +648,10 @@ async def run_live_manager_cycle(db, discord, settings, kalshi_trader, poly_trad
             )
         else:
             logger.info("All %d live slots occupied — next check in %ds", MAX_LIVE_POSITIONS, SCAN_INTERVAL)
+
+        # 4. Live position update — fires only when price moved ≥ threshold
+        if _live_slots:
+            await _send_live_positions_update(discord, _live_slots)
 
     except Exception as e:
         logger.error("Live manager cycle error: %s", e, exc_info=True)
