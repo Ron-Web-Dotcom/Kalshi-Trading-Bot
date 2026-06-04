@@ -572,6 +572,75 @@ class TradingBot:
                     logger.debug("Manual trade monitor error: %s", e)
                 await asyncio.sleep(60)
 
+        async def bot_alert_loop():
+            """
+            Every 10 minutes: collect ALL new confident BUY signals (live + regular)
+            and fire ONE bundled BOT ALERT if there are picks not yet alerted.
+            Stays completely silent if nothing new — no spam.
+            """
+            from src.alerts.discord import DiscordAlerter
+            from src.utils.daily_stats import stats as _da
+            from src.jobs.live_market_manager import _live_slots as _ls
+
+            # Dedup key: ticker + confidence band (re-alerts if conf jumps 10+ pts)
+            _alerted: dict = {}   # ticker → confidence band already sent
+
+            # Reset dedup at midnight so each new day starts fresh
+            _alerted_date = datetime.now(timezone.utc).date()
+
+            BOT_ALERT_INTERVAL = 600      # 10 minutes between checks
+            MIN_CONF_FOR_ALERT = 63.0     # lower than live trading gate so more picks qualify
+
+            await asyncio.sleep(120)      # let bot settle before first check
+            while not self._shutdown.is_set():
+                await asyncio.sleep(BOT_ALERT_INTERVAL)
+                if self._shutdown.is_set():
+                    break
+
+                try:
+                    # Reset dedup at midnight
+                    today = datetime.now(timezone.utc).date()
+                    if today != _alerted_date:
+                        _alerted.clear()
+                        _alerted_date = today
+
+                    discord = DiscordAlerter()
+                    mode    = "PAPER" if not settings.trading.live_trading_enabled else "LIVE"
+                    new_picks: list = []
+
+                    # 1. Active live slots (already entered — highest urgency)
+                    for ticker, slot in list(_ls.items()):
+                        band = int(slot.get("confidence", 0) / 10) * 10
+                        if _alerted.get(ticker) != band:
+                            new_picks.append({**slot, "is_live": True})
+                            _alerted[ticker] = band
+
+                    # 2. High-confidence BUY evaluations from the regular scan
+                    for ev in list(_da.all_evaluations):
+                        if ev.get("action") != "BUY":
+                            continue
+                        conf   = ev.get("confidence", 0)
+                        ticker = ev.get("ticker", "")
+                        if conf < MIN_CONF_FOR_ALERT or not ticker:
+                            continue
+                        band = int(conf / 10) * 10
+                        if _alerted.get(ticker) != band:
+                            new_picks.append(ev)
+                            _alerted[ticker] = band
+
+                    if not new_picks:
+                        continue   # nothing new — stay quiet
+
+                    # Sort: live first, then by confidence descending
+                    new_picks.sort(
+                        key=lambda x: (0 if x.get("is_live") else 1, -x.get("confidence", 0))
+                    )
+                    await discord.bot_alert(new_picks[:6], mode=mode)
+                    logger.info("BOT ALERT fired: %d picks", len(new_picks))
+
+                except Exception as e:
+                    logger.error("Bot alert loop error: %s", e)
+
         tasks = [
             asyncio.create_task(ingest_loop(),                name="ingest"),
             asyncio.create_task(track_loop(),                 name="track"),
@@ -579,6 +648,7 @@ class TradingBot:
             asyncio.create_task(hourly_heartbeat_loop(),      name="hourly_heartbeat"),
             asyncio.create_task(daytime_summary_loop(),       name="daytime_summary"),
             asyncio.create_task(daily_summary_loop(),         name="daily_summary"),
+            asyncio.create_task(bot_alert_loop(),             name="bot_alert"),
             # asyncio.create_task(discord_command_loop(),      name="discord_commands"),  # enable when Discord bot token is set up
             asyncio.create_task(live_market_manager_loop(),    name="live_market_manager"),
             asyncio.create_task(manual_trade_monitor_loop(),  name="manual_trade_monitor"),

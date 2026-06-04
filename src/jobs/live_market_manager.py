@@ -391,7 +391,11 @@ async def _fill_slots(
             )
 
     if alert_trades:
-        await discord.live_trades_alert(alert_trades, mode="PAPER" if not settings.trading.live_trading_enabled else "LIVE")
+        _mode = "PAPER" if not settings.trading.live_trading_enabled else "LIVE"
+        # Mark as live so bot_alert renders the red LIVE IN-PLAY urgency tier
+        for t in alert_trades:
+            t["is_live"] = True
+        await discord.bot_alert(alert_trades, mode=_mode)
 
     return entered
 

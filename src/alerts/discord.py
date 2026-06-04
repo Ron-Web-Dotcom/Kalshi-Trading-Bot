@@ -175,6 +175,115 @@ class DiscordAlerter:
         )
         await self._post(payload)
 
+    async def bot_alert(self, picks: List[Dict], mode: str = "PAPER") -> None:
+        """
+        🚨 BOT ALERT — single embed, ALL confident picks bundled in one message.
+        Fires only when bot has genuinely new high-confidence signals.
+        Never spams — caller is responsible for deduplication.
+
+        Each pick dict may contain:
+          ticker, title, platform, side, price_cents/yes_ask, confidence,
+          net_ev, reasoning, is_live (bool), close_time
+        """
+        if not picks:
+            return
+
+        mode_tag = "📝 PAPER" if mode == "PAPER" else "💰 LIVE"
+        now_utc  = datetime.now(timezone.utc)
+
+        # ── Urgency tier ──────────────────────────────────────────────────────
+        has_live  = any(p.get("is_live") or p.get("live") for p in picks)
+        top_conf  = max(p.get("confidence", 0) for p in picks)
+        avg_conf  = sum(p.get("confidence", 0) for p in picks) / len(picks)
+
+        if has_live:
+            color   = 0xFF0000
+            urgency = "🔴 LIVE IN-PLAY BET"
+        elif top_conf >= 80:
+            color   = 0xFF4500
+            urgency = "🟠 HIGH CONFIDENCE"
+        elif top_conf >= 70:
+            color   = 0xFFD700
+            urgency = "🟡 SOLID EDGE FOUND"
+        else:
+            color   = 0x00BFFF
+            urgency = "🔵 CONFIDENT PICK"
+
+        # ── Build lines ───────────────────────────────────────────────────────
+        lines = []
+        for i, p in enumerate(picks, 1):
+            plat   = "🟣" if p.get("platform") == "polymarket" else "🟦"
+            title  = self._display_ticker(p.get("ticker", ""), p.get("title", "") or "")[:55]
+            side   = (p.get("side") or "YES").upper()
+            price  = float(p.get("price_cents") or p.get("yes_ask") or p.get("last_price") or 0)
+            conf   = p.get("confidence", 0)
+            ev     = p.get("net_ev")
+            ev_s   = f" | EV **{ev:+.1f}¢**" if ev is not None else ""
+            reason = (p.get("reasoning") or "")[:130]
+
+            # Category label
+            tl = (p.get("title") or "").lower()
+            if p.get("is_live") or p.get("live"):
+                cat = "⚡ LIVE"
+            elif any(k in tl for k in ["bitcoin","btc","eth","crypto","solana","xrp"]):
+                cat = "₿ CRYPTO"
+            elif any(k in tl for k in ["nfl","nba","mlb","nhl","soccer","game","match","score","cup","championship","ufc"]):
+                cat = "🏆 SPORTS"
+            elif any(k in tl for k in ["trump","biden","harris","elect","congress","senate","president","governor"]):
+                cat = "🗳 POLITICS"
+            elif any(k in tl for k in ["cpi","fed","rate","inflation","nasdaq","sp500","gdp","unemployment"]):
+                cat = "📊 ECONOMICS"
+            else:
+                cat = "🎯 PREDICTION"
+
+            # Timing
+            ct = p.get("close_time", "")
+            timing = ""
+            if ct:
+                try:
+                    cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                    if cd.tzinfo is None:
+                        cd = cd.replace(tzinfo=timezone.utc)
+                    hrs = (cd - now_utc).total_seconds() / 3600
+                    timing = (
+                        " ⏰ **resolving now**" if hrs < 0 else
+                        f" 🔥 **ends in {hrs:.0f}h**" if hrs <= 3 else
+                        f" ⏳ ends today" if hrs <= 24 else ""
+                    )
+                except Exception:
+                    pass
+
+            lines.append(
+                f"**{i}. [{cat}] {plat} {title}**{timing}\n"
+                f"   → BUY **{side}** @ **{price:.0f}¢** | **{conf:.0f}% confident**{ev_s}\n"
+                f"   _{reason}_"
+            )
+
+        # ── Dynamic title ─────────────────────────────────────────────────────
+        n = len(picks)
+        if has_live and n > 1:
+            title_str = f"🚨 BOT ALERT — LIVE BET + {n - 1} more pick{'s' if n - 1 > 1 else ''}"
+        elif has_live:
+            title_str = "🚨 BOT ALERT — LIVE IN-PLAY BET JUST PLACED"
+        elif n > 1:
+            title_str = f"🚨 BOT ALERT — {n} CONFIDENT PICKS FOUND"
+        else:
+            title_str = "🚨 BOT ALERT — CONFIDENT PREDICTION FOUND"
+
+        payload = {
+            "embeds": [{
+                "title":       f"{title_str}  [{mode_tag}]",
+                "description": (
+                    f"{urgency} — **{avg_conf:.0f}% avg confidence** across {n} pick{'s' if n > 1 else ''}\n\n"
+                    + "\n\n".join(lines)
+                ),
+                "color":     color,
+                "timestamp": now_utc.isoformat(),
+                "footer":    {"text": "Only alerting when bot is genuinely confident — no spam"},
+            }]
+        }
+        await self._post(payload)
+
     async def live_trades_alert(self, trades: List[Dict], mode: str = "PAPER") -> None:
         """
         Single Discord embed announcing live in-play trades being entered right now.
