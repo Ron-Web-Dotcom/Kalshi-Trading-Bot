@@ -1520,6 +1520,24 @@ class DiscordAlerter:
         )
         await self._post(payload)
 
+    async def ai_budget_cap_hit(self, spent: float, cap: float) -> bool:
+        """One-time white alert when AI spend hits the hard daily cap."""
+        payload = self._embed(
+            title="🤖💸 AI BUDGET CAP HIT",
+            description=(
+                f"Daily AI spend has reached the **${cap:.2f} hard cap**.\n"
+                f"All AI calls are paused for the rest of today.\n\n"
+                f"**Spent:** ${spent:.2f}  |  **Cap:** ${cap:.2f}\n"
+                f"Scanning and tracking continue — trading resumes tomorrow."
+            ),
+            color=0xFFFFFF,  # white
+            fields=[
+                {"name": "Action taken", "value": "AI calls suspended for today", "inline": False},
+                {"name": "Next reset", "value": "Midnight (auto-resumes)", "inline": True},
+            ],
+        )
+        return await self._post(payload)
+
     async def pnl_update(self, total_pnl: float, win_rate: float,
                           total_trades: int, scale_factor: float) -> None:
         color = 0x00FF00 if total_pnl >= 0 else 0xFF4444

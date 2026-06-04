@@ -1,10 +1,16 @@
 """Job: run AI + arbitrage decision logic on markets."""
 
 import logging
+import smtplib
+import os
 from datetime import date
+from email.mime.text import MIMEText
 from typing import Dict, List, Optional
 
 logger = logging.getLogger("trading.jobs.decide")
+
+# One-time flag: send the hard-cap alert only once per calendar day
+_cap_alerted_date: Optional[str] = None
 
 
 async def _get_daily_ai_spend(db) -> float:
@@ -22,6 +28,60 @@ async def _get_daily_ai_spend(db) -> float:
         return 0.0
 
 
+def _send_cap_email(spent: float, cap: float) -> None:
+    """Send a one-time email when the hard cap is hit. Fails silently if not configured."""
+    smtp_host = os.environ.get("SMTP_HOST", "")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_user = os.environ.get("SMTP_USER", "")
+    smtp_pass = os.environ.get("SMTP_PASS", "")
+    alert_to  = os.environ.get("ALERT_EMAIL", "ront.devops@gmail.com")
+
+    if not smtp_host or not smtp_user:
+        return
+
+    try:
+        msg = MIMEText(
+            f"Your Kalshi trading bot AI spend has hit the hard cap.\n\n"
+            f"Spent today: ${spent:.2f}\n"
+            f"Hard cap:    ${cap:.2f}\n\n"
+            f"AI calls are paused for the rest of today.\n"
+            f"Scanning and tracking continue. Everything resets at midnight."
+        )
+        msg["Subject"] = f"🤖💸 AI Budget Hard Cap Hit — ${spent:.2f} / ${cap:.2f}"
+        msg["From"]    = smtp_user
+        msg["To"]      = alert_to
+
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as s:
+            s.starttls()
+            s.login(smtp_user, smtp_pass)
+            s.send_message(msg)
+        logger.info("AI cap email sent to %s", alert_to)
+    except Exception as e:
+        logger.warning("AI cap email failed (non-critical): %s", e)
+
+
+async def _fire_cap_alert(spent: float, cap: float) -> None:
+    """Discord + email, one-time per day."""
+    global _cap_alerted_date
+    today = date.today().isoformat()
+    if _cap_alerted_date == today:
+        return  # already alerted today
+
+    _cap_alerted_date = today
+    logger.warning("AI hard cap $%.2f reached — firing one-time alert", cap)
+
+    try:
+        from src.alerts.discord import DiscordAlerter
+        await DiscordAlerter().ai_budget_cap_hit(spent, cap)
+    except Exception as e:
+        logger.warning("Discord cap alert failed: %s", e)
+
+    try:
+        _send_cap_email(spent, cap)
+    except Exception:
+        pass
+
+
 async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -> Optional[Dict]:
     """
     Run AI decision engine on a single market + signal context.
@@ -30,16 +90,13 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
     from src.ai.decision import AIDecisionEngine
     from src.config.settings import settings
 
-    # AI cost budget gate — log when approaching limit but never fully stop scanning
+    # AI cost budget gate
     tcfg = settings.trading
     if tcfg.enable_daily_cost_limiting:
         spent = await _get_daily_ai_spend(db)
         hard_cap = getattr(tcfg, "daily_ai_hard_cap", 15.0)
         if spent >= hard_cap:
-            logger.warning(
-                "AI spend $%.2f hit hard cap $%.2f — pausing AI calls",
-                spent, hard_cap,
-            )
+            await _fire_cap_alert(spent, hard_cap)
             return None
         elif spent >= tcfg.daily_ai_budget:
             logger.info(
@@ -91,7 +148,6 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
             "✅ TRADE SIGNAL  %-30s  %s/%-3s  conf=%d%%  %s%s  %s",
             ticker, action, side.upper(), conf, tp_str, ev_str, decision.reasoning[:80],
         )
-        # Record signal in daily stats tracker
         try:
             from src.utils.daily_stats import stats as daily_stats
             daily_stats.record_signal(ticker, conf, net_ev, action)
@@ -114,8 +170,6 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
             "🟡 NEAR-MISS      %-30s  HOLD/%-3s  conf=%d%%  (need %d%%)%s%s  %s",
             ticker, side.upper(), conf, min_conf, tp_str, ev_str, decision.reasoning[:80],
         )
-        # Record real near-misses (AI said BUY but conf fell short) into daily stats.
-        # They appear in the hourly report — no individual Discord spam.
         if action == "BUY" and decision.model != "rule_based":
             try:
                 from src.utils.daily_stats import stats as daily_stats
