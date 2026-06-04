@@ -116,7 +116,9 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
                     f"conf {conf:.0f}% < {min_conf:.0f}% required"
                     if conf < min_conf
                     else f"EV {net_ev:+.1f}¢ below minimum"
-                    if (net_ev or 0) <= 0
+                    if net_ev is not None and net_ev <= 0
+                    else "no positive EV computed"
+                    if net_ev is None
                     else "below profit gate"
                 )
                 daily_stats.record_near_miss(
