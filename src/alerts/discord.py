@@ -503,11 +503,17 @@ class DiscordAlerter:
             ticker    = p.get("ticker", "?")
             title     = p.get("title", "") or ""
             label     = self._display_ticker(ticker, title)
-            side      = (p.get("side") or "yes").upper()
-            contracts = p.get("contracts", 0)
+            side_raw  = (p.get("side") or "yes").lower()
+            side      = side_raw.upper()
+            contracts = int(p.get("contracts") or 0)
             avg_price = float(p.get("avg_price") or 0)
             cur_price = float(p.get("current_price") or avg_price)
-            pnl       = float(p.get("pnl") or 0)
+            size_usd  = float(p.get("size_usd") or 0) or round(avg_price * contracts / 100, 2)
+            # Recalculate PnL from live prices (don't trust stale DB value of 0)
+            if side_raw == "yes":
+                pnl = (cur_price - avg_price) * contracts / 100
+            else:
+                pnl = (avg_price - cur_price) * contracts / 100
             total_pnl += pnl
             pnl_sign  = "+" if pnl >= 0 else ""
             pct       = ((cur_price - avg_price) / avg_price * 100) if avg_price else 0
@@ -515,9 +521,9 @@ class DiscordAlerter:
             icon      = "📈" if pnl >= 0 else "📉"
             platform  = "🟣" if p.get("platform") == "polymarket" else "🟦"
             lines.append(
-                f"{icon} {platform} **{label}** | {side} | {contracts} contracts\n"
+                f"{icon} {platform} **{label}** | {side} | {contracts} contracts @ {avg_price:.0f}¢\n"
                 f"   Entry: **{avg_price:.0f}¢** → Now: **{cur_price:.0f}¢** "
-                f"({pct_sign}{pct:.1f}%) | PnL: **${pnl_sign}{pnl:.2f}**"
+                f"({pct_sign}{pct:.1f}%) | Capital: **${size_usd:.2f}** | PnL: **${pnl_sign}{pnl:.2f}**"
             )
         total_sign = "+" if total_pnl >= 0 else ""
         payload = self._embed(
@@ -912,10 +918,11 @@ class DiscordAlerter:
         if new_positions:
             lines = []
             for p in new_positions[:8]:
-                plat  = "🟣" if p.get("platform") == "polymarket" else "🟦"
-                side  = (p.get("side") or "yes").upper()
-                price = float(p.get("avg_price") or 0)
-                size  = float(p.get("size_usd") or 0)
+                plat      = "🟣" if p.get("platform") == "polymarket" else "🟦"
+                side      = (p.get("side") or "yes").upper()
+                price     = float(p.get("avg_price") or 0)
+                contracts = int(p.get("contracts") or 0)
+                size      = float(p.get("size_usd") or 0) or round(price * contracts / 100, 2)
                 label = self._display_ticker(p.get("ticker", "?"), p.get("title", "") or "")
                 lines.append(
                     f"{plat} **{label}** | **{side}** @ {price:.0f}¢ | ${size:.2f}"
@@ -949,17 +956,23 @@ class DiscordAlerter:
             total_unrealised = 0.0
             for p in open_positions[:10]:
                 plat      = "🟣" if p.get("platform") == "polymarket" else "🟦"
-                side      = (p.get("side") or "yes").upper()
+                side_raw  = (p.get("side") or "yes").lower()
+                side      = side_raw.upper()
                 avg_price = float(p.get("avg_price") or 0)
                 cur_price = float(p.get("current_price") or avg_price)
-                pnl       = float(p.get("pnl") or 0)
+                contracts = int(p.get("contracts") or 0)
+                size_usd  = float(p.get("size_usd") or 0) or round(avg_price * contracts / 100, 2)
+                if side_raw == "yes":
+                    pnl = (cur_price - avg_price) * contracts / 100
+                else:
+                    pnl = (avg_price - cur_price) * contracts / 100
                 total_unrealised += pnl
                 pnl_s = "+" if pnl >= 0 else ""
                 mv    = "📈" if pnl >= 0 else "📉"
                 label = self._display_ticker(p.get("ticker", "?"), p.get("title", "") or "")
                 lines.append(
                     f"{mv} {plat} **{label}** | {side} | "
-                    f"{avg_price:.0f}¢→{cur_price:.0f}¢ | **${pnl_s}{pnl:.2f}**"
+                    f"{avg_price:.0f}¢→{cur_price:.0f}¢ | ${size_usd:.2f} in | **${pnl_s}{pnl:.2f}**"
                 )
             total_s = "+" if total_unrealised >= 0 else ""
             lines.append(f"\n**Unrealised Total: ${total_s}{total_unrealised:.2f}**")

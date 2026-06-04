@@ -78,7 +78,10 @@ async def run_tracking(db_manager) -> None:
                     if cur_price == 0:
                         logger.warning("TRACK SKIP Polymarket %s — %s price=0 in cache", ticker, bid_key)
                         continue
-                    pnl        = (cur_price - avg_price) * contracts / 100
+                    if side == "yes":
+                        pnl = (cur_price - avg_price) * contracts / 100
+                    else:
+                        pnl = (avg_price - cur_price) * contracts / 100
                     pct_change = ((cur_price - avg_price) / avg_price * 100) if avg_price else 0
                     mkt_status = mkt_row.get("status", "open")
                     if mkt_status in ("resolved", "settled", "finalized"):
@@ -132,7 +135,17 @@ async def run_tracking(db_manager) -> None:
                 # Current bid = what we can sell for right now (cents)
                 bid_key   = "yes_bid" if side == "yes" else "no_bid"
                 cur_price = float(mkt.get(bid_key, 0) or 0)
-                pnl       = (cur_price - avg_price) * contracts / 100
+                # Fall back to last_price if bid is 0 (thin/illiquid market)
+                if cur_price == 0:
+                    cur_price = float(mkt.get("last_price", 0) or 0)
+                if cur_price == 0:
+                    logger.warning("TRACK SKIP Kalshi %s — %s=0 and no last_price", ticker, bid_key)
+                    continue
+                # PnL: YES profits when price rises, NO profits when YES price falls
+                if side == "yes":
+                    pnl = (cur_price - avg_price) * contracts / 100
+                else:
+                    pnl = (avg_price - cur_price) * contracts / 100
                 pct_change = ((cur_price - avg_price) / avg_price * 100) if avg_price else 0
 
                 close_reason = ""

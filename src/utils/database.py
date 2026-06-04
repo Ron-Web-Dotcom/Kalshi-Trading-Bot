@@ -149,6 +149,7 @@ class DatabaseManager:
                     "ALTER TABLE positions  ADD COLUMN platform TEXT DEFAULT 'kalshi'",
                     "ALTER TABLE positions  ADD COLUMN poly_token_id TEXT",
                     "ALTER TABLE positions  ADD COLUMN title TEXT DEFAULT ''",
+                    "ALTER TABLE positions  ADD COLUMN size_usd REAL DEFAULT 0",
                     "ALTER TABLE markets    ADD COLUMN platform TEXT DEFAULT 'kalshi'",
                 ]:
                     try:
