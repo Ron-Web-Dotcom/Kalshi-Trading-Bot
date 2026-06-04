@@ -182,22 +182,19 @@ class KalshiClient:
         # ── DB path (preferred — prices already enriched by ingest job) ──────
         if db is not None:
             try:
-                cutoff_iso = now.isoformat()
-                max_iso    = (now.replace(hour=0, minute=0, second=0, microsecond=0)
-                              .__class__.fromisoformat(cutoff_iso))  # keep tz
                 import datetime as _dt
-                max_close  = (now + _dt.timedelta(hours=max_hours)).isoformat()
+                now_iso   = now.strftime("%Y-%m-%dT%H:%M:%S")
+                max_iso   = (now + _dt.timedelta(hours=max_hours)).strftime("%Y-%m-%dT%H:%M:%S")
                 rows = await db.fetchall(
                     """SELECT ticker, title, category, yes_ask, no_ask, yes_bid, no_bid,
                               last_price, volume, close_time, platform
                        FROM markets
                        WHERE (platform='kalshi' OR platform IS NULL)
-                         AND status='open'
+                         AND (status='open' OR status='')
                          AND close_time > ? AND close_time <= ?
-                         AND (yes_ask > 1 OR last_price > 1 OR yes_bid > 1)
                        ORDER BY close_time ASC
                        LIMIT ?""",
-                    (cutoff_iso, max_close, max_markets),
+                    (now_iso, max_iso, max_markets),
                 )
                 live = []
                 for r in (rows or []):
@@ -207,15 +204,24 @@ class KalshiClient:
                         yes_ask = float(m.get("last_price") or 0)
                     if not yes_ask:
                         yes_ask = float(m.get("yes_bid") or 0)
+                    if not yes_ask:
+                        continue  # skip truly priceless markets
                     no_ask = float(m.get("no_ask") or 0) or round(100.0 - yes_ask, 1)
-                    close_dt = datetime.fromisoformat(str(m["close_time"]).replace("Z", "+00:00"))
-                    hours_left = (close_dt - now).total_seconds() / 3600
+                    try:
+                        close_dt = datetime.fromisoformat(str(m["close_time"]).replace("Z", "+00:00"))
+                        if close_dt.tzinfo is None:
+                            close_dt = close_dt.replace(tzinfo=timezone.utc)
+                        hours_left = (close_dt - now).total_seconds() / 3600
+                    except Exception:
+                        hours_left = 0
                     m.update(yes_ask=yes_ask, no_ask=no_ask, is_live=True,
                              hours_to_close=round(hours_left, 2), platform="kalshi")
                     live.append(m)
-                logger.info("Kalshi live markets (DB, ≤%.0fh): %d with price", max_hours, len(live))
+                logger.info("Kalshi live markets (DB, ≤%.0fh): %d of %d rows have price",
+                            max_hours, len(live), len(rows or []))
                 if live:
                     return live
+                logger.warning("Kalshi DB: %d rows in window but 0 have price — check ingest", len(rows or []))
             except Exception as e:
                 logger.warning("Kalshi live DB query failed, falling back to API: %s", e)
 
