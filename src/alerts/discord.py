@@ -963,9 +963,9 @@ class DiscordAlerter:
 
     async def daytime_summary(
         self,
-        period: str,            # "Midnight" / "Morning" / "Afternoon" / "Evening"
+        period: str,               # "Midnight" / "Morning" / "Afternoon" / "Evening"
         open_positions: list,
-        new_positions: list,    # opened since last summary
+        new_positions: list,       # opened since last summary
         today_pnl: float,
         kalshi_count: int,
         poly_count: int,
@@ -974,119 +974,218 @@ class DiscordAlerter:
         total_losses: int,
         total_closed: int,
         paper: bool = True,
+        closed_since_last: Optional[List[Dict]] = None,   # settled since last check-in
+        best_buys: Optional[List[Dict]] = None,           # top AI BUY picks this cycle
+        live_positions: Optional[List[Dict]] = None,      # in-play live slots
     ) -> None:
-        """Scheduled digest at 12am/6am/12pm/6pm ET — positions + today's PnL."""
+        """Scheduled digest at 12am/6am/12pm/6pm ET — narrative of what the bot did."""
         from src.utils.eastern_time import format_et, et_label
-        mode_tag  = "📝 PAPER" if paper else "💰 LIVE"
-        pnl_sign  = "+" if today_pnl >= 0 else ""
-        icons  = {"Midnight": "🌙", "Morning": "🌅", "Afternoon": "🌇", "Evening": "🌆"}
-        colors = {"Midnight": 0x2C2F33, "Morning": 0x00BFFF, "Afternoon": 0xFFA500, "Evening": 0xFF6B35}
-        icon  = icons.get(period, "🕐")
-        color = colors.get(period, 0x5865F2)
-        now_utc   = format_et(fmt="%I:%M %p") + f" {et_label()}"
+        mode_tag = "📝 PAPER" if paper else "💰 LIVE"
+        icons    = {"Midnight": "🌙", "Morning": "🌅", "Afternoon": "🌇", "Evening": "🌆"}
+        p_icon   = icons.get(period, "🕐")
+        now_str  = format_et(fmt="%I:%M %p") + f" {et_label()}"
+        closed   = closed_since_last or []
+        buys     = best_buys or []
+        live_pos = live_positions or []
+
+        # ── Deduplicate open positions ────────────────────────────────────────
+        _seen_k: set = set()
+        _seen_t: set = set()
+        deduped_open = []
+        for p in (open_positions or []):
+            _t = (p.get("title") or "").strip().lower()
+            _k = (p.get("platform",""), p.get("side",""), p.get("contracts",0),
+                  round(float(p.get("avg_price") or 0)))
+            if _k in _seen_k or (_t and _t not in ("","unknown") and _t in _seen_t):
+                continue
+            _seen_k.add(_k)
+            if _t:
+                _seen_t.add(_t)
+            deduped_open.append(p)
+
+        # ── Determine the headline story ──────────────────────────────────────
+        wins_here   = [c for c in closed if (c.get("pnl") or 0) > 0]
+        losses_here = [c for c in closed if (c.get("pnl") or 0) < 0]
+        has_live    = bool(live_pos)
+        has_new     = bool(new_positions)
+        top_buy     = next((b for b in buys if b.get("action") == "BUY"), None)
+
+        if has_live and has_new:
+            headline = f"⚡🎯 Bot placed a LIVE in-play bet AND a new prediction — it's been busy!"
+            color    = 0xFF4400
+        elif has_live:
+            headline = f"⚡ OH SNAP — Bot entered a LIVE in-play market! Game on! 🎮"
+            color    = 0xFF4400
+        elif wins_here and has_new:
+            total_won = sum(c.get("pnl", 0) or 0 for c in wins_here)
+            headline  = f"🏆 Bot banked ${total_won:+.2f} AND placed {len(new_positions)} new bet(s) — let's GO!"
+            color     = 0x00FF7F
+        elif wins_here:
+            total_won = sum(c.get("pnl", 0) or 0 for c in wins_here)
+            headline  = f"💰 YES! Bot won — **${total_won:+.2f}** profit locked in. Damn that's good."
+            color     = 0x00FF7F
+        elif has_new:
+            headline = f"🎯 Bot placed **{len(new_positions)}** new prediction bet(s) — confidence was there!"
+            color    = 0x00BFFF
+        elif top_buy:
+            ttl = self._display_ticker(top_buy.get("ticker",""), top_buy.get("title","") or "")[:40]
+            headline = f"🧠 Bot spotted a strong edge on **{ttl}** — watching for right entry point"
+            color    = 0x5865F2
+        elif losses_here:
+            total_lost = sum(c.get("pnl", 0) or 0 for c in losses_here)
+            headline   = f"📉 Tough one — ${total_lost:.2f} loss this period. Bot's already hunting the next edge."
+            color      = 0xFF4444
+        else:
+            scanned = kalshi_count + poly_count
+            headline = f"🔍 Bot analyzed **{scanned:,}** markets — holding cash, waiting for real edge"
+            color    = 0x808080
 
         fields = []
 
-        # Today's PnL + scan counts
+        # ── What the bot did since last check-in ─────────────────────────────
+        activity_lines = []
+
+        # New bets placed
+        for p in (new_positions or [])[:6]:
+            plat  = "🟣" if p.get("platform") == "polymarket" else "🟦"
+            side  = (p.get("side") or "yes").upper()
+            price = float(p.get("avg_price") or 0)
+            size  = float(p.get("size_usd") or 0) or round(price * int(p.get("contracts") or 0) / 100, 2)
+            label = self._display_ticker(p.get("ticker","?"), p.get("title","") or "")[:50]
+            is_live_bet = p.get("is_live") or p.get("_momentum")
+            tag   = " ⚡ LIVE BET" if is_live_bet else ""
+            activity_lines.append(
+                f"🎯 **Placed:**{tag} {plat} **{label}**\n"
+                f"   → BUY **{side}** @ **{price:.0f}¢** | ${size:.2f} in"
+            )
+
+        # Bets that settled (won or lost)
+        for c in closed[:5]:
+            pnl   = c.get("pnl") or 0
+            sign  = "+" if pnl >= 0 else ""
+            icon  = "✅ WON" if pnl >= 0 else "❌ LOST"
+            why   = c.get("close_reason", "")
+            how   = (
+                "prediction resolved ✔" if why.startswith("resolved") else
+                "stop-loss hit"         if why.startswith("stop_loss") else
+                "take-profit hit 🎉"    if why.startswith("take_profit") else
+                "AI opted out"          if why.startswith("ai_reeval") else "closed"
+            )
+            label = self._display_ticker(c.get("ticker","?"), c.get("title","") or "")[:50]
+            plat  = "🟣" if c.get("platform") == "polymarket" else "🟦"
+            activity_lines.append(
+                f"{icon}: {plat} **{label}**\n"
+                f"   → **${sign}{pnl:.2f}** ({how})"
+            )
+
+        if not activity_lines:
+            activity_lines.append("_No new bets or settlements this period — scanning continued non-stop_")
+
         fields.append({
-            "name":   "📊 Status",
-            "value":  (
-                f"Today's PnL: **${pnl_sign}{today_pnl:.2f}** | Mode: {mode_tag}\n"
-                f"Markets: 🟦 **{kalshi_count}** Kalshi + 🟣 **{poly_count}** Polymarket"
-            ),
+            "name":   f"📋 What The Bot Did (since last check-in)",
+            "value":  "\n\n".join(activity_lines),
             "inline": False,
         })
 
-        # Track record
-        if total_closed == 0:
-            wr_str   = "No closed trades yet — building track record..."
-            wr_emoji = "🆕"
-        else:
-            wr_emoji = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
-            wr_str = f"**{win_rate:.0f}% win rate** — {total_wins}W / {total_losses}L / {total_closed} closed"
-        fields.append({"name": f"{wr_emoji} Track Record", "value": wr_str, "inline": False})
-
-        # New positions opened since last summary
-        if new_positions:
-            lines = []
-            for p in new_positions[:8]:
-                plat      = "🟣" if p.get("platform") == "polymarket" else "🟦"
-                side      = (p.get("side") or "yes").upper()
-                price     = float(p.get("avg_price") or 0)
-                contracts = int(p.get("contracts") or 0)
-                size      = float(p.get("size_usd") or 0) or round(price * contracts / 100, 2)
-                label = self._display_ticker(p.get("ticker", "?"), p.get("title", "") or "")
-                lines.append(
-                    f"{plat} **{label}** | **{side}** @ {price:.0f}¢ | ${size:.2f}"
+        # ── Live in-play bets ─────────────────────────────────────────────────
+        if live_pos:
+            llines = []
+            for lp in live_pos[:3]:
+                label    = self._display_ticker(lp.get("ticker","?"), lp.get("title","") or "")[:50]
+                side     = (lp.get("side") or "yes").upper()
+                entry    = float(lp.get("entry_price") or lp.get("yes_ask") or 0)
+                move     = lp.get("move_pct", 0)
+                m_icon   = "📈" if move >= 0 else "📉"
+                llines.append(
+                    f"⚡ **{label}** — **{side}** in-play\n"
+                    f"   Entry: {entry:.0f}¢ | Move: {m_icon} {move:+.1f}%"
                 )
             fields.append({
-                "name":   f"🆕 New Positions Opened ({len(new_positions)})",
-                "value":  "\n".join(lines),
-                "inline": False,
-            })
-        else:
-            fields.append({
-                "name":   "🆕 New Positions",
-                "value":  "_No new positions since last summary_",
+                "name":   "⚡ LIVE In-Play Bets (Active Right Now!)",
+                "value":  "\n\n".join(llines),
                 "inline": False,
             })
 
-        # All currently open positions — deduplicate same trade stored under two tickers
-        # (Polymarket ticker drifts between conditionId/slug/id across API cycles)
-        if open_positions:
-            _seen: set = set()
-            _seen_titles: set = set()
-            _deduped_open = []
-            for p in open_positions:
-                _title = (p.get("title") or "").strip().lower()
-                _key = (p.get("platform",""), p.get("side",""), p.get("contracts",0),
-                        round(float(p.get("avg_price") or 0)))
-                if _key in _seen:
-                    continue
-                if _title and _title not in ("", "unknown") and _title in _seen_titles:
-                    continue
-                _seen.add(_key)
-                if _title:
-                    _seen_titles.add(_title)
-                _deduped_open.append(p)
-            open_positions = _deduped_open
-        if open_positions:
-            lines = []
-            total_unrealised = 0.0
-            for p in open_positions[:10]:
+        # ── Open positions — what's riding ────────────────────────────────────
+        if deduped_open:
+            olines = []
+            total_unreal = 0.0
+            for p in deduped_open[:8]:
                 plat      = "🟣" if p.get("platform") == "polymarket" else "🟦"
-                side_raw  = (p.get("side") or "yes").lower()
-                side      = side_raw.upper()
+                side      = (p.get("side") or "yes").upper()
                 avg_price = float(p.get("avg_price") or 0)
                 cur_price = float(p.get("current_price") or avg_price)
                 contracts = int(p.get("contracts") or 0)
                 size_usd  = float(p.get("size_usd") or 0) or round(avg_price * contracts / 100, 2)
-                pnl = (cur_price - avg_price) * contracts / 100
-                total_unrealised += pnl
+                pnl       = (cur_price - avg_price) * contracts / 100
+                total_unreal += pnl
                 pnl_s = "+" if pnl >= 0 else ""
+                pct   = ((cur_price - avg_price) / avg_price * 100) if avg_price else 0
                 mv    = "📈" if pnl >= 0 else "📉"
-                label = self._display_ticker(p.get("ticker", "?"), p.get("title", "") or "")
-                lines.append(
-                    f"{mv} {plat} **{label}** | {side} | "
-                    f"{avg_price:.0f}¢→{cur_price:.0f}¢ | ${size_usd:.2f} in | **${pnl_s}{pnl:.2f}**"
+                label = self._display_ticker(p.get("ticker","?"), p.get("title","") or "")[:48]
+                olines.append(
+                    f"{mv} {plat} **{label}** | {side}\n"
+                    f"   {avg_price:.0f}¢ → {cur_price:.0f}¢ ({pct:+.1f}%) | "
+                    f"${size_usd:.2f} in | Paper: **${pnl_s}{pnl:.2f}**"
                 )
-            total_s = "+" if total_unrealised >= 0 else ""
-            lines.append(f"\n**Unrealised Total: ${total_s}{total_unrealised:.2f}**")
+            tu_s = "+" if total_unreal >= 0 else ""
+            olines.append(f"\n💼 **Total on paper right now: ${tu_s}{total_unreal:.2f}**")
             fields.append({
-                "name":   f"💼 Open Positions ({len(open_positions)})",
-                "value":  "\n".join(lines),
+                "name":   f"💼 Holding ({len(deduped_open)} open bets)",
+                "value":  "\n\n".join(olines),
                 "inline": False,
             })
         else:
             fields.append({
-                "name":   "💼 Open Positions",
-                "value":  "_No open positions — cash held_",
+                "name":   "💼 Holding",
+                "value":  "_No open bets — fully in cash, ready to pounce_",
                 "inline": False,
             })
 
+        # ── Bot's radar — top picks it's watching ────────────────────────────
+        buy_signals = [b for b in buys if b.get("action") == "BUY"][:3]
+        if buy_signals:
+            rlines = []
+            for b in buy_signals:
+                plat   = "🟣" if b.get("platform") == "polymarket" else "🟦"
+                label  = self._display_ticker(b.get("ticker",""), b.get("title","") or "")[:48]
+                conf   = b.get("confidence", 0)
+                ev     = b.get("net_ev")
+                ev_s   = f" | EV {ev:+.1f}¢" if ev is not None else ""
+                side   = (b.get("side") or "YES").upper()
+                reason = (b.get("reasoning") or "")[:90]
+                rlines.append(
+                    f"🟢 {plat} **{label}**\n"
+                    f"   BUY **{side}** — {conf:.0f}% conf{ev_s}\n"
+                    f"   _{reason}_"
+                )
+            fields.append({
+                "name":   "🧠 Bot's Best Picks Right Now",
+                "value":  "\n\n".join(rlines),
+                "inline": False,
+            })
+
+        # ── Track record ──────────────────────────────────────────────────────
+        pnl_s = "+" if today_pnl >= 0 else ""
+        if total_closed == 0:
+            wr_emoji = "🆕"
+            wr_str   = "No settled bets yet — track record in progress"
+        else:
+            wr_emoji = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
+            wr_str   = f"**{win_rate:.0f}% win rate** — {total_wins}W / {total_losses}L / {total_closed} settled"
+        fields.append({
+            "name":   f"{wr_emoji} Track Record",
+            "value":  (
+                f"{wr_str}\n"
+                f"Today's locked-in PnL: **${pnl_s}{today_pnl:.2f}**\n"
+                f"Scanning: 🟦 **{kalshi_count}** Kalshi + 🟣 **{poly_count}** Polymarket"
+            ),
+            "inline": False,
+        })
+
         payload = self._embed(
-            title=f"{icon} {mode_tag} {period} Summary — {now_utc}",
-            description="Scheduled position digest — Kalshi + Polymarket",
+            title=f"{p_icon} {mode_tag} {period} Check-In — {now_str}",
+            description=headline,
             color=color,
             fields=fields,
         )

@@ -356,6 +356,13 @@ class TradingBot:
                     )
                     new_pos = [dict(r) for r in (new_pos or [])]
 
+                    # Positions that SETTLED (closed) since last check-in
+                    closed_since = await self.db.fetchall(
+                        "SELECT * FROM positions WHERE status='closed' AND closed_at >= ? ORDER BY closed_at DESC",
+                        (last_summary_at,)
+                    )
+                    closed_since = [dict(r) for r in (closed_since or [])]
+
                     pnl_row = await self.db.fetchone(
                         "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
                         "WHERE executed_at >= ? AND pnl IS NOT NULL AND paper_trade=?",
@@ -383,6 +390,13 @@ class TradingBot:
                     total_losses = wl.get("losses",0) or 0
                     win_rate     = (total_wins / total_closed * 100) if total_closed > 0 else 0.0
 
+                    from src.utils.daily_stats import stats as _ds_sum
+                    from src.jobs.live_market_manager import _live_slots as _lslots
+                    # Build live position list from active live slots
+                    live_pos_list = [
+                        dict(v, ticker=k) for k, v in _lslots.items()
+                    ]
+
                     await discord.daytime_summary(
                         period=period,
                         open_positions=open_pos,
@@ -395,6 +409,9 @@ class TradingBot:
                         total_losses=total_losses,
                         total_closed=total_closed,
                         paper=not settings.trading.live_trading_enabled,
+                        closed_since_last=closed_since,
+                        best_buys=list(_ds_sum.all_evaluations),
+                        live_positions=live_pos_list,
                     )
                     # Missed trades — separate message at same 4 scheduled times only
                     try:
