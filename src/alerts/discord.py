@@ -438,6 +438,9 @@ class DiscordAlerter:
         if current_tickers == self.__class__._last_missed_tickers:
             return   # nothing new — don't spam
 
+        # Find which tickers are genuinely new since last send
+        prev_tickers = self.__class__._last_missed_tickers
+        new_tickers  = current_tickers - prev_tickers
         self.__class__._last_missed_tickers = current_tickers
         mode_tag = "📝 PAPER" if paper else "💰 LIVE"
         et_time  = format_et(fmt="%I:%M %p") + f" {et_label()}"
@@ -451,7 +454,7 @@ class DiscordAlerter:
             conf    = nm.get("confidence", 0)
             side    = (nm.get("side") or "yes").upper()
             skip_r  = (nm.get("skip_reason") or "confidence below threshold")[:60]
-            new_tag = " 🆕" if i == 1 and len(current_tickers - (frozenset() if i == 1 else current_tickers)) > 0 else ""
+            new_tag = " 🆕" if nm.get("ticker", "") in new_tickers else ""
             lines.append(
                 f"**#{i}{new_tag} {plat} {title}**\n"
                 f"BUY {side} — **{conf:.0f}% conf**{ev_str}\n"

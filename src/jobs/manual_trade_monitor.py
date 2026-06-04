@@ -54,7 +54,7 @@ async def _check_kalshi_manual_trades(kalshi, db, discord, settings) -> None:
 
     for pos in positions:
         ticker      = pos.get("ticker", "")
-        side        = "yes" if (pos.get("position", 0) or 0) > 0 else "no"
+        side        = "yes" if float(pos.get("position", 0) or 0) > 0 else "no"
         contracts   = abs(int(pos.get("position", 0) or 0))
 
         if not ticker or contracts == 0:

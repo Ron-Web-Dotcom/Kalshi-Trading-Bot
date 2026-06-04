@@ -481,33 +481,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             )
 
             if top_live:
-                # Build Discord summary BEFORE execution so alert fires even if one trade fails
-                alert_trades = []
-                for r in top_live:
-                    m  = r["market"]
-                    d  = r["decision"]
-                    alert_trades.append({
-                        "ticker":        m.get("ticker", ""),
-                        "title":         m.get("title", ""),
-                        "platform":      r["platform"],
-                        "side":          r["side"],
-                        "price_cents":   r["price_cents"],
-                        "confidence":    d.get("confidence", 0),
-                        "net_ev":        d.get("net_ev") or 0,
-                        "size_usd":      round(max(min_size, min(
-                                             scaler.current_size * (
-                                                 1.5 if d.get("confidence", 0) >= 90 else
-                                                 1.0 if d.get("confidence", 0) >= 80 else
-                                                 0.5 if d.get("confidence", 0) >= 70 else 0.25
-                                             ), max_size)), 2),
-                        "contracts":     0,  # filled after execute
-                        "reasoning":     d.get("reasoning", ""),
-                        "hours_to_close": m.get("hours_to_close", 0),
-                    })
-
-                await discord.live_trades_alert(alert_trades, mode=mode_label)
-
-                # Execute each live trade
+                # Execute each live trade; collect only the ones that actually went through
+                executed_live_trades = []
                 for r in top_live:
                     if trades_this_cycle >= max_trades + 3:  # live trades get up to 3 extra slots
                         break
@@ -588,6 +563,23 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                             confidence=live_conf, net_ev=live_net_ev,
                             reason=decision.get("reasoning", "")[:200],
                         )
+                        executed_live_trades.append({
+                            "ticker":         live_tick,
+                            "title":          m.get("title", ""),
+                            "platform":       live_platform,
+                            "side":           live_side,
+                            "price_cents":    live_price,
+                            "confidence":     live_conf,
+                            "net_ev":         live_net_ev or 0,
+                            "size_usd":       rec.get("total_cost", live_size),
+                            "contracts":      rec.get("contracts", 0),
+                            "reasoning":      decision.get("reasoning", ""),
+                            "hours_to_close": m.get("hours_to_close", 0),
+                        })
+
+                # Alert only for trades that actually executed (not skipped)
+                if executed_live_trades:
+                    await discord.live_trades_alert(executed_live_trades, mode=mode_label)
 
         # Long-term pool: higher-volume markets (any close time)
         long_term = [
@@ -727,8 +719,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     poly_str = ""
                     if poly_comp:
                         poly_str = (
-                            f" | Poly_YES={poly_comp['poly_yes']:.0f}¢"
-                            f" Poly_NO={poly_comp['poly_no']:.0f}¢"
+                            f" | Poly_YES={poly_comp.get('poly_yes', 0):.0f}¢"
+                            f" Poly_NO={poly_comp.get('poly_no', 0):.0f}¢"
                         )
                     logger.info(
                         "TAKING BEST OPPORTUNITY: %s BUY %s @ %.0f¢ | "

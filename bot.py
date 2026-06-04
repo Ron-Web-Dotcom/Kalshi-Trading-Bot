@@ -481,14 +481,12 @@ class TradingBot:
             from src.alerts.discord import DiscordAlerter
             from src.execution.paper_trader import PaperTrader
             from src.execution.poly_paper_trader import PolyPaperTrader
-            from src.clients.kalshi_client import KalshiClient
 
             await asyncio.sleep(60)   # let ingest and trade loops warm up first
             discord_lm = DiscordAlerter()
             logger.info("Live market manager started — scanning every %ds for in-play opportunities", SCAN_INTERVAL)
             while not self._shutdown.is_set():
                 try:
-                    _kalshi_tmp = KalshiClient()
                     _k_trader = PaperTrader(db=self.db, discord=None, scaler=self.scaler, risk=self.risk)
                     _p_trader = PolyPaperTrader(db=self.db, discord=None, scaler=self.scaler, risk=self.risk)
                     await run_live_manager_cycle(
@@ -500,7 +498,6 @@ class TradingBot:
                         scaler        = self.scaler,
                         risk          = self.risk,
                     )
-                    await _kalshi_tmp.close()
                 except Exception as e:
                     logger.debug("Live manager loop error: %s", e)
                 await asyncio.sleep(SCAN_INTERVAL)

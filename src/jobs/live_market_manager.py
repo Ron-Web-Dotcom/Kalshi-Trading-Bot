@@ -506,8 +506,19 @@ async def run_live_manager_cycle(db, discord, settings, kalshi_trader, poly_trad
         for p in db_positions:
             t = p["ticker"]
             if t not in _live_slots:
-                # Look up close_time from markets table
-                mkt = await db.fetchone("SELECT close_time FROM markets WHERE ticker=?", (t,))
+                # Look up close_time from markets table (works for Kalshi tickers)
+                mkt = await db.fetchone(
+                    "SELECT close_time FROM markets WHERE ticker=? OR ticker LIKE ?",
+                    (t, f"%{t[:20]}%"),
+                )
+                close_time = (mkt or {}).get("close_time") or ""
+                # Fallback: if we can't find close_time, try fetching live from Kalshi API
+                if not close_time and p.get("platform", "kalshi") == "kalshi":
+                    try:
+                        raw = await kalshi._request("GET", f"/markets/{t}")
+                        close_time = (raw.get("market") or raw).get("close_time") or ""
+                    except Exception:
+                        pass
                 _live_slots[t] = {
                     "ticker":      t,
                     "side":        p.get("side", "yes"),
@@ -515,8 +526,9 @@ async def run_live_manager_cycle(db, discord, settings, kalshi_trader, poly_trad
                     "platform":    p.get("platform", "kalshi"),
                     "title":       p.get("title", ""),
                     "contracts":   p.get("contracts", 0),
-                    "close_time":  (mkt or {}).get("close_time", "") if mkt else "",
+                    "close_time":  close_time,
                     "confidence":  0,
+                    "size_usd":    0,
                 }
 
         logger.info("Live slots active: %d/%d", len(_live_slots), MAX_LIVE_POSITIONS)
