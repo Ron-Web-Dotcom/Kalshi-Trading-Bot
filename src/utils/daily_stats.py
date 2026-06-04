@@ -42,6 +42,7 @@ class DailyStats:
         reasoning: str,
         title: str = "",
         platform: str = "kalshi",
+        close_time: str = "",
     ) -> None:
         """Record every AI evaluation — BUY or HOLD — to find best pick of the day."""
         entry = {
@@ -54,6 +55,7 @@ class DailyStats:
             "true_prob":  true_prob,
             "reasoning":  reasoning,
             "platform":   platform,
+            "close_time": close_time,
             "evaluated_at": datetime.now(timezone.utc).isoformat(),
         }
         self.all_evaluations.append(entry)

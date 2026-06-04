@@ -75,6 +75,7 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
             reasoning=decision.reasoning,
             title=market.get("title", ""),
             platform=market.get("platform", "kalshi"),
+            close_time=market.get("close_time", "") or market.get("expiration_time", ""),
         )
     except Exception:
         pass
