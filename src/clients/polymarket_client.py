@@ -224,10 +224,18 @@ class PolymarketTradingClient:
                 m["hours_to_close"] = round(hours_left, 2)
                 live.append(m)
 
-            logger.info(
-                "Polymarket live markets (all categories, closing ≤%.0fh): %d of %d total",
-                max_hours, len(live), len(all_markets),
-            )
+            if not live and all_markets:
+                sample = all_markets[0]
+                logger.warning(
+                    "Polymarket live: 0/%d pass time filter. Sample close_time fields: endDate=%s endDateIso=%s end_date=%s",
+                    len(all_markets),
+                    sample.get("endDate"), sample.get("endDateIso"), sample.get("end_date"),
+                )
+            else:
+                logger.info(
+                    "Polymarket live markets (all categories, closing ≤%.0fh): %d of %d total",
+                    max_hours, len(live), len(all_markets),
+                )
             return live[:max_markets]
         except Exception as e:
             logger.warning("Failed to fetch Polymarket live markets: %s", e)

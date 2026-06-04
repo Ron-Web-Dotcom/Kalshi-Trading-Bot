@@ -274,7 +274,14 @@ async def _fill_slots(
     live_p = [m for m in live_p if m.get("ticker") not in open_tickers and m.get("yes_ask", 0) > 1]
 
     if not live_k and raw_k:
-        logger.warning("Kalshi: %d live markets fetched but all filtered out (0 price or already open)", raw_k)
+        sample = live_k[:1] or []
+        # log a raw sample before filtering to see actual field names
+        raw_sample = (await kalshi.get_all_markets(status="open", max_markets=1, sort_by_close=True) or [None])[0]
+        logger.warning(
+            "Kalshi: %d live markets fetched but all filtered out. Sample keys+prices: %s",
+            raw_k,
+            {k: raw_sample.get(k) for k in ["ticker","yes_ask","no_ask","last_price","yes_bid","no_bid","close_time"]} if raw_sample else "none",
+        )
     if not live_p and raw_p:
         logger.warning("Polymarket: %d live markets fetched but all filtered out (0 price or already open)", raw_p)
     logger.info(
