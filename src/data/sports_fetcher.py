@@ -1,5 +1,5 @@
 """
-Sports data via ESPN's public (unofficial) JSON API — no API key required.
+Sports data via ESPN's public JSON API + SofaScore API — no API key required.
 
 Fetches live/recent scores, standings, and team records to inform AI
 decisions on Kalshi sports markets:
@@ -9,8 +9,9 @@ decisions on Kalshi sports markets:
   "Will the Lakers make the NBA playoffs?"
 
 Endpoints used (all public, no auth):
-  https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/scoreboard
-  https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/standings
+  ESPN:      https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/scoreboard
+  SofaScore: https://api.sofascore.com/api/v1/sport/{sport}/events/live
+             https://api.sofascore.com/api/v1/search/all?q={query}
 """
 
 import logging
@@ -21,8 +22,23 @@ import httpx
 
 logger = logging.getLogger("trading.sports_fetcher")
 
-_TIMEOUT = httpx.Timeout(10.0)
-_BASE    = "https://site.api.espn.com/apis/site/v2/sports"
+_TIMEOUT      = httpx.Timeout(10.0)
+_BASE         = "https://site.api.espn.com/apis/site/v2/sports"
+_SOFA_BASE    = "https://api.sofascore.com/api/v1"
+_SOFA_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept":     "application/json",
+    "Referer":    "https://www.sofascore.com/",
+}
+
+# SofaScore sport slugs
+_SOFA_SPORTS = {
+    "nfl": "american-football", "nba": "basketball", "mlb": "baseball",
+    "nhl": "ice-hockey",        "nba": "basketball", "ufc": "mma",
+    "epl": "football",          "laliga": "football", "bundesliga": "football",
+    "seriea": "football",       "ligue1": "football", "ucl": "football",
+    "uel": "football",          "mls": "football",    "worldcup": "football",
+}
 
 # Supported leagues with ESPN sport/league path
 LEAGUES: Dict[str, Tuple[str, str]] = {
@@ -325,6 +341,70 @@ async def fetch_standings(league: str) -> List[Dict]:
         return []
 
 
+async def fetch_sofa_live(sport_slug: str) -> List[Dict]:
+    """Fetch live events from SofaScore for a sport."""
+    try:
+        url = f"{_SOFA_BASE}/sport/{sport_slug}/events/live"
+        async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_SOFA_HEADERS) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+        events = r.json().get("events") or []
+        results = []
+        for e in events[:20]:
+            home = (e.get("homeTeam") or {}).get("name", "")
+            away = (e.get("awayTeam") or {}).get("name", "")
+            hs   = (e.get("homeScore") or {}).get("current", "")
+            as_  = (e.get("awayScore") or {}).get("current", "")
+            status = (e.get("status") or {}).get("description", "")
+            tournament = (e.get("tournament") or {}).get("name", "")
+            if home and away:
+                results.append({
+                    "home": home, "away": away,
+                    "home_score": hs, "away_score": as_,
+                    "status": status, "tournament": tournament,
+                })
+        return results
+    except Exception as e:
+        logger.debug("SofaScore live fetch failed for %s: %s", sport_slug, e)
+        return []
+
+
+async def fetch_sofa_search(query: str) -> List[Dict]:
+    """Search SofaScore for teams/events matching a query."""
+    try:
+        url = f"{_SOFA_BASE}/search/all"
+        async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_SOFA_HEADERS) as client:
+            r = await client.get(url, params={"q": query[:60]})
+            r.raise_for_status()
+        data = r.json()
+        results = []
+        # Extract team results
+        for team in (data.get("teams") or {}).get("results", [])[:3]:
+            name    = team.get("name", "")
+            country = (team.get("country") or {}).get("name", "")
+            if name:
+                results.append({"type": "team", "name": name, "country": country})
+        # Extract event results
+        for event in (data.get("events") or {}).get("results", [])[:5]:
+            home  = (event.get("homeTeam") or {}).get("name", "")
+            away  = (event.get("awayTeam") or {}).get("name", "")
+            hs    = (event.get("homeScore") or {}).get("current", "")
+            as_   = (event.get("awayScore") or {}).get("current", "")
+            date  = event.get("startTimestamp", "")
+            tourney = (event.get("tournament") or {}).get("name", "")
+            status  = (event.get("status") or {}).get("description", "")
+            if home and away:
+                results.append({
+                    "type": "event", "home": home, "away": away,
+                    "home_score": hs, "away_score": as_,
+                    "status": status, "tournament": tourney,
+                })
+        return results
+    except Exception as e:
+        logger.debug("SofaScore search failed for '%s': %s", query, e)
+        return []
+
+
 async def fetch_sports_context(title: str) -> Optional[str]:
     """
     High-level: detect league + teams from title, fetch scores + standings,
@@ -337,49 +417,76 @@ async def fetch_sports_context(title: str) -> Optional[str]:
     teams = extract_teams(title)
 
     import asyncio
-    scores_task    = fetch_scoreboard(league)
-    standings_task = fetch_standings(league)
-    scores, standings = await asyncio.gather(scores_task, standings_task, return_exceptions=True)
+    sofa_sport   = _SOFA_SPORTS.get(league, "football")
+    # Extract search keywords from title for SofaScore search
+    title_words  = " ".join(w for w in title.split() if len(w) > 3)[:60]
 
-    if isinstance(scores, Exception):
-        scores = []
-    if isinstance(standings, Exception):
-        standings = []
+    scores, standings, sofa_live, sofa_search = await asyncio.gather(
+        fetch_scoreboard(league),
+        fetch_standings(league),
+        fetch_sofa_live(sofa_sport),
+        fetch_sofa_search(title_words),
+        return_exceptions=True,
+    )
+
+    if isinstance(scores, Exception):    scores = []
+    if isinstance(standings, Exception): standings = []
+    if isinstance(sofa_live, Exception): sofa_live = []
+    if isinstance(sofa_search, Exception): sofa_search = []
 
     lines = [f"Sports context ({league.upper()}):"]
 
-    # Filter scores to only games involving our teams (or show last 5 if no match)
+    # ── ESPN scores ───────────────────────────────────────────────────────────
     if scores:
         relevant = [g for g in scores if g["home_team"] in teams or g["away_team"] in teams]
         shown    = relevant or scores[:5]
-        lines.append("  Recent/live scores:")
+        lines.append("  ESPN — Recent/live scores:")
         for g in shown:
-            status = g["status"]
-            if g["completed"]:
+            result = "Final" if g["completed"] else g["status"]
+            lines.append(
+                f"    {g['away_team']} {g['away_score']} @ {g['home_team']} {g['home_score']}  [{result}]"
+            )
+
+    # ── SofaScore live events ─────────────────────────────────────────────────
+    if sofa_live:
+        title_lower = title.lower()
+        relevant_live = [
+            e for e in sofa_live
+            if any(t.lower() in (e["home"] + e["away"]).lower() for t in (teams or [""]))
+            or any(kw in (e["home"] + e["away"]).lower() for kw in title_lower.split()[:4])
+        ]
+        shown_live = relevant_live or sofa_live[:5]
+        if shown_live:
+            lines.append("  SofaScore — Live now:")
+            for e in shown_live[:6]:
                 lines.append(
-                    f"    {g['away_team']} {g['away_score']} @ {g['home_team']} {g['home_score']}  [Final]"
-                )
-            else:
-                lines.append(
-                    f"    {g['away_team']} {g['away_score']} @ {g['home_team']} {g['home_score']}  [{status}]"
+                    f"    {e['away']} {e['away_score']} @ {e['home']} {e['home_score']}"
+                    f"  [{e['status']}]  ({e['tournament']})"
                 )
 
-    # Filter standings to teams we care about
+    # ── SofaScore search results ──────────────────────────────────────────────
+    if sofa_search:
+        event_results = [r for r in sofa_search if r.get("type") == "event"]
+        if event_results:
+            lines.append("  SofaScore — Matching events:")
+            for e in event_results[:4]:
+                lines.append(
+                    f"    {e['away']} {e['away_score']} @ {e['home']} {e['home_score']}"
+                    f"  [{e['status']}]  ({e['tournament']})"
+                )
+
+    # ── ESPN standings ────────────────────────────────────────────────────────
     if standings and teams:
         relevant_standings = [s for s in standings if s["team"] in teams]
         if relevant_standings:
-            lines.append("  Standings for relevant teams:")
+            lines.append("  ESPN Standings (relevant teams):")
             for s in relevant_standings:
-                stat_str = "  ".join(
-                    f"{k}:{v}" for k, v in list(s["stats"].items())[:5]
-                )
+                stat_str = "  ".join(f"{k}:{v}" for k, v in list(s["stats"].items())[:5])
                 lines.append(f"    {s['team']}: {stat_str}")
     elif standings and not teams:
-        lines.append("  League standings (top 5):")
+        lines.append("  ESPN Standings (top 5):")
         for s in standings[:5]:
-            stat_str = "  ".join(
-                f"{k}:{v}" for k, v in list(s["stats"].items())[:3]
-            )
+            stat_str = "  ".join(f"{k}:{v}" for k, v in list(s["stats"].items())[:3])
             lines.append(f"    {s['team']}: {stat_str}")
 
     return "\n".join(lines) if len(lines) > 1 else None
