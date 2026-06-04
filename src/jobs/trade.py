@@ -106,6 +106,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
     )
     open_count   = len(open_positions_rows)
     open_tickers = {p["ticker"] for p in open_positions_rows}
+    # Also block by normalized title so the same question on a different platform is skipped
+    open_titles  = {(p.get("title") or "").strip().lower() for p in open_positions_rows if p.get("title")}
     if open_count > 0:
         logger.info("── Open Positions (%d) ──────────────────────────────────────────", open_count)
         for _p in open_positions_rows:
@@ -346,6 +348,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     m for m in raw_poly
                     if m.get("yes_ask", 0) > 1
                     and m.get("ticker") not in open_tickers
+                    and (m.get("title") or "").strip().lower() not in open_titles
                 ][:max_scan]
                 logger.info("Polymarket: %d markets stored, %d tradeable",
                             len(raw_poly), len(poly_markets))
@@ -395,11 +398,17 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             ask = m.get("yes_ask", 0) or 0
             return ask if ask > 0 else (m.get("last_price", 0) or 0)
 
+        def _already_open(m):
+            if m.get("ticker") in open_tickers:
+                return True
+            t = (m.get("title") or "").strip().lower()
+            return bool(t and t in open_titles)
+
         # Long-term pool: higher-volume markets (any close time)
         long_term = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
-            and m.get("ticker") not in open_tickers
+            and not _already_open(m)
             and 2 < _tradeable_price(m) < 98
             and m.get("volume", 0) >= min_vol
             and (m.get("title") or "")
@@ -409,7 +418,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         short_term = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
-            and m.get("ticker") not in open_tickers
+            and not _already_open(m)
             and 2 < _tradeable_price(m) < 98
             and m.get("ticker") not in {x.get("ticker") for x in long_term}
             and _closes_within(m, 24)
