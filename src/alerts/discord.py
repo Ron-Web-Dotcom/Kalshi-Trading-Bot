@@ -927,7 +927,18 @@ class DiscordAlerter:
                 "inline": False,
             })
 
-        # All currently open positions
+        # All currently open positions — deduplicate same trade stored under two tickers
+        if open_positions:
+            _seen: set = set()
+            _deduped_open = []
+            for p in open_positions:
+                _key = (p.get("platform",""), p.get("side",""), p.get("contracts",0),
+                        round(float(p.get("avg_price") or 0)),
+                        (p.get("title") or p.get("ticker",""))[:40])
+                if _key not in _seen:
+                    _seen.add(_key)
+                    _deduped_open.append(p)
+            open_positions = _deduped_open
         if open_positions:
             lines = []
             total_unrealised = 0.0
