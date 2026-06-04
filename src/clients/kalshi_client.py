@@ -169,9 +169,8 @@ class KalshiClient:
 
     async def get_live_markets(self, max_hours: float = 3.0, max_markets: int = 60) -> List[Dict]:
         """
-        Fetch Kalshi "happening now" in-play markets — those closing within max_hours.
-        These are short-duration sports/event markets resolving in minutes or hours.
-        Returns normalised market dicts with is_live=True flag.
+        Fetch Kalshi in-play markets closing within max_hours.
+        Enriches price-less markets using last_price or individual market detail.
         """
         try:
             markets = await self.get_all_markets(status="open", max_markets=500, sort_by_close=True)
@@ -184,14 +183,36 @@ class KalshiClient:
                     if close_dt.tzinfo is None:
                         close_dt = close_dt.replace(tzinfo=timezone.utc)
                     hours_left = (close_dt - now).total_seconds() / 3600
-                    if 0 < hours_left <= max_hours:
-                        m["is_live"] = True
-                        m["hours_to_close"] = round(hours_left, 2)
-                        live.append(m)
+                    if not (0 < hours_left <= max_hours):
+                        continue
                 except Exception:
                     continue
-            logger.info("Kalshi live markets (closing ≤%.0fh): %d of %d total", max_hours, len(live), len(markets))
-            return live[:max_markets]
+
+                # Enrich price if yes_ask is missing
+                if not float(m.get("yes_ask") or 0):
+                    last_p = float(m.get("last_price") or 0)
+                    if last_p > 0:
+                        m["yes_ask"] = last_p
+                        m["no_ask"]  = round(100.0 - last_p, 1)
+                    else:
+                        try:
+                            detail = await self._request("GET", f"/markets/{m['ticker']}")
+                            md = detail.get("market") or detail
+                            m["yes_ask"] = float(md.get("yes_ask") or md.get("last_price") or 0)
+                            m["no_ask"]  = float(md.get("no_ask") or 0) or round(100.0 - m["yes_ask"], 1)
+                        except Exception:
+                            pass
+
+                m["is_live"]       = True
+                m["hours_to_close"] = round(hours_left, 2)
+                live.append(m)
+
+            priced = [m for m in live if float(m.get("yes_ask") or 0) > 0]
+            logger.info(
+                "Kalshi live markets (closing ≤%.0fh): %d total, %d with valid price",
+                max_hours, len(live), len(priced),
+            )
+            return priced[:max_markets]
         except Exception as e:
             logger.warning("Failed to fetch Kalshi live markets: %s", e)
             return []

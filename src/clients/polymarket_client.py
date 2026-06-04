@@ -209,49 +209,33 @@ class PolymarketTradingClient:
 
     async def get_live_markets(self, max_hours: float = 6.0, max_markets: int = 60) -> List[Dict]:
         """
-        Fetch ALL active Polymarket markets closing within max_hours — every category.
-        Reuses the same reliable fetch path as get_markets() then filters by close time.
+        Fetch active Polymarket markets. Polymarket markets resolve weeks/months out
+        so we ignore close_time and just return active markets with valid prices.
         """
-        from datetime import datetime, timezone
         try:
-            # Use the same pagination approach as get_markets for reliability
             all_markets = await self.get_markets(limit=500)
             if not all_markets:
-                logger.info("Polymarket live markets: get_markets returned 0 — API may be down")
+                logger.warning("Polymarket live markets: get_markets returned 0 — API may be down")
                 return []
 
-            now  = datetime.now(timezone.utc)
-            live = []
-            for m in all_markets:
-                ct = m.get("close_time") or ""
-                if not ct:
-                    continue
-                try:
-                    close_dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
-                    if close_dt.tzinfo is None:
-                        close_dt = close_dt.replace(tzinfo=timezone.utc)
-                    hours_left = (close_dt - now).total_seconds() / 3600
-                    if not (0 < hours_left <= max_hours):
-                        continue
-                except Exception:
-                    continue
-                m["is_live"]       = True
-                m["hours_to_close"] = round(hours_left, 2)
-                live.append(m)
+            # Filter to markets with a valid price and title
+            live = [
+                m for m in all_markets
+                if (m.get("yes_ask") or 0) > 1
+                and (m.get("title") or "")
+            ]
 
             if not live and all_markets:
                 sample = all_markets[0]
                 logger.warning(
-                    "Polymarket live: 0/%d pass time filter. Sample: close_time=%r yes_ask=%.1f title=%s",
+                    "Polymarket live: 0/%d have valid price. Sample: close_time=%r yes_ask=%.1f title=%s",
                     len(all_markets),
                     sample.get("close_time"), sample.get("yes_ask", 0),
                     (sample.get("title") or "")[:60],
                 )
             else:
-                logger.info(
-                    "Polymarket live markets (all categories, closing ≤%.0fh): %d of %d total",
-                    max_hours, len(live), len(all_markets),
-                )
+                logger.info("Polymarket live markets: %d of %d active with valid price", len(live), len(all_markets))
+
             return live[:max_markets]
         except Exception as e:
             logger.warning("Failed to fetch Polymarket live markets: %s", e)
