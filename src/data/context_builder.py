@@ -130,7 +130,7 @@ def _news_keywords(title: str) -> List[str]:
 async def build_market_context(
     market: Dict,
     include_community: bool = False,
-    timeout_seconds: float = 6.0,
+    timeout_seconds: float = 10.0,
 ) -> str:
     """
     Build a real-world context block for ANY Kalshi market.
@@ -188,7 +188,7 @@ async def build_market_context(
         tasks["economics"] = fetch_economic_context(title)
 
     # News: always fetch — relevant to every market type
-    tasks["headlines"] = fetch_headlines(news_kws, category=category, max_headlines=5)
+    tasks["headlines"] = fetch_headlines(news_kws, category=category, max_headlines=8)
 
     # Metaculus: optional community prediction
     if include_community:

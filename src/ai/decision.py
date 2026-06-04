@@ -170,32 +170,45 @@ class AIDecisionEngine:
         _no_price_warn = ""
         if not context and any(k in title.lower() for k in ["bitcoin", "btc", "eth", "crypto", "price", "$"]):
             _no_price_warn = "\n⚠️ WARNING: Live price fetch failed — your training data prices may be STALE. Do NOT cite specific prices unless you are certain they are current. Be extra conservative."
-        context_block  = f"\n\n--- REAL-WORLD CONTEXT ---\n{context}\n--- END CONTEXT ---" if context else _no_price_warn
+        context_block  = f"\n\n--- REAL-WORLD CONTEXT (live data fetched right now) ---\n{context}\n--- END CONTEXT ---" if context else _no_price_warn
         bot_block      = f"\n\n{bot_context}" if bot_context else ""
+        no_context_warning = "\n⚠️ NO LIVE DATA AVAILABLE — default confidence to ≤ 50. Do NOT guess." if not context else ""
 
-        return f"""You are an expert quantitative prediction market trader. Your ONLY goal is to find bets where your estimated true probability beats the market price by enough to profit after fees.
+        return f"""You are a professional prediction market trader managing real money. Your job is to find high-conviction bets backed by real-world evidence — NOT to trade for the sake of trading.
+
+GOLDEN RULE: A confident HOLD is always better than a weak BUY. Cash is a position.
+MINIMUM BAR: Only BUY when you have specific, verifiable facts that justify your probability estimate.
+TARGET: Reach confidence 75–100 only when real-world data clearly supports it. Never inflate confidence.
 
 === MARKET ===
 Ticker:   {ticker}
 Question: {title}
 Closes:   {close_time}
 
-=== KALSHI PRICES (cents — market pays 100¢ on correct resolution) ===
-YES ask: {yes_ask:.0f}¢  → Kalshi implies {yes_ask:.0f}% YES probability
-NO ask:  {no_ask:.0f}¢  → Kalshi implies {no_ask:.0f}% NO probability
+=== CURRENT MARKET PRICES ===
+YES ask: {yes_ask:.0f}¢  → market implies {yes_ask:.0f}% chance of YES
+NO ask:  {no_ask:.0f}¢  → market implies {no_ask:.0f}% chance of NO
 Spread:  {spread:.0f}¢  |  Volume: {volume:,}  |  Liquidity: {liquidity}
 {poly_block}
-=== EXPECTED VALUE on Kalshi (per contract, after 2% fee) ===
-BUY YES @ {yes_ask:.0f}¢ → win {yes_ev_if_true:.1f}¢ if YES  |  lose {yes_ask:.0f}¢ if NO  |  break-even P(YES) = {yes_ask/98*100:.1f}%
-BUY NO  @ {no_ask:.0f}¢ → win {no_ev_if_true:.1f}¢ if NO   |  lose {no_ask:.0f}¢ if YES |  break-even P(NO)  = {no_ask/98*100:.1f}%
-{arb_text}{context_block}{bot_block}
+=== EXPECTED VALUE (per contract, after 2% Kalshi fee) ===
+BUY YES @ {yes_ask:.0f}¢ → profit {yes_ev_if_true:.1f}¢ if YES resolves  |  lose {yes_ask:.0f}¢ if NO  |  break-even = {yes_ask/98*100:.1f}% true prob
+BUY NO  @ {no_ask:.0f}¢ → profit {no_ev_if_true:.1f}¢ if NO resolves   |  lose {no_ask:.0f}¢ if YES |  break-even = {no_ask/98*100:.1f}% true prob
+{arb_text}{context_block}{bot_block}{no_context_warning}
+
+=== HOW TO SCORE CONFIDENCE ===
+90–100% → You have direct, current, unambiguous data (live score, official result, real-time price)
+75–89%  → Strong evidence from multiple sources clearly pointing one way
+60–74%  → Good evidence but some uncertainty remains
+50–59%  → Weak evidence or conflicting signals — lean HOLD
+< 50%   → No real edge — always HOLD
 
 === YOUR TASK ===
-Step 1 — Use the real-world context AND the Polymarket cross-reference (if present) to estimate TRUE P(YES).
-         Polymarket having a significantly different price is a strong signal one platform is wrong.
-Step 2 — Compute net EV = (your_true_prob/100 - kalshi_price/100) × 98¢  for the better side.
-Step 3 — BUY if: net_ev > 0¢  AND  price between 5–95¢  AND  your true_prob clearly differs from market price.
-Step 4 — HOLD if context contradicts your estimate or you genuinely have no edge. If edge exists, BUY.
+Step 1 — Read the REAL-WORLD CONTEXT carefully. Extract every specific fact relevant to this question.
+Step 2 — Estimate TRUE P(YES) based ONLY on those facts. If context is missing, default to 50%.
+Step 3 — Check Polymarket price (if shown) — large gaps between platforms signal mispricing.
+Step 4 — Compute net EV = (true_prob/100 - market_price/100) × 98¢ for the better side.
+Step 5 — BUY only if: net_ev > 2¢ AND confidence ≥ {self.trading_cfg.min_ai_confidence:.0f}% AND you can cite specific facts.
+Step 6 — HOLD if: no strong evidence, conflicting data, context missing, or EV is marginal.
 
 Respond ONLY with this exact JSON (no markdown):
 {{
@@ -203,16 +216,16 @@ Respond ONLY with this exact JSON (no markdown):
   "action": "BUY" | "HOLD",
   "side": "yes" | "no" | null,
   "net_ev_cents": <expected profit per contract after fee, negative = unfavourable>,
-  "confidence": <integer 0-100 — certainty in your true_prob estimate>,
-  "reasoning": "<2-3 sentences citing specific facts that drove your estimate>"
+  "confidence": <integer 0-100 — how certain you are in your true_prob, based on evidence quality>,
+  "reasoning": "<3-4 sentences. Quote specific facts from context. State what evidence drove your estimate and what would change your mind.>"
 }}
 
-Rules:
-- true_prob must be driven by FACTS from context, not gut feel. No context = be very conservative.
-- Polymarket price divergence is a useful signal but not sufficient alone — check the real-world data.
-- confidence = certainty in your probability, not excitement about the trade
-- confidence ≥ {self.trading_cfg.min_ai_confidence:.0f} required to place a trade
-- HOLD only when you genuinely see no edge or context directly contradicts the bet"""
+HARD RULES — violating these means a bad trade:
+- confidence must reflect EVIDENCE QUALITY, not how exciting the trade looks
+- No context available = confidence ≤ 50, action = HOLD
+- If Polymarket and Kalshi agree on price, there's likely no edge — be skeptical
+- Minimum net_ev to BUY = 2¢ (small edges get eaten by variance)
+- confidence ≥ {self.trading_cfg.min_ai_confidence:.0f} required — if you can't reach it, HOLD and say why"""
 
     async def decide(self, market: Dict, signals: List[Dict] = []) -> AIDecision:
         ticker = market.get("ticker", "UNKNOWN")
@@ -269,10 +282,10 @@ Rules:
             if side not in ("yes", "no"):
                 side = "yes"
 
-            # Reject zero/negative EV — any positive edge is acceptable
-            if action == "BUY" and net_ev is not None and net_ev <= 0:
+            # Reject low/negative EV — need at least 2¢ edge to overcome variance
+            if action == "BUY" and net_ev is not None and net_ev < 2.0:
                 action = "HOLD"
-                reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ ≤ 0] " + reasoning
+                reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < 2¢ minimum] " + reasoning
 
             # Reject physically impossible EV given the market price
             if action == "BUY" and net_ev is not None:
