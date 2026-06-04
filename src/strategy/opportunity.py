@@ -263,6 +263,10 @@ class OpportunityHunter:
             )
 
             if action != "BUY" or conf < min_confidence or net_ev <= 0:
+                logger.info(
+                    "  [LIVE-SKIP] %-36s action=%s conf=%d%% ev=%.1f¢ (need BUY+conf≥%d%%+ev>0)",
+                    (market.get("title") or ticker)[:36], action, conf, net_ev, min_confidence,
+                )
                 continue
 
             score     = score_opportunity(market, decision)
