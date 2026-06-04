@@ -457,13 +457,43 @@ class TradingBot:
         signal.signal(signal.SIGINT,  _on_signal)
         signal.signal(signal.SIGTERM, _on_signal)
 
+        async def discord_command_loop():
+            """Poll Discord for bot commands every 10 seconds."""
+            from src.utils.discord_commands import DiscordCommandListener
+            listener = DiscordCommandListener(db=self.db)
+            if not listener.enabled:
+                logger.info("Discord commands disabled — set DISCORD_BOT_TOKEN + DISCORD_COMMAND_CHANNEL_ID in .env to enable")
+                return
+            logger.info("Discord command listener active — type !help in your channel")
+            while not self._shutdown.is_set():
+                try:
+                    await listener.poll_and_execute()
+                except Exception as e:
+                    logger.debug("Discord command poll error: %s", e)
+                await asyncio.sleep(10)
+
+        async def manual_trade_monitor_loop():
+            """Check for user-placed manual trades every 60 seconds (live mode only)."""
+            from src.jobs.manual_trade_monitor import check_manual_trades
+            from src.alerts.discord import DiscordAlerter
+            await asyncio.sleep(30)
+            while not self._shutdown.is_set():
+                try:
+                    discord = DiscordAlerter()
+                    await check_manual_trades(db=self.db, discord=discord)
+                except Exception as e:
+                    logger.debug("Manual trade monitor error: %s", e)
+                await asyncio.sleep(60)
+
         tasks = [
-            asyncio.create_task(ingest_loop(),           name="ingest"),
-            asyncio.create_task(track_loop(),            name="track"),
-            asyncio.create_task(trade_loop(),            name="trade"),
-            asyncio.create_task(hourly_heartbeat_loop(), name="hourly_heartbeat"),
-            asyncio.create_task(daytime_summary_loop(),  name="daytime_summary"),
-            asyncio.create_task(daily_summary_loop(),    name="daily_summary"),
+            asyncio.create_task(ingest_loop(),                name="ingest"),
+            asyncio.create_task(track_loop(),                 name="track"),
+            asyncio.create_task(trade_loop(),                 name="trade"),
+            asyncio.create_task(hourly_heartbeat_loop(),      name="hourly_heartbeat"),
+            asyncio.create_task(daytime_summary_loop(),       name="daytime_summary"),
+            asyncio.create_task(daily_summary_loop(),         name="daily_summary"),
+            asyncio.create_task(discord_command_loop(),       name="discord_commands"),
+            asyncio.create_task(manual_trade_monitor_loop(),  name="manual_trade_monitor"),
         ]
 
         await self._shutdown.wait()
