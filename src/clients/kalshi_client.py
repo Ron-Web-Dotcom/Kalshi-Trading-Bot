@@ -167,14 +167,61 @@ class KalshiClient:
 
         return markets[:max_markets]
 
-    async def get_live_markets(self, max_hours: float = 3.0, max_markets: int = 60) -> List[Dict]:
+    async def get_live_markets(self, max_hours: float = 3.0, max_markets: int = 60,
+                               db=None) -> List[Dict]:
         """
-        Fetch Kalshi in-play markets closing within max_hours.
-        Uses yes_ask → last_price → yes_bid fallback chain for price.
+        Return Kalshi markets closing within max_hours.
+        If db is provided, queries the DB (has enriched prices from ingest).
+        Falls back to API with yes_ask→last_price→yes_bid price chain.
         """
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        cutoff = (now.replace(tzinfo=timezone.utc)
+                  if now.tzinfo else now.replace(tzinfo=timezone.utc))
+
+        # ── DB path (preferred — prices already enriched by ingest job) ──────
+        if db is not None:
+            try:
+                cutoff_iso = now.isoformat()
+                max_iso    = (now.replace(hour=0, minute=0, second=0, microsecond=0)
+                              .__class__.fromisoformat(cutoff_iso))  # keep tz
+                import datetime as _dt
+                max_close  = (now + _dt.timedelta(hours=max_hours)).isoformat()
+                rows = await db.fetchall(
+                    """SELECT ticker, title, category, yes_ask, no_ask, yes_bid, no_bid,
+                              last_price, volume, close_time, platform
+                       FROM markets
+                       WHERE (platform='kalshi' OR platform IS NULL)
+                         AND status='open'
+                         AND close_time > ? AND close_time <= ?
+                         AND (yes_ask > 1 OR last_price > 1 OR yes_bid > 1)
+                       ORDER BY close_time ASC
+                       LIMIT ?""",
+                    (cutoff_iso, max_close, max_markets),
+                )
+                live = []
+                for r in (rows or []):
+                    m = dict(r)
+                    yes_ask = float(m.get("yes_ask") or 0)
+                    if not yes_ask:
+                        yes_ask = float(m.get("last_price") or 0)
+                    if not yes_ask:
+                        yes_ask = float(m.get("yes_bid") or 0)
+                    no_ask = float(m.get("no_ask") or 0) or round(100.0 - yes_ask, 1)
+                    close_dt = datetime.fromisoformat(str(m["close_time"]).replace("Z", "+00:00"))
+                    hours_left = (close_dt - now).total_seconds() / 3600
+                    m.update(yes_ask=yes_ask, no_ask=no_ask, is_live=True,
+                             hours_to_close=round(hours_left, 2), platform="kalshi")
+                    live.append(m)
+                logger.info("Kalshi live markets (DB, ≤%.0fh): %d with price", max_hours, len(live))
+                if live:
+                    return live
+            except Exception as e:
+                logger.warning("Kalshi live DB query failed, falling back to API: %s", e)
+
+        # ── API fallback ──────────────────────────────────────────────────────
         try:
             markets = await self.get_all_markets(status="open", max_markets=500, sort_by_close=True)
-            now = datetime.now(timezone.utc)
             live, no_price = [], 0
             for m in markets:
                 ct = m.get("close_time") or ""
@@ -187,32 +234,15 @@ class KalshiClient:
                         continue
                 except Exception:
                     continue
-
-                # Price fallback chain: yes_ask → last_price → yes_bid → no_ask derived
-                yes_ask = float(m.get("yes_ask") or 0)
-                no_ask  = float(m.get("no_ask")  or 0)
-                if not yes_ask:
-                    yes_ask = float(m.get("last_price") or 0)
-                if not yes_ask:
-                    yes_ask = float(m.get("yes_bid") or 0)
-                if not no_ask and yes_ask:
-                    no_ask = round(100.0 - yes_ask, 1)
-                if not yes_ask and no_ask:
-                    yes_ask = round(100.0 - no_ask, 1)
-
+                yes_ask = float(m.get("yes_ask") or m.get("last_price") or m.get("yes_bid") or 0)
+                no_ask  = float(m.get("no_ask") or 0) or round(100.0 - yes_ask, 1)
                 if yes_ask > 0:
-                    m["yes_ask"] = yes_ask
-                    m["no_ask"]  = no_ask
-                    m["is_live"]       = True
-                    m["hours_to_close"] = round(hours_left, 2)
+                    m.update(yes_ask=yes_ask, no_ask=no_ask, is_live=True,
+                             hours_to_close=round(hours_left, 2))
                     live.append(m)
                 else:
                     no_price += 1
-
-            logger.info(
-                "Kalshi live markets (closing ≤%.0fh): %d with price, %d skipped (no price)",
-                max_hours, len(live), no_price,
-            )
+            logger.info("Kalshi live (API, ≤%.0fh): %d with price, %d no price", max_hours, len(live), no_price)
             return live[:max_markets]
         except Exception as e:
             logger.warning("Failed to fetch Kalshi live markets: %s", e)

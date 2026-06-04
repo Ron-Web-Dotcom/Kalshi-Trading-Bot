@@ -234,7 +234,7 @@ async def _fill_slots(
     # Fetch live markets from BOTH platforms — all categories, any close time ≤ LIVE_WINDOW_HOURS
     live_k, live_p = [], []
     try:
-        live_k = await kalshi.get_live_markets(max_hours=LIVE_WINDOW_HOURS, max_markets=60)
+        live_k = await kalshi.get_live_markets(max_hours=LIVE_WINDOW_HOURS, max_markets=60, db=db)
         if not live_k:
             logger.warning("Kalshi live fetch: 0 markets in %.1fh window — no in-play Kalshi markets right now", LIVE_WINDOW_HOURS)
         else:
