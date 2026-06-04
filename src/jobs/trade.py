@@ -464,6 +464,131 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     lm.get("hours_to_close", 0), lm.get("yes_ask", 0),
                 )
 
+        # Hoist sizing constants so both live pass and regular pass can use them
+        min_size = settings.trading.min_trade_size_dollars
+        max_size = settings.trading.max_trade_size_dollars
+
+        # ── LIVE TRADING PASS: top 3 confident picks from in-play markets ───────
+        all_live = live_kalshi + live_poly
+        if all_live:
+            live_hunter = OpportunityHunter(db=db)
+            top_live = await live_hunter.find_top_live(
+                live_markets   = all_live,
+                arb_signals    = all_signals,
+                min_confidence = settings.trading.min_ai_confidence,
+                top_n          = 3,
+                ai_eval_n      = min(6, len(all_live)),
+            )
+
+            if top_live:
+                # Build Discord summary BEFORE execution so alert fires even if one trade fails
+                alert_trades = []
+                for r in top_live:
+                    m  = r["market"]
+                    d  = r["decision"]
+                    alert_trades.append({
+                        "ticker":        m.get("ticker", ""),
+                        "title":         m.get("title", ""),
+                        "platform":      r["platform"],
+                        "side":          r["side"],
+                        "price_cents":   r["price_cents"],
+                        "confidence":    d.get("confidence", 0),
+                        "net_ev":        d.get("net_ev") or 0,
+                        "size_usd":      round(max(min_size, min(
+                                             scaler.current_size * (
+                                                 1.5 if d.get("confidence", 0) >= 90 else
+                                                 1.0 if d.get("confidence", 0) >= 80 else
+                                                 0.5 if d.get("confidence", 0) >= 70 else 0.25
+                                             ), max_size)), 2),
+                        "contracts":     0,  # filled after execute
+                        "reasoning":     d.get("reasoning", ""),
+                        "hours_to_close": m.get("hours_to_close", 0),
+                    })
+
+                await discord.live_trades_alert(alert_trades, mode=mode_label)
+
+                # Execute each live trade
+                for r in top_live:
+                    if trades_this_cycle >= max_trades + 3:  # live trades get up to 3 extra slots
+                        break
+                    m        = r["market"]
+                    decision = r["decision"]
+                    live_side  = r["side"]
+                    live_price = r["price_cents"]
+                    live_tick  = m.get("ticker", "")
+                    live_net_ev = decision.get("net_ev")
+
+                    # Skip if already open
+                    if _already_open(m):
+                        continue
+
+                    # Profit gate (relaxed for live)
+                    live_conf = float(decision.get("confidence", 0))
+                    live_base = scaler.current_size
+                    live_mult = (1.5 if live_conf >= 90 else
+                                 1.0 if live_conf >= 80 else
+                                 0.5 if live_conf >= 70 else 0.25)
+                    live_size = round(max(min_size, min(live_base * live_mult, max_size)), 2)
+                    live_contracts = (live_size / (live_price / 100)) if live_price > 0 else 0
+                    live_exp_profit = live_contracts * (live_net_ev / 100) if live_net_ev else None
+                    live_roi = (live_exp_profit / live_size * 100) if (live_exp_profit and live_size) else None
+                    live_min_roi = max(2.0, settings.trading.min_profit_roi_pct * 0.4)
+                    live_min_abs = max(0.50, settings.trading.min_profit_abs_usd * 0.5)
+
+                    if live_exp_profit is None or live_exp_profit < live_min_abs or (live_roi or 0) < live_min_roi:
+                        logger.info(
+                            "LIVE SKIP %s — profit gate: $%.2f (%.1f%% ROI) < min $%.2f / %.1f%%",
+                            live_tick, live_exp_profit or 0, live_roi or 0,
+                            live_min_abs, live_min_roi,
+                        )
+                        results.skipped += 1
+                        daily_stats.record_skip("live_profit_gate")
+                        continue
+
+                    live_allowed, live_reason = risk.check_trade(
+                        live_tick, scaler.current_size,
+                        current_positions=[], portfolio_value=portfolio_val,
+                    )
+                    if not live_allowed:
+                        logger.info("LIVE SKIP %s — risk gate: %s", live_tick, live_reason)
+                        results.skipped += 1
+                        daily_stats.record_skip(f"live_risk_gate:{live_reason}")
+                        continue
+
+                    live_platform = r["platform"]
+                    active_trader = kalshi_trader if live_platform == "kalshi" else poly_trader
+                    logger.info(
+                        "LIVE TRADE: [%s] %s BUY %s @ %.0f¢ | conf=%d%% EV=%.1f¢ size=$%.2f",
+                        live_platform.upper(), live_tick, live_side.upper(), live_price,
+                        live_conf, live_net_ev or 0, live_size,
+                    )
+                    rec = await active_trader.execute(
+                        ticker=live_tick,
+                        action=decision["action"],
+                        side=live_side,
+                        price_cents=live_price,
+                        ai_confidence=live_conf,
+                        ai_reasoning=decision["reasoning"],
+                        signal_source="live_scan",
+                        net_ev=live_net_ev,
+                        market_title=m.get("title", ""),
+                        **({"poly_token_id": m.get("_yes_token") if live_side == "yes" else m.get("_no_token")}
+                           if live_platform == "polymarket" else {}),
+                    )
+                    if rec:
+                        trades_this_cycle += 1
+                        results.total_positions += 1
+                        results.total_capital_used += rec.get("total_cost", 0)
+                        results.ai_trades += 1
+                        open_tickers.add(live_tick)  # prevent duplicate in same cycle
+                        await auditor.log(
+                            db, "TRADE_PLACED", ticker=live_tick, platform=live_platform,
+                            side=live_side, price_cents=live_price,
+                            size_usd=rec.get("total_cost", 0),
+                            confidence=live_conf, net_ev=live_net_ev,
+                            reason=decision.get("reasoning", "")[:200],
+                        )
+
         # Long-term pool: higher-volume markets (any close time)
         long_term = [
             m for m in markets
@@ -538,8 +663,6 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             #   90–100% → max size   (150% of base, capped) — very high conviction
             confidence = float(decision.get("confidence", 0))
             base       = scaler.current_size
-            min_size   = settings.trading.min_trade_size_dollars
-            max_size   = settings.trading.max_trade_size_dollars
             if confidence >= 90:
                 size_multiplier = 1.5
                 size_tier       = "MAX (90%+ conf)"

@@ -205,3 +205,92 @@ class OpportunityHunter:
 
         logger.info("No opportunity cleared min_score=%.2f — sitting out", min_score)
         return None
+
+    async def find_top_live(
+        self,
+        live_markets:  List[Dict],
+        arb_signals:   List[Dict],
+        min_confidence: float = 70.0,
+        top_n:          int   = 3,
+        ai_eval_n:      int   = 6,
+    ) -> List[Dict]:
+        """
+        Scan all live in-play markets, run AI on the best ai_eval_n by pre-score,
+        and return up to top_n results that clear min_confidence.
+        Used for the dedicated live trading pass.
+        """
+        from src.jobs.decide import make_decision_for_market
+
+        if not live_markets:
+            return []
+
+        # Pre-score — give live markets an extra boost for being time-sensitive
+        prescored = []
+        for market in live_markets:
+            yes_ask = float(market.get("yes_ask") or market.get("last_price") or 0)
+            title   = market.get("title", "")
+            if yes_ask <= 1 or yes_ask >= 99:
+                continue
+            if not title or len(title) < 5 or title.startswith("0x"):
+                continue
+            pre = _pre_score(market) * 1.5   # live boost
+            prescored.append((pre, market))
+
+        prescored.sort(key=lambda x: x[0], reverse=True)
+        logger.info(
+            "── LIVE SCAN: %d markets pre-scored, sending top %d to AI ──",
+            len(prescored), min(ai_eval_n, len(prescored)),
+        )
+
+        results = []
+        for pre_score, market in prescored[:ai_eval_n]:
+            ticker = market.get("ticker", "")
+            try:
+                decision = await make_decision_for_market(market, arb_signals, db=self.db)
+            except Exception as e:
+                logger.debug("Live AI eval failed for %s: %s", ticker, e)
+                continue
+            if not decision:
+                continue
+
+            conf   = float(decision.get("confidence", 0))
+            net_ev = decision.get("net_ev") or 0.0
+            action = decision.get("action", "HOLD")
+
+            logger.info(
+                "  [LIVE-AI] %-36s conf=%d%% ev=%.1f¢ → %s",
+                (market.get("title") or ticker)[:36], conf, net_ev, action,
+            )
+
+            if action != "BUY" or conf < min_confidence or net_ev <= 0:
+                continue
+
+            score     = score_opportunity(market, decision)
+            yes_ask   = float(market.get("yes_ask") or market.get("last_price") or 0)
+            no_ask    = float(market.get("no_ask")  or (100 - yes_ask))
+            side      = decision.get("side", "yes")
+            price_cents = yes_ask if side == "yes" else no_ask
+
+            results.append({
+                "market":      market,
+                "decision":    decision,
+                "poly_comp":   None,
+                "score":       score,
+                "side":        side,
+                "price_cents": price_cents,
+                "platform":    market.get("platform", "kalshi"),
+            })
+
+        results.sort(key=lambda x: x["score"], reverse=True)
+        picked = results[:top_n]
+
+        if picked:
+            logger.info(
+                "LIVE TOP %d: %s",
+                len(picked),
+                " | ".join(
+                    f"{r['market'].get('ticker','?')} {r['decision'].get('confidence',0):.0f}%"
+                    for r in picked
+                ),
+            )
+        return picked

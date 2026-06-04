@@ -174,6 +174,54 @@ class DiscordAlerter:
         )
         await self._post(payload)
 
+    async def live_trades_alert(self, trades: List[Dict], mode: str = "PAPER") -> None:
+        """
+        Single Discord embed announcing live in-play trades being entered right now.
+        Each trade dict: {title, platform, side, price_cents, confidence, net_ev,
+                          size_usd, contracts, reasoning, hours_to_close}
+        """
+        if not trades:
+            return
+
+        mode_tag = "📝 PAPER" if mode == "PAPER" else "💰 LIVE"
+        lines = []
+        for i, t in enumerate(trades, 1):
+            platform_icon = "🟦" if t.get("platform") == "kalshi" else "🟣"
+            title    = self._display_ticker(t.get("ticker", ""), t.get("title", ""))
+            side     = (t.get("side") or "yes").upper()
+            price    = t.get("price_cents", 0)
+            conf     = t.get("confidence", 0)
+            ev       = t.get("net_ev") or 0
+            size     = t.get("size_usd", 0)
+            hours    = t.get("hours_to_close", 0)
+            lines.append(
+                f"**{i}. {platform_icon} {title}**\n"
+                f"   BUY {side} @ {price:.0f}¢ — ${size:.2f} — **{conf:.0f}% conf** — EV {ev:+.1f}¢ — ⏱ {hours:.1f}h left"
+            )
+
+        fields = []
+        for i, t in enumerate(trades, 1):
+            reasoning = (t.get("reasoning") or "")[:200]
+            if reasoning:
+                title_short = self._display_ticker(t.get("ticker", ""), t.get("title", ""))[:40]
+                fields.append({
+                    "name": f"#{i} Reasoning — {title_short}",
+                    "value": reasoning,
+                    "inline": False,
+                })
+
+        payload = {
+            "embeds": [{
+                "title": f"⚡ LIVE TRADES — Entering {len(trades)} position{'s' if len(trades) > 1 else ''} now  [{mode_tag}]",
+                "description": "\n\n".join(lines),
+                "color": 0xFF8C00,
+                "fields": fields,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "footer": {"text": "In-play markets resolving soon — high time sensitivity"},
+            }]
+        }
+        await self._post(payload)
+
     async def arb_signal(self, ticker: str, signal_type: str,
                           gross_edge: float, net_edge: float,
                           side: str = "", kalshi_price: float = 0,
