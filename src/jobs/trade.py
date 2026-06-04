@@ -104,7 +104,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         "SELECT ticker, side, contracts, avg_price, current_price, pnl, platform, title "
         "FROM positions WHERE status='open'"
     )
-    open_count = len(open_positions_rows)
+    open_count   = len(open_positions_rows)
+    open_tickers = {p["ticker"] for p in open_positions_rows}
     if open_count > 0:
         logger.info("── Open Positions (%d) ──────────────────────────────────────────", open_count)
         for _p in open_positions_rows:
@@ -344,6 +345,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 poly_markets = [
                     m for m in raw_poly
                     if m.get("yes_ask", 0) > 1
+                    and m.get("ticker") not in open_tickers
                 ][:max_scan]
                 logger.info("Polymarket: %d markets stored, %d tradeable",
                             len(raw_poly), len(poly_markets))
@@ -374,8 +376,6 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td
 
         arb_tickers = {s["ticker"] for s in all_signals}
-        open_positions = await db.fetchall("SELECT ticker FROM positions WHERE status='open'")
-        open_tickers = {p["ticker"] for p in (open_positions or [])}
         now_utc = _dt.now(_tz.utc)
 
         def _closes_within(m, hours):
