@@ -574,18 +574,28 @@ class TradingBot:
 
         async def bot_alert_loop():
             """
-            Every 10 minutes: fire ONE bundled BOT ALERT when the bot has active
-            live slots — events happening RIGHT NOW that the bot entered.
-            Long-term predictions appear in the hourly report instead.
-            Stays completely silent when no live events are active.
+            Every 10 minutes: fire ONE bundled BOT ALERT for events happening
+            RIGHT NOW. Two sources qualify:
+
+            1. Active live slots — the bot already entered a live in-play trade.
+            2. Any BUY evaluation (regardless of close_time) where the UNDERLYING
+               REAL-WORLD EVENT is currently live — e.g. France playing a World
+               Cup match, election night vote counting, NBA Finals game in progress.
+               Detected via SofaScore live feed + entity matching on the title.
+
+            Long-term predictions with no live event stay in the hourly report.
+            Silent when nothing qualifies.
             """
             from src.alerts.discord import DiscordAlerter
+            from src.utils.daily_stats import stats as _da
             from src.jobs.live_market_manager import _live_slots as _ls
+            from src.data.sports_fetcher import is_event_live_now
 
-            _alerted: dict = {}          # ticker → confidence band already sent
-            _alerted_date = datetime.now(timezone.utc).date()
+            _alerted: dict = {}
+            _alerted_date  = datetime.now(timezone.utc).date()
 
-            BOT_ALERT_INTERVAL = 600     # 10 minutes between checks
+            BOT_ALERT_INTERVAL = 600
+            MIN_CONF           = 60.0
 
             await asyncio.sleep(120)
             while not self._shutdown.is_set():
@@ -603,13 +613,34 @@ class TradingBot:
                     mode      = "PAPER" if not settings.trading.live_trading_enabled else "LIVE"
                     new_picks: list = []
 
-                    # BOT ALERT = LIVE SLOTS ONLY — events the bot entered that
-                    # are happening RIGHT NOW. Long-term picks appear in the
-                    # hourly report's "What The Bot Is Watching" section instead.
+                    # 1. Active live slots — already entered, highest urgency
                     for ticker, slot in list(_ls.items()):
                         band = int(slot.get("confidence", 0) / 10) * 10
                         if _alerted.get(ticker) != band:
                             new_picks.append({**slot, "is_live": True})
+                            _alerted[ticker] = band
+
+                    # 2. BUY evaluations where the underlying event is LIVE RIGHT NOW
+                    # (regardless of whether the market itself is "long-term")
+                    for ev in list(_da.all_evaluations):
+                        if ev.get("action") != "BUY":
+                            continue
+                        conf   = ev.get("confidence", 0)
+                        ticker = ev.get("ticker", "")
+                        if conf < MIN_CONF or not ticker:
+                            continue
+                        if ticker in _ls:        # already covered by slot check above
+                            continue
+                        title = ev.get("title", "") or ""
+                        try:
+                            live_now = await is_event_live_now(title)
+                        except Exception:
+                            live_now = False
+                        if not live_now:
+                            continue             # event not happening yet — stay quiet
+                        band = int(conf / 10) * 10
+                        if _alerted.get(ticker) != band:
+                            new_picks.append({**ev, "is_live": True})
                             _alerted[ticker] = band
 
                     if not new_picks:
