@@ -166,10 +166,10 @@ class DiscordAlerter:
         if reasoning:
             fields.append({"name": f"{source_emoji} AI Reasoning", "value": reasoning[:300], "inline": False})
 
-        title_line = f"\n_{market_title[:80]}_" if market_title else ""
+        display = self._display_ticker(ticker, market_title)
         payload = self._embed(
-            title=f"{source_emoji} {mode_tag} Trade Entered — {ticker}",
-            description=f"**{action} {side.upper()}** on `{ticker}`{title_line}",
+            title=f"{source_emoji} {mode_tag} Trade Entered — {display}",
+            description=f"**{action} {side.upper()}** on _{display}_",
             color=color,
             fields=fields,
         )
