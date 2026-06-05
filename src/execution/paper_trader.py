@@ -32,7 +32,8 @@ class PaperTrader:
                       forced_size: Optional[float] = None,
                       net_ev: Optional[float] = None,
                       true_prob: Optional[float] = None,
-                      market_title: str = "") -> Optional[Dict]:
+                      market_title: str = "",
+                      is_live_event: bool = False) -> Optional[Dict]:
         """Simulate a trade. Returns trade record dict or None if rejected."""
 
         # ── Safety gate: price must be 1–99¢ ─────────────────────────────────
@@ -149,6 +150,7 @@ class PaperTrader:
                     net_ev=net_ev,
                     exp_profit=exp_profit,
                     market_title=market_title,
+                    is_live_event=is_live_event,
                 )
             except Exception:
                 pass

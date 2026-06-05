@@ -131,11 +131,19 @@ class DiscordAlerter:
                               paper: bool = True, signal_source: str = "",
                               reasoning: str = "", net_ev: Optional[float] = None,
                               exp_profit: Optional[float] = None,
-                              market_title: str = "") -> None:
+                              market_title: str = "",
+                              is_live_event: bool = False) -> None:
         if not self.cfg.alert_on_trade:
             return
         color    = 0x00FF00 if action == "BUY" else 0xFF4444
         mode_tag = "📝 PAPER" if paper else "💰 LIVE"
+
+        # Trade type — live event vs regular prediction market
+        if is_live_event:
+            trade_type = "⚡ LIVE EVENT"
+            color = 0xFF6600  # orange for live events
+        else:
+            trade_type = "🎯 REGULAR"
 
         # Source badge
         if signal_source in ("internal_arb", "cross_market_arb"):
@@ -149,6 +157,7 @@ class DiscordAlerter:
         max_payout = contracts * (100 - price) / 100
 
         fields = [
+            {"name": "Type",      "value": trade_type,                  "inline": True},
             {"name": "Side",      "value": f"**{side.upper()}**",       "inline": True},
             {"name": "Price",     "value": f"{price:.0f}¢",             "inline": True},
             {"name": "Contracts", "value": str(contracts),              "inline": True},
@@ -169,7 +178,7 @@ class DiscordAlerter:
         display = self._display_ticker(ticker, market_title)
         payload = self._embed(
             title=f"{source_emoji} {mode_tag} Trade Entered — {display}",
-            description=f"**{action} {side.upper()}** on _{display}_",
+            description=f"{trade_type} | **{action} {side.upper()}** on _{display}_",
             color=color,
             fields=fields,
         )
