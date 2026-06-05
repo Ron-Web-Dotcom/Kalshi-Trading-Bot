@@ -114,8 +114,7 @@ class KalshiClient:
                 return resp.json()
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 401:
-                    # Auth failure — log once and return empty so cycle continues
-                    logger.warning("Kalshi 401 on %s %s — check API key/RSA key config", method, path)
+                    logger.warning("Kalshi 401 on %s %s — body: %s", method, path, e.response.text[:300])
                     return {}
                 if attempt == retries - 1:
                     _safe = e.response.text[:200]
