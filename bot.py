@@ -757,7 +757,7 @@ class TradingBot:
                             if cd.tzinfo is None:
                                 cd = cd.replace(tzinfo=timezone.utc)
                             hours_left = (cd - now_utc).total_seconds() / 3600
-                            return 0 < hours_left <= 12
+                            return (5 / 60) <= hours_left <= 12
                         except Exception:
                             return False
 
