@@ -406,6 +406,255 @@ async def fetch_sofa_search(query: str) -> List[Dict]:
         return []
 
 
+async def _sofa_get(path: str, params: dict = None):
+    """Raw SofaScore API GET — returns parsed JSON or None."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_SOFA_HEADERS,
+                                     follow_redirects=True) as c:
+            r = await c.get(f"{_SOFA_BASE}{path}", params=params)
+            r.raise_for_status()
+            return r.json()
+    except Exception as e:
+        logger.debug("SofaScore GET %s: %s", path, e)
+        return None
+
+
+async def sofa_search_player(name: str) -> Optional[int]:
+    """Return SofaScore player ID for a player name, or None."""
+    data = await _sofa_get("/search/all", {"q": name})
+    if not data:
+        return None
+    for p in (data.get("players") or {}).get("results", []):
+        if name.lower() in (p.get("name") or "").lower():
+            return p.get("id")
+    return None
+
+
+async def sofa_search_team(name: str) -> Optional[int]:
+    """Return SofaScore team ID for a team name, or None."""
+    data = await _sofa_get("/search/all", {"q": name})
+    if not data:
+        return None
+    for t in (data.get("teams") or {}).get("results", []):
+        if name.lower() in (t.get("name") or "").lower():
+            return t.get("id")
+    return None
+
+
+async def sofa_player_stats(player_id: int, tournament_id: int = None) -> Optional[str]:
+    """
+    Fetch a player's per-game statistics from SofaScore.
+    Returns formatted string: 'LeBron James: 28.4 pts | 7.3 reb | 8.1 ast | 48.2 FG%'
+    """
+    # Get recent seasons
+    seasons_data = await _sofa_get(f"/player/{player_id}/statistics/seasons")
+    if not seasons_data:
+        return None
+
+    seasons = seasons_data.get("seasons") or []
+    if not seasons:
+        return None
+
+    # Use most recent season
+    latest = seasons[0]
+    season_id = latest.get("id")
+    tournament_id = tournament_id or (latest.get("uniqueTournament") or {}).get("id")
+    if not season_id or not tournament_id:
+        return None
+
+    stats_data = await _sofa_get(
+        f"/player/{player_id}/unique-tournament/{tournament_id}/season/{season_id}/statistics/overall"
+    )
+    if not stats_data:
+        return None
+
+    stats = stats_data.get("statistics") or {}
+    if not stats:
+        return None
+
+    # Build human-readable stat line
+    parts = []
+    # Universal stats
+    if stats.get("rating"):
+        parts.append(f"Rating {stats['rating']:.1f}")
+    # Basketball
+    if stats.get("pointsPerGame") is not None:
+        parts.append(f"{stats['pointsPerGame']:.1f} pts/g")
+    if stats.get("reboundsPerGame") is not None:
+        parts.append(f"{stats['reboundsPerGame']:.1f} reb/g")
+    if stats.get("assistsPerGame") is not None:
+        parts.append(f"{stats['assistsPerGame']:.1f} ast/g")
+    if stats.get("fieldGoalPercentage") is not None:
+        parts.append(f"{stats['fieldGoalPercentage']*100:.1f}% FG")
+    # Soccer/football
+    if stats.get("goals") is not None:
+        parts.append(f"{stats['goals']} goals")
+    if stats.get("assists") is not None:
+        parts.append(f"{stats['assists']} assists")
+    if stats.get("goalsPer90") is not None:
+        parts.append(f"{stats['goalsPer90']:.2f} goals/90")
+    # American football
+    if stats.get("passingYards") is not None:
+        parts.append(f"{stats['passingYards']} pass yds")
+    if stats.get("touchdowns") is not None:
+        parts.append(f"{stats['touchdowns']} TDs")
+    # Hockey
+    if stats.get("goals") is not None and stats.get("assists") is not None:
+        pts = (stats.get("goals") or 0) + (stats.get("assists") or 0)
+        parts.append(f"{pts} pts (G+A)")
+    # Games played
+    if stats.get("appearances") is not None:
+        parts.append(f"{stats['appearances']} games")
+
+    if not parts:
+        return None
+
+    season_name = latest.get("year") or latest.get("name") or "current season"
+    return f"{season_name}: {' | '.join(parts)}"
+
+
+async def sofa_player_last_games(player_id: int, n: int = 5) -> Optional[str]:
+    """
+    Fetch a player's last N game performances from SofaScore.
+    Returns formatted string with recent form.
+    """
+    data = await _sofa_get(f"/player/{player_id}/events/last/0")
+    if not data:
+        return None
+
+    events = (data.get("events") or [])[:n]
+    if not events:
+        return None
+
+    lines = []
+    for ev in events:
+        home   = (ev.get("homeTeam") or {}).get("name", "?")
+        away   = (ev.get("awayTeam") or {}).get("name", "?")
+        hs     = (ev.get("homeScore") or {}).get("current", "?")
+        as_    = (ev.get("awayScore") or {}).get("current", "?")
+        status = (ev.get("status") or {}).get("description", "")
+        lines.append(f"  {home} {hs}–{as_} {away} ({status})")
+
+    return "Last {} games:\n".format(len(lines)) + "\n".join(lines)
+
+
+async def sofa_h2h(team1_id: int, team2_id: int) -> Optional[str]:
+    """
+    Fetch head-to-head record between two teams from SofaScore.
+    Returns formatted summary: 'Last 5 H2H: Team A 3W 1D 1L'
+    """
+    data = await _sofa_get(f"/team/{team1_id}/near-events/{team2_id}")
+    if not data:
+        # Try events endpoint
+        data = await _sofa_get(f"/event/{team1_id}/h2h/{team2_id}")
+    if not data:
+        return None
+
+    events = (data.get("teamDuel") or {}).get("managerDuel", {})
+    team1_wins = events.get("wins1") or 0
+    team2_wins = events.get("wins2") or 0
+    draws      = events.get("draws")  or 0
+    total      = team1_wins + team2_wins + draws
+    if not total:
+        return None
+
+    return f"H2H (last {total}): {team1_wins}W {draws}D {team2_wins}L"
+
+
+async def sofa_team_recent_form(team_id: int, n: int = 5) -> Optional[str]:
+    """
+    Fetch team's last N results from SofaScore.
+    Returns: 'Recent form: W W L W D (last 5)'
+    """
+    data = await _sofa_get(f"/team/{team_id}/events/last/0")
+    if not data:
+        return None
+
+    events = (data.get("events") or [])[:n]
+    if not events:
+        return None
+
+    form = []
+    for ev in events:
+        home_id = (ev.get("homeTeam") or {}).get("id")
+        hs = int((ev.get("homeScore") or {}).get("current") or 0)
+        as_ = int((ev.get("awayScore") or {}).get("current") or 0)
+        if home_id == team_id:
+            form.append("W" if hs > as_ else "D" if hs == as_ else "L")
+        else:
+            form.append("W" if as_ > hs else "D" if hs == as_ else "L")
+
+    return f"Recent form: {' '.join(form)} (last {len(form)})"
+
+
+async def fetch_sofa_deep_context(title: str) -> Optional[str]:
+    """
+    Full deep SofaScore research for a sports market.
+
+    Runs in parallel:
+      1. Search for all players mentioned in title → per-game stats + last 5 games
+      2. Search for teams mentioned → recent form
+      3. H2H if two teams found
+      4. Live events matching title entities
+
+    Returns rich context block for AI.
+    """
+    import re as _re
+
+    # Extract player names (FirstName LastName pattern)
+    players = _re.findall(r"\b[A-Z][a-z]+\s+[A-Z][a-z]+\b", title)
+    # Extract likely team names (capitalized sequences)
+    teams   = _re.findall(r"\b(?:the\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b", title)
+    teams   = [t for t in teams if len(t) > 4 and t not in players][:3]
+
+    if not players and not teams:
+        return None
+
+    blocks = []
+
+    # ── Player stats ─────────────────────────────────────────────────────────
+    for player_name in players[:2]:
+        pid = await sofa_search_player(player_name)
+        if not pid:
+            continue
+
+        season_stats, last_games = await asyncio.gather(
+            sofa_player_stats(pid),
+            sofa_player_last_games(pid, n=5),
+            return_exceptions=True,
+        )
+
+        player_lines = [f"📊 **{player_name}** (via SofaScore)"]
+        if isinstance(season_stats, str) and season_stats:
+            player_lines.append(f"  This season: {season_stats}")
+        if isinstance(last_games, str) and last_games:
+            player_lines.append(f"  {last_games}")
+        if len(player_lines) > 1:
+            blocks.append("\n".join(player_lines))
+
+    # ── Team form + H2H ──────────────────────────────────────────────────────
+    team_ids = []
+    for team_name in teams[:2]:
+        tid = await sofa_search_team(team_name)
+        if tid:
+            team_ids.append((team_name, tid))
+
+    for team_name, tid in team_ids:
+        form = await sofa_team_recent_form(tid)
+        if form:
+            blocks.append(f"🏟 **{team_name}**: {form}")
+
+    if len(team_ids) >= 2:
+        h2h = await sofa_h2h(team_ids[0][1], team_ids[1][1])
+        if h2h:
+            blocks.append(f"⚔️ {team_ids[0][0]} vs {team_ids[1][0]}: {h2h}")
+
+    if not blocks:
+        return None
+
+    return "=== SOFASCORE DEEP STATS ===\n" + "\n\n".join(blocks)
+
+
 async def fetch_statmuse(query: str, sport: str = "") -> Optional[str]:
     """
     StatMuse — natural language sports stats, game results, player records.

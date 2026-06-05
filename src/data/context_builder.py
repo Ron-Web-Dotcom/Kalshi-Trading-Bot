@@ -190,9 +190,9 @@ async def build_market_context(
             tasks["sports"] = fetch_comprehensive_sports_context(
                 title, league, teams, team_names, timeout=min(timeout_seconds - 2, 8.0)
             )
-            # StatMuse: player history, per-game averages, H2H records
-            from src.data.sports_fetcher import fetch_statmuse_player_context
-            tasks["statmuse"] = fetch_statmuse_player_context(title)
+            # SofaScore deep research: player stats, H2H, recent form
+            from src.data.sports_fetcher import fetch_sofa_deep_context
+            tasks["sofa_deep"] = fetch_sofa_deep_context(title)
         except ImportError:
             tasks["sports"] = fetch_sports_context(title)
         # Use soccer-specific news feeds for soccer markets
@@ -248,9 +248,9 @@ async def build_market_context(
     elif isinstance(sports, Exception):
         logger.debug("Sports fetch error: %s", sports)
 
-    statmuse = results.get("statmuse")
-    if isinstance(statmuse, str) and statmuse:
-        blocks.append(statmuse)
+    sofa_deep = results.get("sofa_deep")
+    if isinstance(sofa_deep, str) and sofa_deep:
+        blocks.append(sofa_deep)
 
     economics = results.get("economics")
     if isinstance(economics, str) and economics:
