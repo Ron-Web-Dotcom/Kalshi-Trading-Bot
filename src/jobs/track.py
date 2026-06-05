@@ -65,6 +65,14 @@ async def run_tracking(db_manager) -> None:
                         "SELECT yes_ask, no_ask, status FROM markets WHERE ticker=?", (ticker,)
                     )
                     if not mkt_row:
+                        # Ticker mismatch — fallback to title match
+                        pos_title = (pos.get("title") or "").strip()
+                        if pos_title:
+                            mkt_row = await db_manager.fetchone(
+                                "SELECT yes_ask, no_ask, status FROM markets WHERE platform='polymarket' AND title=?",
+                                (pos_title,)
+                            )
+                    if not mkt_row:
                         logger.warning("TRACK SKIP Polymarket %s — not in markets cache (ticker mismatch?)", ticker)
                         continue
                     bid_key   = "yes_ask" if side == "yes" else "no_ask"
