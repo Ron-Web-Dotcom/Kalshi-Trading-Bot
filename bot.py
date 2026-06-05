@@ -195,11 +195,14 @@ class TradingBot:
                     poly_count    = (poly_row or {}).get("n", 0)
                     markets_total = kalshi_count + poly_count
 
-                    # Open positions
+                    # Open positions — actual live count from DB
                     open_row = await self.db.fetchone(
                         "SELECT COUNT(*) as n FROM positions WHERE status='open'"
                     )
                     open_n = (open_row or {}).get("n", 0)
+                    # Live in-play count from live slot manager
+                    from src.jobs.live_market_manager import _live_slots as _hb_ls
+                    live_open_n = len(_hb_ls)
 
                     # Today's PnL (paper or live depending on mode)
                     _paper_flag = 0 if settings.trading.live_trading_enabled else 1
@@ -315,6 +318,7 @@ class TradingBot:
                         poly_count=poly_count,
                         top_candidates=top_candidates,
                         open_positions=open_n,
+                        live_open_positions=live_open_n,
                         paper_pnl=paper_pnl,
                         unrealised_pnl=unrealised_pnl,
                         paper=not settings.trading.live_trading_enabled,

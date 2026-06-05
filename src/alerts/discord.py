@@ -846,6 +846,7 @@ class DiscordAlerter:
         open_positions: int,
         paper_pnl: float,
         unrealised_pnl: float = 0.0,
+        live_open_positions: int = 0,
         paper: bool = True,
         closed_trades: Optional[List[Dict]] = None,
         win_rate: float = 0.0,
@@ -978,8 +979,20 @@ class DiscordAlerter:
         else:
             slots_str = f"⚡ **0/{live_slots_max}** in-play — no live events right now"
 
+        regular_open = max(0, open_positions - live_open_positions)
+        if open_positions == 0:
+            pos_line = "**0** open bets right now"
+        elif live_open_positions > 0:
+            pos_line = (
+                f"**{open_positions}** open bets — "
+                f"⚡ **{live_open_positions}** live in-play + "
+                f"🎯 **{regular_open}** regular"
+            )
+        else:
+            pos_line = f"**{open_positions}** open bets — 🎯 all regular (no live events right now)"
+
         positions_val = (
-            f"**{open_positions}** open bets right now\n"
+            f"{pos_line}\n"
             f"{p_emoji} **Locked in:** ${locked_s}{paper_pnl:.2f} ← _money already banked from closed bets_\n"
             f"{u_emoji} **On paper:** ${paper_s}{unrealised_pnl:.2f} ← _what we'd pocket if we cashed out NOW_\n"
             f"{slots_str}"
