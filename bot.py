@@ -11,6 +11,7 @@ Usage:
 
 import asyncio
 import argparse
+import gc
 import logging
 import signal
 import sys
@@ -198,6 +199,7 @@ class TradingBot:
                     await self.run_cycle()
                 except Exception as e:
                     logger.error("Trade cycle error: %s", e)
+                gc.collect()  # free cycle-local objects before sleeping
                 await asyncio.sleep(TRADE_INTERVAL)
 
         async def hourly_heartbeat_loop():
@@ -996,7 +998,7 @@ class TradingBot:
                             "AND (yes_ask > 0 OR last_price > 0) "
                             "AND title IS NOT NULL AND title != '' "
                             "ORDER BY volume DESC, close_time ASC "
-                            "LIMIT 2000"
+                            "LIMIT 200"
                         ) or []
                         # Normalise prices so downstream code always sees cents format
                         normed = []
@@ -1025,8 +1027,8 @@ class TradingBot:
                         _kc = _KC()
                         _pc = _PC()
                         kalshi_live_now, poly_live_now = await asyncio.gather(
-                            _kc.get_live_now_markets(max_markets=200),
-                            _pc.get_live_now_markets(max_markets=200),
+                            _kc.get_live_now_markets(max_markets=50),
+                            _pc.get_live_now_markets(max_markets=50),
                             return_exceptions=True,
                         )
                         for m in (kalshi_live_now if isinstance(kalshi_live_now, list) else []):
@@ -1076,16 +1078,18 @@ class TradingBot:
                         else:
                             to_check.append(dict(m))
 
-                    # Parallel live check on remaining candidates
+                    # Parallel live check — cap at 20 candidates, batch of 10 to limit RAM
                     if to_check:
                         try:
-                            check_results = await asyncio.gather(
-                                *[is_event_live_now(m.get("title", "")) for m in to_check],
-                                return_exceptions=True,
-                            )
-                            for m, result in zip(to_check, check_results):
-                                if result is True:
-                                    live_candidates.append(m)
+                            for _batch_start in range(0, min(len(to_check), 20), 10):
+                                _batch = to_check[_batch_start:_batch_start + 10]
+                                check_results = await asyncio.gather(
+                                    *[is_event_live_now(m.get("title", "")) for m in _batch],
+                                    return_exceptions=True,
+                                )
+                                for m, result in zip(_batch, check_results):
+                                    if result is True:
+                                        live_candidates.append(m)
                         except Exception as _lce:
                             logger.debug("Parallel live check error: %s", _lce)
 

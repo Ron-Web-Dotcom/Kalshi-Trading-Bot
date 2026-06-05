@@ -136,7 +136,7 @@ class ExternalMarketComparator:
 
     async def _ensure_poly(self):
         if not self._poly_cache:
-            self._poly_cache = await self.polymarket.get_markets(limit=300)
+            self._poly_cache = await self.polymarket.get_markets(limit=100)
 
     async def compare_and_log(self, kalshi_markets: List[Dict]) -> List[Dict]:
         """
