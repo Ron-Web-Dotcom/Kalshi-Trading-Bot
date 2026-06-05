@@ -100,33 +100,60 @@ class OpportunityHunter:
     Reduces AI API calls from O(all_candidates) to O(3) per cycle.
     """
 
-    # Class-level cache: ticker → (rejected_at_ts, reason) — skip re-evaluating within 30 min
+    # Class-level cache: ticker → epoch_rejected — skip re-evaluating within 60 min
     _ai_rejection_cache: dict = {}
-    _REJECTION_TTL_SECS: int = 1800  # 30 minutes
+    _REJECTION_TTL_SECS: int = 3600   # 1 hour
+    _REJECTION_FILE: str = "/tmp/kalshi_ai_rejections.json"
 
     def __init__(self, db=None, ai_top_n: int = 3):
         self.db = db
-        self.ai_top_n = ai_top_n  # how many candidates to send to AI
+        self.ai_top_n = ai_top_n
+        # Load persisted rejections on first instantiation
+        if not self.__class__._ai_rejection_cache:
+            self.__class__._load_rejections()
+
+    @classmethod
+    def _load_rejections(cls) -> None:
+        import json, os, time
+        try:
+            if os.path.exists(cls._REJECTION_FILE):
+                data = json.loads(open(cls._REJECTION_FILE).read())
+                now = time.time()
+                cls._ai_rejection_cache = {
+                    k: v for k, v in data.items()
+                    if now - v.get("ts", 0) < cls._REJECTION_TTL_SECS
+                }
+        except Exception:
+            pass
+
+    @classmethod
+    def _save_rejections(cls) -> None:
+        import json
+        try:
+            with open(cls._REJECTION_FILE, "w") as f:
+                json.dump(cls._ai_rejection_cache, f)
+        except Exception:
+            pass
 
     @classmethod
     def _is_recently_rejected(cls, ticker: str) -> bool:
+        import time
         entry = cls._ai_rejection_cache.get(ticker)
         if not entry:
             return False
-        import time
-        return (time.monotonic() - entry["ts"]) < cls._REJECTION_TTL_SECS
+        return (time.time() - entry.get("ts", 0)) < cls._REJECTION_TTL_SECS
 
     @classmethod
     def _mark_rejected(cls, ticker: str, reason: str = "") -> None:
         import time
-        cls._ai_rejection_cache[ticker] = {"ts": time.monotonic(), "reason": reason}
-        # Prune stale entries to avoid unbounded growth
-        import time as _t
-        now = _t.monotonic()
+        now = time.time()
+        cls._ai_rejection_cache[ticker] = {"ts": now, "reason": reason}
+        # Prune stale entries
         cls._ai_rejection_cache = {
             k: v for k, v in cls._ai_rejection_cache.items()
-            if (now - v["ts"]) < cls._REJECTION_TTL_SECS
+            if (now - v.get("ts", 0)) < cls._REJECTION_TTL_SECS
         }
+        cls._save_rejections()
 
     async def find_best(
         self,

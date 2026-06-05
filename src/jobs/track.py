@@ -73,7 +73,7 @@ async def run_tracking(db_manager) -> None:
                                 (pos_title,)
                             )
                     if not mkt_row:
-                        logger.warning("TRACK SKIP Polymarket %s — not in markets cache (ticker mismatch?)", ticker)
+                        logger.debug("TRACK SKIP Polymarket %s — not in markets cache (ticker mismatch?)", ticker)
                         continue
                     bid_key   = "yes_ask" if side == "yes" else "no_ask"
                     cur_price = float(mkt_row.get(bid_key, 0) or 0)
@@ -84,7 +84,7 @@ async def run_tracking(db_manager) -> None:
                         if alt_price > 0:
                             cur_price = 100.0 - alt_price
                     if cur_price == 0:
-                        logger.warning("TRACK SKIP Polymarket %s — %s price=0 in cache", ticker, bid_key)
+                        logger.debug("TRACK SKIP Polymarket %s — %s price=0 in cache", ticker, bid_key)
                         continue
                     # cur_price is the side's own price (no_ask for NO, yes_ask for YES)
                     # so PnL formula is the same: profit when our side's price rises
