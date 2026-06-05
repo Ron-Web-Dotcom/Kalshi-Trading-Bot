@@ -668,7 +668,7 @@ class TradingBot:
             _result_sent: set = set()
 
             BOT_ALERT_INTERVAL = 600   # check every 10 min
-            MIN_CONF           = 62.0  # min confidence to alert
+            MIN_CONF           = 65.0  # min confidence to alert on live picks
 
             async def _check_and_post_results(discord, mode: str):
                 """

@@ -45,16 +45,29 @@ _HEADERS    = {
 # ── ALL Polymarket tag slugs — main categories + all sub-categories ────────────
 
 POLY_TAG_SLUGS = [
-    # Politics
-    "politics", "us-politics", "elections", "trump",
-    # Sports
+    # Politics — US + global
+    "politics", "us-politics", "elections", "trump", "congress", "senate",
+    "supreme-court", "2024-us-elections", "geopolitics", "middle-east",
+    "russia-ukraine", "china", "iran",
+    # Sports — major leagues
     "nfl", "nba", "mlb", "nhl", "ufc", "soccer", "tennis", "golf",
-    # Crypto
-    "crypto", "bitcoin", "ethereum",
-    # Finance
-    "finance", "stocks", "fed",
-    # World
-    "world", "weather",
+    # Sports — more
+    "mma", "boxing", "college-football", "college-basketball", "f1",
+    "nascar", "esports", "olympics", "wrestling",
+    # Crypto — broad
+    "crypto", "bitcoin", "ethereum", "solana", "defi", "nft",
+    # Finance / Economy
+    "finance", "stocks", "fed", "economy", "interest-rates", "inflation",
+    "commodities", "oil", "gold",
+    # Entertainment / Culture
+    "entertainment", "pop-culture", "music", "movies", "awards", "celebrity",
+    "tv", "gaming",
+    # Science / Tech
+    "science", "technology", "ai", "space", "spacex",
+    # World / Weather
+    "world", "weather", "climate", "natural-disasters",
+    # Misc high-volume
+    "business", "health", "pandemic", "media",
 ]
 
 # Remove duplicates while preserving order
