@@ -598,7 +598,7 @@ class TradingBot:
 
             BOT_ALERT_INTERVAL = 600   # scan every 10 min
             RESULT_CHECK_DELAY = 60    # check results 60s after alert
-            MIN_CONF           = 60.0
+            MIN_CONF           = settings.trading.min_ai_confidence  # 70%
 
             async def _check_and_post_results(discord, mode: str):
                 """
@@ -707,7 +707,12 @@ class TradingBot:
 
                     # 1. Active live slots — already entered, highest urgency
                     for ticker, slot in list(_ls.items()):
-                        band = int(slot.get("confidence", 0) / 10) * 10
+                        conf = float(slot.get("confidence", 0) or 0)
+                        price = float(slot.get("price_cents") or slot.get("yes_ask") or 0)
+                        # Skip if no real confidence or price data
+                        if conf < MIN_CONF or price <= 0:
+                            continue
+                        band = int(conf / 10) * 10
                         if _alerted.get(ticker, {}).get("band") != band:
                             pick = {**slot, "is_live": True, "ticker": ticker}
                             new_picks.append(pick)
@@ -720,9 +725,11 @@ class TradingBot:
                     for ev in list(_da.all_evaluations):
                         if ev.get("action") != "BUY":
                             continue
-                        conf   = ev.get("confidence", 0)
+                        conf   = float(ev.get("confidence", 0) or 0)
+                        price  = float(ev.get("price_cents") or ev.get("yes_ask") or 0)
                         ticker = ev.get("ticker", "")
-                        if conf < MIN_CONF or not ticker:
+                        # Must have real confidence, real price, and meet threshold
+                        if conf < MIN_CONF or price <= 0 or not ticker:
                             continue
                         if ticker in _ls:
                             continue
