@@ -112,7 +112,7 @@ class TradingConfig:
     kill_switch_enabled: bool = field(default_factory=lambda: _env_bool("KILL_SWITCH_ENABLED", True))
     max_daily_loss_usd: float = field(default_factory=lambda: _env_float("MAX_DAILY_LOSS_USD", 50.0))
     max_consecutive_losses: int = field(default_factory=lambda: _env_int("MAX_CONSECUTIVE_LOSSES", 5))
-    max_open_positions: int = field(default_factory=lambda: _env_int("MAX_OPEN_POSITIONS", 10))
+    max_open_positions: int = field(default_factory=lambda: _env_int("MAX_OPEN_POSITIONS", 50))
 
 
 @dataclass

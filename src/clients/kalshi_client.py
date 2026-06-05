@@ -91,7 +91,11 @@ class KalshiClient:
         await self._rate_limit()
         client = await self._get_client()
         body_str = json.dumps(body) if body else ""
-        headers = self._build_headers(method, path, body_str)
+        # Kalshi RSA signature must include query string when present
+        sign_path = path
+        if params:
+            sign_path = path + "?" + urlencode({k: v for k, v in params.items() if v is not None})
+        headers = self._build_headers(method, sign_path, body_str)
 
         for attempt in range(retries):
             try:
@@ -108,6 +112,10 @@ class KalshiClient:
                 resp.raise_for_status()
                 return resp.json()
             except httpx.HTTPStatusError as e:
+                if e.response.status_code == 401:
+                    # Auth failure — log once and return empty so cycle continues
+                    logger.warning("Kalshi 401 on %s %s — check API key/RSA key config", method, path)
+                    return {}
                 if attempt == retries - 1:
                     _safe = e.response.text[:200]
                     if self.cfg.api_key_id:
