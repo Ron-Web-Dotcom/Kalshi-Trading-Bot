@@ -100,9 +100,33 @@ class OpportunityHunter:
     Reduces AI API calls from O(all_candidates) to O(3) per cycle.
     """
 
+    # Class-level cache: ticker → (rejected_at_ts, reason) — skip re-evaluating within 30 min
+    _ai_rejection_cache: dict = {}
+    _REJECTION_TTL_SECS: int = 1800  # 30 minutes
+
     def __init__(self, db=None, ai_top_n: int = 3):
         self.db = db
         self.ai_top_n = ai_top_n  # how many candidates to send to AI
+
+    @classmethod
+    def _is_recently_rejected(cls, ticker: str) -> bool:
+        entry = cls._ai_rejection_cache.get(ticker)
+        if not entry:
+            return False
+        import time
+        return (time.monotonic() - entry["ts"]) < cls._REJECTION_TTL_SECS
+
+    @classmethod
+    def _mark_rejected(cls, ticker: str, reason: str = "") -> None:
+        import time
+        cls._ai_rejection_cache[ticker] = {"ts": time.monotonic(), "reason": reason}
+        # Prune stale entries to avoid unbounded growth
+        import time as _t
+        now = _t.monotonic()
+        cls._ai_rejection_cache = {
+            k: v for k, v in cls._ai_rejection_cache.items()
+            if (now - v["ts"]) < cls._REJECTION_TTL_SECS
+        }
 
     async def find_best(
         self,
@@ -171,6 +195,10 @@ class OpportunityHunter:
         for pre_score, market, poly_comp in top_candidates:
             ticker = market.get("ticker", "")
 
+            if self._is_recently_rejected(ticker):
+                logger.debug("AI skip (cached rejection): %s", ticker[:40])
+                continue
+
             enriched = dict(market)
             if poly_comp:
                 enriched["poly_yes"]      = poly_comp["poly_yes"]
@@ -182,6 +210,8 @@ class OpportunityHunter:
                 continue
 
             score = score_opportunity(market, decision, poly_comp)
+            if score <= 0:
+                self._mark_rejected(ticker, decision.get("reasoning", "")[:60])
             yes_ask = float(market.get("yes_ask") or market.get("last_price") or 0)
             no_ask  = float(market.get("no_ask")  or (100 - yes_ask))
 
@@ -296,6 +326,9 @@ class OpportunityHunter:
         results = []
         for pre_score, market in prescored[:ai_eval_n]:
             ticker = market.get("ticker", "")
+            if self._is_recently_rejected(ticker):
+                logger.debug("Live AI skip (cached rejection): %s", ticker[:40])
+                continue
             try:
                 decision = await make_decision_for_market(market, arb_signals, db=self.db)
             except Exception as e:
@@ -339,6 +372,7 @@ class OpportunityHunter:
                     "  [LIVE-SKIP] %-36s action=%s conf=%d%% ev=%.1f¢ (need BUY+conf≥%d%%+ev>0)",
                     (market.get("title") or ticker)[:36], action, conf, net_ev, min_confidence,
                 )
+                self._mark_rejected(ticker, decision.get("reasoning", "")[:60])
                 continue
 
             score     = score_opportunity(market, decision)
