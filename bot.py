@@ -1067,31 +1067,49 @@ class TradingBot:
                         )
 
                     # Update shared scan state for hourly heartbeat
-                    # Pull fresh Kalshi candidates from DB so they always appear alongside Poly
-                    _kal_top = []
+                    # Regular top: 3 Kalshi + 3 Poly — always balanced, same as live
+                    _kal_reg = []
+                    _poly_reg = []
                     try:
                         _kal_rows = await self.db.fetchall(
                             "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time "
                             "FROM markets "
                             "WHERE (platform='kalshi' OR platform IS NULL) "
-                            "AND yes_ask > 5 AND yes_ask < 95 "
+                            "AND yes_ask > 10 AND yes_ask < 90 "
                             "AND (status='open' OR status='') "
                             "AND title IS NOT NULL AND title != '' "
                             "AND title NOT LIKE '0x%' "
-                            "ORDER BY volume DESC LIMIT 4"
+                            "ORDER BY volume DESC LIMIT 3"
                         )
-                        _kal_top = [dict(r) for r in (_kal_rows or [])]
+                        _kal_reg = [dict(r, platform="kalshi") for r in (_kal_rows or [])]
                     except Exception:
                         pass
-                    _poly_regular = [
-                        dict(m, _scan_type="regular")
-                        for m in candidates[:4]
-                        if m.get("title") and not m.get("_platform_live")
-                    ]
+                    try:
+                        _poly_rows = await self.db.fetchall(
+                            "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time "
+                            "FROM markets "
+                            "WHERE platform='polymarket' "
+                            "AND yes_ask > 10 AND yes_ask < 90 "
+                            "AND (status='open' OR status='') "
+                            "AND title IS NOT NULL AND title != '' "
+                            "AND title NOT LIKE '0x%' "
+                            "ORDER BY volume DESC LIMIT 3"
+                        )
+                        _poly_reg = [dict(r) for r in (_poly_rows or [])]
+                    except Exception:
+                        pass
+                    # Live top: split live_candidates into Kalshi + Poly for display
+                    _kal_live = [m for m in live_candidates if m.get("platform") != "polymarket"]
+                    _poly_live = [m for m in live_candidates if m.get("platform") == "polymarket"]
+                    _live_display = []
+                    for _a, _b in zip(_kal_live, _poly_live):
+                        _live_display += [_a, _b]
+                    _live_display += _kal_live[len(_poly_live):] + _poly_live[len(_kal_live):]
+
                     from src.utils.daily_stats import stats as _scan_stats
                     _scan_stats.update_scan_state(
-                        live_markets=live_candidates,
-                        regular_top=_kal_top + _poly_regular,
+                        live_markets=_live_display or live_candidates,
+                        regular_top=_kal_reg + _poly_reg,
                     )
 
                     # ── 3. AI-EVALUATE live candidates — find cheeky bids ─────
