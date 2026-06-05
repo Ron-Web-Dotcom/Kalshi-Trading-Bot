@@ -32,13 +32,62 @@ _SOFA_HEADERS = {
     "Referer":    "https://www.sofascore.com/",
 }
 
-# SofaScore sport slugs
+# SofaScore sport slugs — covers every sport SofaScore tracks
 _SOFA_SPORTS = {
-    "nfl": "american-football", "nba": "basketball", "mlb": "baseball",
-    "nhl": "ice-hockey",        "nba": "basketball", "ufc": "mma",
-    "epl": "football",          "laliga": "football", "bundesliga": "football",
-    "seriea": "football",       "ligue1": "football", "ucl": "football",
-    "uel": "football",          "mls": "football",    "worldcup": "football",
+    # American sports
+    "nfl":              "american-football",
+    "ncaaf":            "american-football",
+    "nba":              "basketball",
+    "ncaab":            "basketball",
+    "wnba":             "basketball",
+    "mlb":              "baseball",
+    "nhl":              "ice-hockey",
+    "ufc":              "mma",
+    "mma":              "mma",
+    "boxing":           "boxing",
+    # Soccer — all leagues
+    "epl":              "football",
+    "laliga":           "football",
+    "bundesliga":       "football",
+    "seriea":           "football",
+    "ligue1":           "football",
+    "ucl":              "football",
+    "uel":              "football",
+    "uecl":             "football",
+    "mls":              "football",
+    "worldcup":         "football",
+    "euros":            "football",
+    "nwsl":             "football",
+    "copalibertadores": "football",
+    "concacaf":         "football",
+    "soccer":           "football",
+    "football":         "football",
+    # Tennis
+    "tennis":           "tennis",
+    "atp":              "tennis",
+    "wta":              "tennis",
+    "wimbledon":        "tennis",
+    "usopen_tennis":    "tennis",
+    "ausopen":          "tennis",
+    "rolandgarros":     "tennis",
+    # Golf
+    "golf":             "golf",
+    "pga":              "golf",
+    "masters":          "golf",
+    # Motorsport
+    "f1":               "motorsport",
+    "formula1":         "motorsport",
+    "nascar":           "motorsport",
+    # Other
+    "rugby":            "rugby",
+    "rugbyleague":      "rugby-league",
+    "handball":         "handball",
+    "volleyball":       "volleyball",
+    "cricket":          "cricket",
+    "darts":            "darts",
+    "snooker":          "snooker",
+    "esports":          "esports",
+    "cycling":          "cycling",
 }
 
 # Supported leagues with ESPN sport/league path
@@ -472,39 +521,91 @@ async def sofa_player_stats(player_id: int, tournament_id: int = None) -> Option
     if not stats:
         return None
 
-    # Build human-readable stat line
+    # Build human-readable stat line — handles every sport SofaScore tracks
     parts = []
-    # Universal stats
-    if stats.get("rating"):
-        parts.append(f"Rating {stats['rating']:.1f}")
-    # Basketball
-    if stats.get("pointsPerGame") is not None:
-        parts.append(f"{stats['pointsPerGame']:.1f} pts/g")
-    if stats.get("reboundsPerGame") is not None:
-        parts.append(f"{stats['reboundsPerGame']:.1f} reb/g")
-    if stats.get("assistsPerGame") is not None:
-        parts.append(f"{stats['assistsPerGame']:.1f} ast/g")
-    if stats.get("fieldGoalPercentage") is not None:
-        parts.append(f"{stats['fieldGoalPercentage']*100:.1f}% FG")
-    # Soccer/football
-    if stats.get("goals") is not None:
-        parts.append(f"{stats['goals']} goals")
-    if stats.get("assists") is not None:
-        parts.append(f"{stats['assists']} assists")
-    if stats.get("goalsPer90") is not None:
-        parts.append(f"{stats['goalsPer90']:.2f} goals/90")
-    # American football
-    if stats.get("passingYards") is not None:
-        parts.append(f"{stats['passingYards']} pass yds")
-    if stats.get("touchdowns") is not None:
-        parts.append(f"{stats['touchdowns']} TDs")
-    # Hockey
-    if stats.get("goals") is not None and stats.get("assists") is not None:
-        pts = (stats.get("goals") or 0) + (stats.get("assists") or 0)
-        parts.append(f"{pts} pts (G+A)")
-    # Games played
-    if stats.get("appearances") is not None:
-        parts.append(f"{stats['appearances']} games")
+    s = stats  # shorthand
+
+    # Universal
+    if s.get("rating"):           parts.append(f"Rating {s['rating']:.1f}")
+    if s.get("appearances"):      parts.append(f"{s['appearances']} games")
+
+    # Basketball (NBA, NCAAB, WNBA)
+    if s.get("pointsPerGame")     is not None: parts.append(f"{s['pointsPerGame']:.1f} pts/g")
+    if s.get("reboundsPerGame")   is not None: parts.append(f"{s['reboundsPerGame']:.1f} reb/g")
+    if s.get("assistsPerGame")    is not None: parts.append(f"{s['assistsPerGame']:.1f} ast/g")
+    if s.get("stealsPerGame")     is not None: parts.append(f"{s['stealsPerGame']:.1f} stl/g")
+    if s.get("blocksPerGame")     is not None: parts.append(f"{s['blocksPerGame']:.1f} blk/g")
+    if s.get("fieldGoalPercentage") is not None: parts.append(f"{s['fieldGoalPercentage']*100:.1f}% FG")
+    if s.get("threePointPercentage") is not None: parts.append(f"{s['threePointPercentage']*100:.1f}% 3PT")
+
+    # Soccer / football (all leagues)
+    if s.get("goals")             is not None: parts.append(f"{s['goals']} goals")
+    if s.get("goalAssists")       is not None: parts.append(f"{s['goalAssists']} assists")
+    if s.get("goalsPer90")        is not None: parts.append(f"{s['goalsPer90']:.2f} goals/90")
+    if s.get("keyPasses")         is not None: parts.append(f"{s['keyPasses']} key passes")
+    if s.get("accuratePasses")    is not None: parts.append(f"{s['accuratePasses']} acc. passes")
+    if s.get("yellowCards")       is not None: parts.append(f"{s['yellowCards']}Y")
+    if s.get("redCards")          is not None and s['redCards']: parts.append(f"{s['redCards']}R")
+    # Goalkeeper
+    if s.get("savePercentage")    is not None: parts.append(f"{s['savePercentage']:.1f}% saves")
+    if s.get("cleanSheets")       is not None: parts.append(f"{s['cleanSheets']} clean sheets")
+
+    # American Football (NFL, NCAAF)
+    if s.get("passingYards")      is not None: parts.append(f"{s['passingYards']} pass yds")
+    if s.get("passingTouchdowns") is not None: parts.append(f"{s['passingTouchdowns']} pass TDs")
+    if s.get("rushingYards")      is not None: parts.append(f"{s['rushingYards']} rush yds")
+    if s.get("rushingTouchdowns") is not None: parts.append(f"{s['rushingTouchdowns']} rush TDs")
+    if s.get("receivingYards")    is not None: parts.append(f"{s['receivingYards']} rec yds")
+    if s.get("receptions")        is not None: parts.append(f"{s['receptions']} rec")
+    if s.get("interceptions")     is not None: parts.append(f"{s['interceptions']} INTs")
+    if s.get("sacks")             is not None: parts.append(f"{s['sacks']} sacks")
+
+    # Ice Hockey (NHL)
+    if s.get("goals") is not None and s.get("goalAssists") is not None and s.get("passingYards") is None:
+        g  = s.get("goals") or 0
+        a  = s.get("goalAssists") or 0
+        if g or a:
+            parts.append(f"{g}G {a}A {g+a}pts (hockey)")
+    if s.get("plusMinus")         is not None: parts.append(f"{s['plusMinus']:+d} +/-")
+    if s.get("penaltyMinutes")    is not None: parts.append(f"{s['penaltyMinutes']} PIM")
+    if s.get("shotsOnTarget")     is not None: parts.append(f"{s['shotsOnTarget']} SOG")
+
+    # Baseball (MLB)
+    if s.get("battingAverage")    is not None: parts.append(f".{int(s['battingAverage']*1000):03d} AVG")
+    if s.get("homeRuns")          is not None: parts.append(f"{s['homeRuns']} HR")
+    if s.get("runsBattedIn")      is not None: parts.append(f"{s['runsBattedIn']} RBI")
+    if s.get("stolenBases")       is not None: parts.append(f"{s['stolenBases']} SB")
+    if s.get("onBasePlusSlugging") is not None: parts.append(f"{s['onBasePlusSlugging']:.3f} OPS")
+    if s.get("earnedRunAverage")  is not None: parts.append(f"{s['earnedRunAverage']:.2f} ERA")
+    if s.get("wins")              is not None: parts.append(f"{s['wins']}W-{s.get('losses',0)}L")
+    if s.get("strikeouts")        is not None: parts.append(f"{s['strikeouts']} K")
+    if s.get("whip")              is not None: parts.append(f"{s['whip']:.2f} WHIP")
+
+    # Tennis (ATP/WTA)
+    if s.get("aces")              is not None: parts.append(f"{s['aces']} aces")
+    if s.get("doubleFaults")      is not None: parts.append(f"{s['doubleFaults']} DFs")
+    if s.get("firstServePercentage") is not None: parts.append(f"{s['firstServePercentage']:.1f}% 1st serve")
+    if s.get("breakPointsConverted") is not None: parts.append(f"{s['breakPointsConverted']} BP conv.")
+
+    # Golf (PGA)
+    if s.get("scoringAverage")    is not None: parts.append(f"{s['scoringAverage']:.2f} scoring avg")
+    if s.get("drivingDistance")   is not None: parts.append(f"{s['drivingDistance']:.1f} yds driving")
+
+    # MMA / Boxing
+    if s.get("wins")              is not None and s.get("earnedRunAverage") is None:
+        parts.append(f"{s.get('wins',0)}W-{s.get('losses',0)}L-{s.get('draws',0)}D")
+    if s.get("knockouts")         is not None: parts.append(f"{s['knockouts']} KOs")
+    if s.get("submissions")       is not None: parts.append(f"{s['submissions']} subs")
+
+    # Cricket
+    if s.get("runs")              is not None: parts.append(f"{s['runs']} runs")
+    if s.get("wickets")           is not None: parts.append(f"{s['wickets']} wickets")
+    if s.get("battingAverage")    is None and s.get("average") is not None:
+        parts.append(f"{s['average']:.2f} avg")
+
+    # Rugby
+    if s.get("tries")             is not None: parts.append(f"{s['tries']} tries")
+    if s.get("tackles")           is not None: parts.append(f"{s['tackles']} tackles")
 
     if not parts:
         return None
@@ -589,21 +690,96 @@ async def sofa_team_recent_form(team_id: int, n: int = 5) -> Optional[str]:
 
 async def fetch_sofa_deep_context(title: str) -> Optional[str]:
     """
-    Full deep SofaScore research for a sports market.
+    Full deep SofaScore research for ANY sport in a market title.
+
+    Covers: NBA, NFL, MLB, NHL, NCAA, soccer (all leagues), tennis (ATP/WTA),
+    golf (PGA), MMA/UFC, boxing, rugby, cricket, handball, volleyball,
+    motorsport (F1/NASCAR), esports, cycling, darts, snooker — everything
+    SofaScore tracks.
 
     Runs in parallel:
-      1. Search for all players mentioned in title → per-game stats + last 5 games
-      2. Search for teams mentioned → recent form
-      3. H2H if two teams found
-      4. Live events matching title entities
-
-    Returns rich context block for AI.
+      1. Detect sport from title → fetch live events for that sport
+      2. Search for player names → per-game season stats + last 5 games
+      3. Search for team names → recent form
+      4. H2H between two teams if both found
     """
     import re as _re
 
-    # Extract player names (FirstName LastName pattern)
+    t_lower = title.lower()
+
+    # Detect sport slug from title keywords
+    _SPORT_KEYWORDS: List[Tuple[str, str]] = [
+        # American sports
+        ("nfl",          "american-football"),
+        ("super bowl",   "american-football"),
+        ("quarterback",  "american-football"),
+        ("touchdown",    "american-football"),
+        ("nba",          "basketball"),
+        ("wnba",         "basketball"),
+        ("basketball",   "basketball"),
+        ("march madness","basketball"),
+        ("final four",   "basketball"),
+        ("mlb",          "baseball"),
+        ("baseball",     "baseball"),
+        ("world series", "baseball"),
+        ("nhl",          "ice-hockey"),
+        ("hockey",       "ice-hockey"),
+        ("stanley cup",  "ice-hockey"),
+        ("ufc",          "mma"),
+        ("mma",          "mma"),
+        ("boxing",       "boxing"),
+        # Soccer / football
+        ("premier league","football"),
+        ("epl",           "football"),
+        ("laliga",        "football"),
+        ("bundesliga",    "football"),
+        ("serie a",       "football"),
+        ("ligue 1",       "football"),
+        ("champions league","football"),
+        ("europa league", "football"),
+        ("world cup",     "football"),
+        ("euros",         "football"),
+        ("mls",           "football"),
+        ("soccer",        "football"),
+        # Tennis
+        ("tennis",        "tennis"),
+        ("atp",           "tennis"),
+        ("wta",           "tennis"),
+        ("wimbledon",     "tennis"),
+        ("us open",       "tennis"),
+        ("french open",   "tennis"),
+        ("australian open","tennis"),
+        ("roland garros", "tennis"),
+        # Golf
+        ("golf",          "golf"),
+        ("pga",           "golf"),
+        ("masters",       "golf"),
+        ("open championship","golf"),
+        # Motorsport
+        ("formula 1",     "motorsport"),
+        ("f1",            "motorsport"),
+        ("grand prix",    "motorsport"),
+        ("nascar",        "motorsport"),
+        # Other
+        ("rugby",         "rugby"),
+        ("cricket",       "cricket"),
+        ("handball",      "handball"),
+        ("volleyball",    "volleyball"),
+        ("cycling",       "cycling"),
+        ("tour de france","cycling"),
+        ("darts",         "darts"),
+        ("snooker",       "snooker"),
+        ("esports",       "esports"),
+    ]
+
+    detected_slug = "football"  # default to soccer (most global)
+    for kw, slug in _SPORT_KEYWORDS:
+        if kw in t_lower:
+            detected_slug = slug
+            break
+
+    # Extract player names (FirstName LastName) and team/entity names
     players = _re.findall(r"\b[A-Z][a-z]+\s+[A-Z][a-z]+\b", title)
-    # Extract likely team names (capitalized sequences)
     teams   = _re.findall(r"\b(?:the\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b", title)
     teams   = [t for t in teams if len(t) > 4 and t not in players][:3]
 
@@ -612,8 +788,21 @@ async def fetch_sofa_deep_context(title: str) -> Optional[str]:
 
     blocks = []
 
+    # ── Live events for this sport ────────────────────────────────────────────
+    live_events = await fetch_sofa_live(detected_slug)
+    if live_events:
+        live_lines = []
+        for ev in live_events[:4]:
+            home  = (ev.get("homeTeam") or {}).get("name", "?")
+            away  = (ev.get("awayTeam") or {}).get("name", "?")
+            hs    = (ev.get("homeScore") or {}).get("current", "?")
+            as_   = (ev.get("awayScore") or {}).get("current", "?")
+            live_lines.append(f"  🔴 {home} {hs}–{as_} {away} (LIVE)")
+        if live_lines:
+            blocks.append("Live now on SofaScore:\n" + "\n".join(live_lines))
+
     # ── Player stats ─────────────────────────────────────────────────────────
-    for player_name in players[:2]:
+    for player_name in players[:3]:
         pid = await sofa_search_player(player_name)
         if not pid:
             continue
@@ -624,16 +813,16 @@ async def fetch_sofa_deep_context(title: str) -> Optional[str]:
             return_exceptions=True,
         )
 
-        player_lines = [f"📊 **{player_name}** (via SofaScore)"]
+        player_lines = [f"📊 **{player_name}** (SofaScore)"]
         if isinstance(season_stats, str) and season_stats:
-            player_lines.append(f"  This season: {season_stats}")
+            player_lines.append(f"  Season: {season_stats}")
         if isinstance(last_games, str) and last_games:
             player_lines.append(f"  {last_games}")
         if len(player_lines) > 1:
             blocks.append("\n".join(player_lines))
 
     # ── Team form + H2H ──────────────────────────────────────────────────────
-    team_ids = []
+    team_ids: List[Tuple[str, int]] = []
     for team_name in teams[:2]:
         tid = await sofa_search_team(team_name)
         if tid:
@@ -652,7 +841,8 @@ async def fetch_sofa_deep_context(title: str) -> Optional[str]:
     if not blocks:
         return None
 
-    return "=== SOFASCORE DEEP STATS ===\n" + "\n\n".join(blocks)
+    sport_label = detected_slug.replace("-", " ").title()
+    return f"=== SOFASCORE DEEP STATS ({sport_label}) ===\n" + "\n\n".join(blocks)
 
 
 async def fetch_statmuse(query: str, sport: str = "") -> Optional[str]:
