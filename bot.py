@@ -604,18 +604,17 @@ class TradingBot:
 
         async def bot_alert_loop():
             """
-            Every 10 minutes: fire ONE bundled BOT ALERT for live events happening
-            RIGHT NOW. Then, ~1 minute after each alerted pick resolves or the bot
-            takes an action, fire a color-coded follow-up result:
+            Scans every 10 min — fires Discord ONLY when there is something NEW:
+              • A brand-new high-confidence live bid the bot just opted into
+              • A live event bid not previously alerted (or confidence jumped a band)
 
-              🟢 WE GOT THE BAG        — position closed in profit
-              🔴 WE LOST BUT WE KEEP   — position closed at a loss
-              🟡 HAVE TO OPT OUT       — bot exited early (conditions changed)
-              🟤 I SAW A SWEET BID     — new high-confidence bid just entered
+            SILENT when:
+              • No new picks found
+              • Same picks as last time (already in _alerted at same band)
+              • No live event happening right now
 
-            Two sources qualify for the initial alert:
-              1. Active live slots — bot already entered an in-play trade.
-              2. BUY evaluations where the underlying event is confirmed live NOW.
+            Follow-up result fires ~1 min after a position closes:
+              🟢 WE GOT THE BAG  🔴 WE LOST  🟡 HAVE TO OPT OUT  🟤 NEW BID
             """
             from src.alerts.discord import DiscordAlerter
             from src.utils.daily_stats import stats as _da
@@ -625,6 +624,8 @@ class TradingBot:
             # ticker → {band, pick_snapshot, alerted_at, result_sent}
             _alerted: dict = {}
             _alerted_date  = datetime.now(timezone.utc).date()
+            # frozenset of ticker+band keys sent in last alert — prevents re-sending same bundle
+            _last_sent_keys: frozenset = frozenset()
 
             BOT_ALERT_INTERVAL = 600   # scan every 10 min
             RESULT_CHECK_DELAY = 60    # check results 60s after alert
@@ -783,8 +784,18 @@ class TradingBot:
                         new_picks.sort(
                             key=lambda x: (0 if x.get("is_live") else 1, -x.get("confidence", 0))
                         )
-                        await discord.bot_alert(new_picks[:6], mode=mode)
-                        logger.info("BOT ALERT fired: %d picks", len(new_picks))
+                        # Build a fingerprint of this batch — ticker + confidence band
+                        batch_keys = frozenset(
+                            f"{p.get('ticker')}:{int(p.get('confidence',0)//10)*10}"
+                            for p in new_picks
+                        )
+                        # Only fire if this is genuinely different from last alert
+                        if batch_keys != _last_sent_keys:
+                            await discord.bot_alert(new_picks[:6], mode=mode)
+                            _last_sent_keys = batch_keys
+                            logger.info("BOT ALERT fired: %d new picks", len(new_picks))
+                        else:
+                            logger.debug("BOT ALERT skipped — same picks as last send")
 
                     # Check results for previously alerted picks
                     await _check_and_post_results(discord, mode)
