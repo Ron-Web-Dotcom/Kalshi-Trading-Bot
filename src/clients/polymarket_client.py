@@ -12,6 +12,7 @@ import time
 from typing import Dict, List, Optional
 
 import httpx
+import os
 
 logger = logging.getLogger("trading.polymarket_client")
 
@@ -23,6 +24,10 @@ _HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; trading-bot/1.0)",
     "Accept": "application/json",
 }
+
+# Set POLY_PROXY_URL in .env to route Polymarket through a residential proxy:
+# e.g. POLY_PROXY_URL=http://username:password@proxy-host:port
+_PROXY_URL = os.environ.get("POLY_PROXY_URL", "")
 
 
 class PolymarketTradingClient:
@@ -43,7 +48,14 @@ class PolymarketTradingClient:
 
     def _client(self) -> httpx.AsyncClient:
         if self._http is None or self._http.is_closed:
-            self._http = httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS)
+            proxy = _PROXY_URL or None
+            if proxy:
+                logger.debug("Polymarket: using proxy %s", proxy.split("@")[-1])
+            self._http = httpx.AsyncClient(
+                timeout=_TIMEOUT,
+                headers=_HEADERS,
+                proxy=proxy,
+            )
         return self._http
 
     # ── Market data (PUBLIC — no auth) ────────────────────────────────────────
