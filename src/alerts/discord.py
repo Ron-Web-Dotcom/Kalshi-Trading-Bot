@@ -847,6 +847,7 @@ class DiscordAlerter:
         paper_pnl: float,
         unrealised_pnl: float = 0.0,
         live_open_positions: int = 0,
+        open_by_platform: Optional[Dict] = None,
         paper: bool = True,
         closed_trades: Optional[List[Dict]] = None,
         win_rate: float = 0.0,
@@ -980,16 +981,28 @@ class DiscordAlerter:
             slots_str = f"⚡ **0/{live_slots_max}** in-play — no live events right now"
 
         regular_open = max(0, open_positions - live_open_positions)
+        plat = open_by_platform or {}
+        kal_n  = plat.get("kalshi", 0) + plat.get(None, 0)
+        poly_n = plat.get("polymarket", 0)
+
         if open_positions == 0:
             pos_line = "**0** open bets right now"
-        elif live_open_positions > 0:
-            pos_line = (
-                f"**{open_positions}** open bets — "
-                f"⚡ **{live_open_positions}** live in-play + "
-                f"🎯 **{regular_open}** regular"
-            )
         else:
-            pos_line = f"**{open_positions}** open bets — 🎯 all regular (no live events right now)"
+            plat_parts = []
+            if kal_n:
+                plat_parts.append(f"🟦 **{kal_n}** Kalshi")
+            if poly_n:
+                plat_parts.append(f"🟣 **{poly_n}** Polymarket")
+            plat_str = " + ".join(plat_parts) if plat_parts else f"**{open_positions}**"
+
+            if live_open_positions > 0:
+                pos_line = (
+                    f"**{open_positions}** open bets ({plat_str}) — "
+                    f"⚡ **{live_open_positions}** live in-play + "
+                    f"🎯 **{regular_open}** regular"
+                )
+            else:
+                pos_line = f"**{open_positions}** open bets ({plat_str}) — 🎯 all regular"
 
         positions_val = (
             f"{pos_line}\n"

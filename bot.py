@@ -195,14 +195,25 @@ class TradingBot:
                     poly_count    = (poly_row or {}).get("n", 0)
                     markets_total = kalshi_count + poly_count
 
-                    # Open positions — actual live count from DB
-                    open_row = await self.db.fetchone(
-                        "SELECT COUNT(*) as n FROM positions WHERE status='open'"
+                    # Open positions — ALL platforms (Kalshi + Polymarket), live + regular
+                    open_rows = await self.db.fetchall(
+                        "SELECT platform, COUNT(*) as n FROM positions "
+                        "WHERE status='open' GROUP BY platform"
                     )
-                    open_n = (open_row or {}).get("n", 0)
-                    # Live in-play count from live slot manager
+                    open_n = sum((r.get("n") or 0) for r in (open_rows or []))
+                    open_by_platform = {r.get("platform", "kalshi"): r.get("n", 0) for r in (open_rows or [])}
+                    # Live in-play tickers from live slot manager
                     from src.jobs.live_market_manager import _live_slots as _hb_ls
-                    live_open_n = len(_hb_ls)
+                    live_tickers = set(_hb_ls.keys())
+                    # Count live open positions across both platforms
+                    live_open_rows = await self.db.fetchall(
+                        "SELECT COUNT(*) as n FROM positions WHERE status='open' AND ticker IN ({})".format(
+                            ",".join("?" * len(live_tickers))
+                        ) if live_tickers else
+                        "SELECT 0 as n",
+                        tuple(live_tickers) if live_tickers else (),
+                    )
+                    live_open_n = (live_open_rows[0].get("n") or 0) if live_open_rows else 0
 
                     # Today's PnL (paper or live depending on mode)
                     _paper_flag = 0 if settings.trading.live_trading_enabled else 1
@@ -319,6 +330,7 @@ class TradingBot:
                         top_candidates=top_candidates,
                         open_positions=open_n,
                         live_open_positions=live_open_n,
+                        open_by_platform=open_by_platform,
                         paper_pnl=paper_pnl,
                         unrealised_pnl=unrealised_pnl,
                         paper=not settings.trading.live_trading_enabled,
