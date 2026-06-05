@@ -91,11 +91,8 @@ class KalshiClient:
         await self._rate_limit()
         client = await self._get_client()
         body_str = json.dumps(body) if body else ""
-        # Kalshi RSA signature must include query string when present
-        sign_path = path
-        if params:
-            sign_path = path + "?" + urlencode({k: v for k, v in params.items() if v is not None})
-        headers = self._build_headers(method, sign_path, body_str)
+        # Kalshi v2 RSA signature uses path only — no query string
+        headers = self._build_headers(method, path, body_str)
 
         for attempt in range(retries):
             try:
