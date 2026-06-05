@@ -1110,6 +1110,8 @@ class TradingBot:
                             "AND (status='open' OR status='') "
                             "AND title IS NOT NULL AND title != '' "
                             "AND title NOT LIKE '0x%' "
+                            "AND close_time > datetime('now', '+24 hours') "
+                            "AND close_time < datetime('now', '+7 days') "
                             + _kal_excl +
                             "ORDER BY RANDOM() LIMIT 3",
                             _kal_excl_params,
@@ -1126,6 +1128,8 @@ class TradingBot:
                                 "AND (status='open' OR status='') "
                                 "AND title IS NOT NULL AND title != '' "
                                 "AND title NOT LIKE '0x%' "
+                                "AND close_time > datetime('now', '+24 hours') "
+                                "AND close_time < datetime('now', '+7 days') "
                                 "ORDER BY RANDOM() LIMIT 3"
                             )
                             _kal_reg = [dict(r, platform="kalshi") for r in (_kal_rows2 or [])]
@@ -1148,6 +1152,8 @@ class TradingBot:
                             "AND (status='open' OR status='') "
                             "AND title IS NOT NULL AND title != '' "
                             "AND title NOT LIKE '0x%' "
+                            "AND close_time > datetime('now', '+24 hours') "
+                            "AND close_time < datetime('now', '+7 days') "
                             + _poly_excl +
                             "ORDER BY RANDOM() LIMIT 3",
                             _poly_excl_params,
@@ -1163,6 +1169,8 @@ class TradingBot:
                                 "AND (status='open' OR status='') "
                                 "AND title IS NOT NULL AND title != '' "
                                 "AND title NOT LIKE '0x%' "
+                                "AND close_time > datetime('now', '+24 hours') "
+                                "AND close_time < datetime('now', '+7 days') "
                                 "ORDER BY RANDOM() LIMIT 3"
                             )
                             _poly_reg = [dict(r) for r in (_poly_rows2 or [])]
