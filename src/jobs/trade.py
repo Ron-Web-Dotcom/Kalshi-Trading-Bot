@@ -420,11 +420,16 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             return bool(t and t in open_titles)
 
         # ── Live / in-play market pool (highest priority) ─────────────────────
-        # Fetch directly from both APIs — these are events resolving in <2 hours
+        # Two-pass live detection:
+        #   Pass 1 — time-based: markets closing within 6h on Kalshi, all active on Poly
+        #   Pass 2 — event-based: is_event_live_now() checks titles against sports/news APIs
+        #            catches events that started but have markets closing in 24h+
+        from src.data.live_event_detector import is_event_live_now
+
         live_kalshi_raw  = []
         live_poly_raw    = []
         try:
-            live_kalshi_raw = await kalshi.get_live_markets(max_hours=2.0, max_markets=500)
+            live_kalshi_raw = await kalshi.get_live_markets(max_hours=6.0, max_markets=500)
         except Exception as _le:
             logger.debug("Live Kalshi fetch skipped: %s", _le)
         if poly_enabled:
@@ -432,6 +437,38 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 live_poly_raw = await poly_client.get_live_markets(max_hours=48.0, max_markets=500)
             except Exception as _le:
                 logger.debug("Live Polymarket fetch skipped: %s", _le)
+
+        # Pass 2 — pull broader Kalshi markets (up to 24h) and check if event is live NOW
+        try:
+            kalshi_24h_raw = await kalshi.get_live_markets(max_hours=24.0, max_markets=500)
+            live_check_tasks = [
+                is_event_live_now(m.get("title", ""))
+                for m in kalshi_24h_raw
+                if m.get("ticker") not in {x.get("ticker") for x in live_kalshi_raw}
+            ]
+            if live_check_tasks:
+                live_check_results = await asyncio.gather(*live_check_tasks, return_exceptions=True)
+                extra_kalshi = kalshi_24h_raw[len(live_kalshi_raw):]
+                for m, result in zip(extra_kalshi, live_check_results):
+                    if result is True:
+                        live_kalshi_raw.append(m)
+        except Exception as _le:
+            logger.debug("Live event detector pass skipped: %s", _le)
+
+        # Pass 2 for Polymarket — check all active markets for live events
+        if poly_enabled:
+            try:
+                poly_all_raw = await poly_client.get_live_markets(max_hours=48.0, max_markets=500)
+                poly_seen = {m.get("ticker") for m in live_poly_raw}
+                poly_extra = [m for m in poly_all_raw if m.get("ticker") not in poly_seen]
+                poly_live_tasks = [is_event_live_now(m.get("title", "")) for m in poly_extra]
+                if poly_live_tasks:
+                    poly_live_results = await asyncio.gather(*poly_live_tasks, return_exceptions=True)
+                    for m, result in zip(poly_extra, poly_live_results):
+                        if result is True:
+                            live_poly_raw.append(m)
+            except Exception as _le:
+                logger.debug("Poly live event pass skipped: %s", _le)
 
         live_kalshi = [
             m for m in live_kalshi_raw
@@ -449,7 +486,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         ]
         if live_kalshi or live_poly:
             logger.info(
-                "── LIVE MARKETS: %d Kalshi in-play (≤2h) + %d Polymarket in-play (≤48h) ─",
+                "── LIVE MARKETS: %d Kalshi in-play + %d Polymarket in-play ─",
                 len(live_kalshi), len(live_poly),
             )
             for lm in live_kalshi[:5]:
