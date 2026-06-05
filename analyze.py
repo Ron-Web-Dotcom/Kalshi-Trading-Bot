@@ -7,7 +7,8 @@ Usage: python analyze.py
 import sqlite3
 from datetime import datetime, timezone
 
-DB_PATH = "/home/user/Kalshi-Trading-Bot/trading_system.db"
+import os
+DB_PATH = os.environ.get("DB_PATH", os.path.join(os.path.dirname(__file__), "trading_system.db"))
 
 def run():
     con = sqlite3.connect(DB_PATH)
