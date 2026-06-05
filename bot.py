@@ -882,22 +882,68 @@ class TradingBot:
                         except Exception:
                             pass
 
-                    # ── 2. LIVE EVENT SCAN — find markets for events live right now ─
+                    # ── 2. LIVE EVENT SCAN — ALL categories + sub-categories ──────
+                    # Pull every open market from DB across all categories.
+                    # Price normalised: stored as cents (45) or decimal (0.45) both work.
                     try:
-                        # Pull candidates from DB — short-closing and any open market
                         candidates = await self.db.fetchall(
-                            "SELECT ticker, title, yes_ask, no_ask, volume, platform, "
-                            "close_time, category FROM markets "
+                            "SELECT ticker, title, yes_ask, no_ask, last_price, volume, "
+                            "platform, close_time, category FROM markets "
                             "WHERE (status='open' OR status='') "
-                            "AND yes_ask > 3 AND yes_ask < 97 "
+                            "AND (yes_ask > 0 OR last_price > 0) "
                             "AND title IS NOT NULL AND title != '' "
-                            "ORDER BY "
-                            "  CASE WHEN close_time IS NOT NULL AND close_time != '' THEN 1 ELSE 2 END, "
-                            "  close_time ASC, volume DESC "
-                            "LIMIT 60"
+                            "ORDER BY volume DESC, close_time ASC "
+                            "LIMIT 2000"
                         ) or []
-                    except Exception:
+                        # Normalise prices so downstream code always sees cents format
+                        normed = []
+                        for r in candidates:
+                            m = dict(r)
+                            def _n(v):
+                                try:
+                                    f = float(v or 0)
+                                    return f if f <= 1.0 else f / 100.0
+                                except Exception:
+                                    return 0.0
+                            ya = _n(m.get("yes_ask") or m.get("last_price"))
+                            if 0.03 <= ya <= 0.97:   # 3¢–97¢ tradeable range
+                                m["yes_ask"] = round(ya * 100, 2)
+                                m["no_ask"]  = round((1 - ya) * 100, 2)
+                                normed.append(m)
+                        candidates = normed
+                    except Exception as _ce:
+                        logger.debug("Live scan DB query failed: %s", _ce)
                         candidates = []
+
+                    # Also pull live-now markets directly from both platforms
+                    try:
+                        from src.clients.kalshi_client import KalshiClient as _KC
+                        from src.clients.polymarket_client import PolymarketTradingClient as _PC
+                        _kc = _KC()
+                        _pc = _PC()
+                        kalshi_live_now, poly_live_now = await asyncio.gather(
+                            _kc.get_live_now_markets(max_markets=200),
+                            _pc.get_live_now_markets(max_markets=200),
+                            return_exceptions=True,
+                        )
+                        for m in (kalshi_live_now if isinstance(kalshi_live_now, list) else []):
+                            m["_platform_live"] = True
+                            candidates.append(m)
+                        for m in (poly_live_now if isinstance(poly_live_now, list) else []):
+                            m["_platform_live"] = True
+                            candidates.append(m)
+                    except Exception as _pe:
+                        logger.debug("Live platform fetch in scan loop: %s", _pe)
+
+                    # Deduplicate by ticker
+                    seen_t: set = set()
+                    deduped = []
+                    for m in candidates:
+                        t = m.get("ticker") or m.get("condition_id") or ""
+                        if t and t not in seen_t:
+                            deduped.append(m)
+                            seen_t.add(t)
+                    candidates = deduped
 
                     # Filter to markets where the underlying event is live RIGHT NOW
                     already_tracked  = {t for t in live_miss_tracker._misses}
@@ -910,20 +956,35 @@ class TradingBot:
                     except Exception:
                         pass
 
+                    # Run is_event_live_now() in parallel for all candidates
+                    # Skip check for markets already confirmed live by platform API
                     live_candidates = []
+                    to_check = []
                     for m in candidates:
-                        ticker = m.get("ticker", "")
+                        ticker = m.get("ticker", "") or m.get("condition_id", "")
                         title  = m.get("title", "") or ""
                         if not ticker or not title:
                             continue
                         if ticker in already_position:
-                            continue   # already in a position — not a miss
-                        try:
-                            is_live = await is_event_live_now(title)
-                        except Exception:
-                            is_live = False
-                        if is_live:
+                            continue
+                        if m.get("_platform_live"):
+                            # Already confirmed live by Kalshi/Poly native API
                             live_candidates.append(dict(m))
+                        else:
+                            to_check.append(dict(m))
+
+                    # Parallel live check on remaining candidates
+                    if to_check:
+                        try:
+                            check_results = await asyncio.gather(
+                                *[is_event_live_now(m.get("title", "")) for m in to_check],
+                                return_exceptions=True,
+                            )
+                            for m, result in zip(to_check, check_results):
+                                if result is True:
+                                    live_candidates.append(m)
+                        except Exception as _lce:
+                            logger.debug("Parallel live check error: %s", _lce)
 
                     if not live_candidates:
                         # Still run hourly digest even if no new live markets
@@ -934,9 +995,9 @@ class TradingBot:
                             len(live_candidates), len(candidates),
                         )
 
-                    # ── 3. AI-EVALUATE live candidates — record misses ─────────
+                    # ── 3. AI-EVALUATE live candidates — find cheeky bids ─────
                     engine = AIDecisionEngine(db=self.db)
-                    for m in live_candidates[:8]:   # cap at 8 per cycle to control AI cost
+                    for m in live_candidates[:20]:  # up to 20 live markets per 5-min cycle
                         ticker = m.get("ticker", "")
                         title  = m.get("title", "")
 
