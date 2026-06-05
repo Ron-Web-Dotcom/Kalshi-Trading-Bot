@@ -377,6 +377,8 @@ class TradingBot:
                         live_slots=len(_live_slots),
                         live_slots_max=MAX_LIVE_POSITIONS,
                         all_evaluations=list(daily_stats.all_evaluations),
+                        live_scan_markets=list(daily_stats.last_live_scan_markets),
+                        regular_scan_top=list(daily_stats.last_regular_scan_top),
                     )
                 except Exception as e:
                     logger.error("Hourly heartbeat error: %s", e)
@@ -1094,13 +1096,23 @@ class TradingBot:
                             logger.debug("Parallel live check error: %s", _lce)
 
                     if not live_candidates:
-                        # Still run hourly digest even if no new live markets
                         pass
                     else:
                         logger.info(
                             "Live miss scan: %d live-event markets found out of %d candidates",
                             len(live_candidates), len(candidates),
                         )
+
+                    # Update shared scan state for hourly heartbeat
+                    from src.utils.daily_stats import stats as _scan_stats
+                    _scan_stats.update_scan_state(
+                        live_markets=live_candidates,
+                        regular_top=[
+                            dict(m, _scan_type="regular")
+                            for m in candidates[:6]
+                            if m.get("title") and not m.get("_platform_live")
+                        ],
+                    )
 
                     # ── 3. AI-EVALUATE live candidates — find cheeky bids ─────
                     engine = AIDecisionEngine(db=self.db)

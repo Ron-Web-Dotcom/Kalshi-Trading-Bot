@@ -28,6 +28,20 @@ class DailyStats:
         self.poly_matches: int = 0
         self.suspicious_matches: List[Dict] = []
         self.consecutive_losses: int = 0
+        # Live scan state — updated by live_miss_scan_loop each cycle
+        self.last_live_scan_markets: List[Dict] = []   # confirmed live-now markets this hour
+        self.last_regular_scan_top: List[Dict] = []    # top pre-scored regular candidates this hour
+        self.last_scan_updated_at: str = ""
+
+    def update_scan_state(
+        self,
+        live_markets: List[Dict],
+        regular_top: List[Dict],
+    ) -> None:
+        """Called after each scan cycle to keep heartbeat data fresh."""
+        self.last_live_scan_markets = live_markets[:6]
+        self.last_regular_scan_top  = regular_top[:6]
+        self.last_scan_updated_at   = datetime.now(timezone.utc).isoformat()
 
     # ── Recording methods ──────────────────────────────────────────────────
 
@@ -212,6 +226,9 @@ class DailyStats:
         self.suspicious_matches = []
         self.consecutive_losses = 0
         self.all_evaluations = []   # reset daily — fresh picks each day
+        self.last_live_scan_markets = []
+        self.last_regular_scan_top  = []
+        self.last_scan_updated_at   = ""
         logger.info("Daily stats reset for new day.")
 
     def snapshot(self) -> Dict:

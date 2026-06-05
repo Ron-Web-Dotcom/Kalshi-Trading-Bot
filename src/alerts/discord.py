@@ -889,6 +889,8 @@ class DiscordAlerter:
         live_slots: int = 0,
         live_slots_max: int = 3,
         all_evaluations: Optional[List[Dict]] = None,
+        live_scan_markets: Optional[List[Dict]] = None,
+        regular_scan_top: Optional[List[Dict]] = None,
     ) -> None:
         """Hourly heartbeat — clean stats, watching section, best pick."""
         from src.utils.eastern_time import format_et, et_label
@@ -952,50 +954,53 @@ class DiscordAlerter:
             wr_emoji   = "🆕"
             record_str = "Just started — scanning now. First evaluation will appear here shortly."
 
-        # ── Watching — dynamic: timed labels + AI verdict ─────────────────────
-        # Build a lookup: ticker → AI evaluation (so we can overlay what bot thinks)
+        # ── Scan Results — live events + regular top picks ────────────────────
         eval_by_ticker: Dict[str, Dict] = {}
         for e in all_evals:
             t = e.get("ticker", "")
             if t and t not in eval_by_ticker:
                 eval_by_ticker[t] = e
 
-        watch_lines = []
-        kal_shown = poly_shown = 0
-        for c in top_candidates:
-            if kal_shown >= 3 and poly_shown >= 3:
-                break
-            plat = c.get("platform", "kalshi")
-            if plat == "polymarket" and poly_shown >= 3:
-                continue
-            if plat != "polymarket" and kal_shown >= 3:
-                continue
-
+        def _market_line(m: Dict, badge: str = "") -> str:
+            plat   = m.get("platform", "kalshi")
             icon   = "🟣" if plat == "polymarket" else "🟦"
-            title  = self._display_ticker(c.get("ticker", ""), c.get("title", "") or "")
-            yes    = float(c.get("yes_ask", 0) or 0)
-            no     = float(c.get("no_ask", 0) or (100 - yes if yes else 0))
-            timing = _timing(c.get("close_time", ""))
-
-            ev = eval_by_ticker.get(c.get("ticker", ""))
+            title  = self._display_ticker(m.get("ticker", ""), m.get("title", "") or "")[:55]
+            yes    = float(m.get("yes_ask", 0) or 0)
+            no     = float(m.get("no_ask", 0) or (100 - yes if yes else 0))
+            timing = _timing(m.get("close_time", ""))
+            ev     = eval_by_ticker.get(m.get("ticker", ""))
             if ev:
                 action = ev.get("action", "HOLD")
                 conf   = ev.get("confidence", 0)
+                ev_val = ev.get("net_ev")
+                ev_s   = f" EV {ev_val:+.1f}¢" if ev_val is not None else ""
                 a_icon = "🟢 BUY" if action == "BUY" else "⏸ HOLD"
-                ai_str = f"\n🤖 Bot: {a_icon} ({conf:.0f}% conf)"
+                ai_str = f"\n🤖 {a_icon} {conf:.0f}% conf{ev_s}"
             else:
-                ai_str = ""
+                ai_str = "\n🤖 Not yet evaluated"
+            return f"{icon}{badge} **{title}** — {timing}\nYES {yes:.0f}¢ | NO {no:.0f}¢{ai_str}"
 
-            watch_lines.append(
-                f"{icon} **{title}** — {timing}\n"
-                f"YES {yes:.0f}¢ | NO {no:.0f}¢{ai_str}"
-            )
-            if plat == "polymarket":
-                poly_shown += 1
-            else:
-                kal_shown += 1
+        # Live scan section
+        live_mkts = live_scan_markets or []
+        if live_mkts:
+            live_lines = [_market_line(m, " ⚡") for m in live_mkts[:4]]
+            live_section = "\n\n".join(live_lines)
+        else:
+            live_section = "_No live events confirmed this scan_"
 
-        watching = "\n\n".join(watch_lines) or "_Scanning... no candidates yet_"
+        # Regular scan top picks
+        reg_mkts = regular_scan_top or top_candidates or []
+        reg_lines = []
+        seen_reg = set()
+        for m in reg_mkts[:6]:
+            t = m.get("ticker", "")
+            if t in seen_reg:
+                continue
+            seen_reg.add(t)
+            reg_lines.append(_market_line(m))
+            if len(reg_lines) >= 4:
+                break
+        regular_section = "\n\n".join(reg_lines) or "_Scanning... no candidates yet_"
 
         # ── Open Positions — plain-English PnL ───────────────────────────────
         locked_s = "+" if paper_pnl >= 0 else ""
@@ -1058,8 +1063,13 @@ class DiscordAlerter:
                 "inline": False,
             },
             {
-                "name":   "👀 What The Bot Is Watching Right Now",
-                "value":  watching,
+                "name":   "⚡ Live Events This Scan",
+                "value":  live_section,
+                "inline": False,
+            },
+            {
+                "name":   "🔍 Regular Scan — Top Picks",
+                "value":  regular_section,
                 "inline": False,
             },
             {
