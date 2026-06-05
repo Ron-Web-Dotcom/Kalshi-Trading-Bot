@@ -379,15 +379,29 @@ class CategoryScanner:
                 "FROM markets "
                 "WHERE (status='open' OR status='') "
                 "AND (platform='kalshi' OR platform IS NULL) "
-                "AND yes_ask > 2 AND yes_ask < 98 "
+                "AND (yes_ask > 0 OR last_price > 0) "
                 "AND title IS NOT NULL AND title != '' "
                 "ORDER BY volume DESC"
             ) or []
 
+            def _norm_price(v):
+                try:
+                    f = float(v or 0)
+                    return f if f <= 1.0 else f / 100.0
+                except Exception:
+                    return 0.0
+
             by_cat: Dict[str, List] = defaultdict(list)
             for r in rows:
-                cat = _normalize_cat(r.get("category") or "general")
-                by_cat[cat].append(dict(r))
+                m = dict(r)
+                # Normalise prices to 0-1 range regardless of storage format
+                ya = _norm_price(m.get("yes_ask") or m.get("last_price") or m.get("yes_bid"))
+                if ya <= 0 or ya >= 1:
+                    continue
+                m["yes_ask"] = round(ya * 100, 2)   # store as cents for downstream compat
+                m["no_ask"]  = round((1 - ya) * 100, 2)
+                cat = _normalize_cat(m.get("category") or "general")
+                by_cat[cat].append(m)
 
             result = []
             for cat, mlist in by_cat.items():

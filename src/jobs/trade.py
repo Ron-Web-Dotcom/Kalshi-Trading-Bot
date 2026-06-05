@@ -545,8 +545,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     live_contracts = (live_size / (live_price / 100)) if live_price > 0 else 0
                     live_exp_profit = live_contracts * (live_net_ev / 100) if live_net_ev else None
                     live_roi = (live_exp_profit / live_size * 100) if (live_exp_profit and live_size) else None
-                    live_min_roi = max(2.0, settings.trading.min_profit_roi_pct * 0.4)
-                    live_min_abs = max(0.50, settings.trading.min_profit_abs_usd * 0.5)
+                    live_min_roi = settings.trading.min_profit_roi_pct * 0.4
+                    live_min_abs = settings.trading.min_profit_abs_usd * 0.4
 
                     if live_exp_profit is None or live_exp_profit < live_min_abs or (live_roi or 0) < live_min_roi:
                         logger.info(
@@ -751,14 +751,13 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             exp_profit_usd = contracts_est * (net_ev / 100) if net_ev is not None else None
             roi_pct        = (exp_profit_usd / planned_size_usd * 100) if (exp_profit_usd and planned_size_usd) else None
 
-            # Live markets resolve quickly — relax the profit gate (2% ROI / $0.50 min)
-            # Regular markets keep the standard gate (5% ROI / $1.00 min)
+            # Use settings directly — no hardcoded floors overriding config
+            min_roi = settings.trading.min_profit_roi_pct
+            min_abs = settings.trading.min_profit_abs_usd
             if is_live_market:
-                min_roi = max(2.0, settings.trading.min_profit_roi_pct * 0.4)
-                min_abs = max(0.50, settings.trading.min_profit_abs_usd * 0.5)
-            else:
-                min_roi = settings.trading.min_profit_roi_pct
-                min_abs = settings.trading.min_profit_abs_usd
+                # Live markets resolve fast — relax gate by 60%
+                min_roi *= 0.4
+                min_abs *= 0.4
 
             if exp_profit_usd is None or exp_profit_usd < min_abs or (roi_pct or 0) < min_roi:
                 skip_reason = (
