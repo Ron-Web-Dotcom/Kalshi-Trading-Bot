@@ -63,8 +63,12 @@ class KalshiClient:
     def _sign_request(self, method: str, path: str, body: str = "") -> Dict[str, str]:
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.asymmetric import padding
+        from urllib.parse import urlparse
         ts = str(int(time.time() * 1000))
-        msg = ts + method.upper() + path + body
+        # Kalshi expects full path in signature (e.g. /trade-api/v2/markets)
+        base_path = urlparse(self.cfg.base_url).path.rstrip("/")
+        full_path = base_path + path if not path.startswith(base_path) else path
+        msg = ts + method.upper() + full_path
         sig = self._private_key.sign(msg.encode(), padding.PKCS1v15(), hashes.SHA256())
         return {
             "KALSHI-ACCESS-KEY": self.cfg.api_key_id,
