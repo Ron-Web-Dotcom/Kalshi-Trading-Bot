@@ -845,6 +845,8 @@ class TradingBot:
 
             LIVE_SCAN_INTERVAL  = 300   # 5 min
             _last_hour_digest   = None
+            _shown_reg_kal: set = set()   # rotate Kalshi regular picks each scan
+            _shown_reg_poly: set = set()  # rotate Poly regular picks each scan
 
             await asyncio.sleep(90)   # let bot warm up first
             logger.info("Live miss scan loop started — scanning every %ds", LIVE_SCAN_INTERVAL)
@@ -1071,31 +1073,78 @@ class TradingBot:
                     _kal_reg = []
                     _poly_reg = []
                     try:
+                        _kal_excl = ""
+                        _kal_excl_params: tuple = ()
+                        if _shown_reg_kal:
+                            _kal_excl = "AND ticker NOT IN ({}) ".format(
+                                ",".join("?" * len(_shown_reg_kal))
+                            )
+                            _kal_excl_params = tuple(_shown_reg_kal)
                         _kal_rows = await self.db.fetchall(
-                            "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time "
+                            "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time, category "
                             "FROM markets "
                             "WHERE (platform='kalshi' OR platform IS NULL) "
                             "AND yes_ask > 10 AND yes_ask < 90 "
                             "AND (status='open' OR status='') "
                             "AND title IS NOT NULL AND title != '' "
                             "AND title NOT LIKE '0x%' "
-                            "ORDER BY volume DESC LIMIT 3"
+                            + _kal_excl +
+                            "ORDER BY RANDOM() LIMIT 3",
+                            _kal_excl_params,
                         )
                         _kal_reg = [dict(r, platform="kalshi") for r in (_kal_rows or [])]
+                        # If exclusion left nothing, reset and start fresh
+                        if not _kal_reg:
+                            _shown_reg_kal.clear()
+                            _kal_rows2 = await self.db.fetchall(
+                                "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time, category "
+                                "FROM markets "
+                                "WHERE (platform='kalshi' OR platform IS NULL) "
+                                "AND yes_ask > 10 AND yes_ask < 90 "
+                                "AND (status='open' OR status='') "
+                                "AND title IS NOT NULL AND title != '' "
+                                "AND title NOT LIKE '0x%' "
+                                "ORDER BY RANDOM() LIMIT 3"
+                            )
+                            _kal_reg = [dict(r, platform="kalshi") for r in (_kal_rows2 or [])]
+                        _shown_reg_kal.update(r["ticker"] for r in _kal_reg)
                     except Exception:
                         pass
                     try:
+                        _poly_excl = ""
+                        _poly_excl_params: tuple = ()
+                        if _shown_reg_poly:
+                            _poly_excl = "AND ticker NOT IN ({}) ".format(
+                                ",".join("?" * len(_shown_reg_poly))
+                            )
+                            _poly_excl_params = tuple(_shown_reg_poly)
                         _poly_rows = await self.db.fetchall(
-                            "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time "
+                            "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time, category "
                             "FROM markets "
                             "WHERE platform='polymarket' "
                             "AND yes_ask > 10 AND yes_ask < 90 "
                             "AND (status='open' OR status='') "
                             "AND title IS NOT NULL AND title != '' "
                             "AND title NOT LIKE '0x%' "
-                            "ORDER BY volume DESC LIMIT 3"
+                            + _poly_excl +
+                            "ORDER BY RANDOM() LIMIT 3",
+                            _poly_excl_params,
                         )
                         _poly_reg = [dict(r) for r in (_poly_rows or [])]
+                        if not _poly_reg:
+                            _shown_reg_poly.clear()
+                            _poly_rows2 = await self.db.fetchall(
+                                "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time, category "
+                                "FROM markets "
+                                "WHERE platform='polymarket' "
+                                "AND yes_ask > 10 AND yes_ask < 90 "
+                                "AND (status='open' OR status='') "
+                                "AND title IS NOT NULL AND title != '' "
+                                "AND title NOT LIKE '0x%' "
+                                "ORDER BY RANDOM() LIMIT 3"
+                            )
+                            _poly_reg = [dict(r) for r in (_poly_rows2 or [])]
+                        _shown_reg_poly.update(r["ticker"] for r in _poly_reg)
                     except Exception:
                         pass
                     # Live top: split live_candidates into Kalshi + Poly for display
