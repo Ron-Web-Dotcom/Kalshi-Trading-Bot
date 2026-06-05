@@ -83,7 +83,7 @@ class PolymarketTradingClient:
 
     # ── Market data ───────────────────────────────────────────────────────────
 
-    async def get_markets(self, limit: int = 500) -> List[Dict]:
+    async def get_markets(self, limit: int = 100) -> List[Dict]:
         """
         Fetch active Polymarket markets from the public Gamma API.
         Returns list of normalised market dicts ready for the opportunity hunter.

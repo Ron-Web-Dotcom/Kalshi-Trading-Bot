@@ -370,8 +370,8 @@ class CategoryScanner:
 
     async def scan_all_categories(
         self,
-        max_per_tag: int = 10,
-        max_total: int = 300,
+        max_per_tag: int = 5,
+        max_total: int = 200,
         include_bulk: bool = True,
     ) -> List[Dict]:
         """
@@ -403,7 +403,7 @@ class CategoryScanner:
         # Bulk fetch + Kalshi concurrently
         extras = []
         if include_bulk:
-            extras.append(_fetch_poly_bulk(100))
+            extras.append(_fetch_poly_bulk(50))
         extras.append(self._kalshi_all_categories(max_per_tag))
 
         extra_results = await asyncio.gather(*extras, return_exceptions=True)

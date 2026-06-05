@@ -26,8 +26,8 @@ class MarketDataFetcher:
         """
         logger.info("━━━ MARKET INGEST START ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         # Two pools: top-1000 by volume + top-200 soonest-closing (for short-duration markets)
-        markets_by_vol   = await self.kalshi.get_all_markets(status="open", max_markets=500)
-        markets_by_close = await self.kalshi.get_all_markets(status="open", max_markets=100, sort_by_close=True)
+        markets_by_vol   = await self.kalshi.get_all_markets(status="open", max_markets=300)
+        markets_by_close = await self.kalshi.get_all_markets(status="open", max_markets=50, sort_by_close=True)
 
         # Merge — deduplicate by ticker, volume pool first
         seen = {m.get("ticker") for m in markets_by_vol}
@@ -120,20 +120,21 @@ class MarketDataFetcher:
         return markets
 
     async def get_cached_markets(self, min_volume: float = 0,
-                                  max_age_minutes: int = 15) -> List[Dict]:
-        """Return markets from DB. Prices in cents."""
+                                  max_age_minutes: int = 15,
+                                  limit: int = 600) -> List[Dict]:
+        """Return markets from DB. Prices in cents. Hard-capped to avoid OOM."""
         query  = "SELECT * FROM markets WHERE status='open' OR status=''"
         params: tuple = ()
         if min_volume > 0:
             query  += " AND volume >= ?"
             params += (min_volume,)
-        query += " ORDER BY volume DESC"
+        query += f" ORDER BY volume DESC LIMIT {int(limit)}"
         rows = await self.db.fetchall(query, params)
 
         if not rows:
             logger.warning("No markets in cache — DB may be empty on first startup")
 
-        logger.info("get_cached_markets: %d rows (min_vol=%g)", len(rows), min_volume)
+        logger.info("get_cached_markets: %d rows (min_vol=%g, cap=%d)", len(rows), min_volume, limit)
         return rows
 
     async def run_continuous(self, interval_seconds: int = 300):
