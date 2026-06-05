@@ -167,10 +167,16 @@ async def _run_rule_engine(market: Dict, context: str) -> Optional[Dict]:
 
 # ── Main entry ────────────────────────────────────────────────────────────────
 
-async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -> Optional[Dict]:
+async def make_decision_for_market(
+    market: Dict,
+    signals: List[Dict],
+    db=None,
+    min_confidence: Optional[float] = None,
+) -> Optional[Dict]:
     """
     Run AI + rule engine as a team.
-    Returns best decision dict, or None if both say HOLD.
+    Returns best decision dict, or None if both say HOLD or below min_confidence.
+    Pass min_confidence to override the global setting (e.g. 55.0 for live markets).
     """
     from src.config.settings import settings
 
@@ -201,7 +207,7 @@ async def make_decision_for_market(market: Dict, signals: List[Dict], db=None) -
         logger.debug("Context build error: %s", e)
 
     ticker   = market.get("ticker", "?")
-    min_conf = tcfg.min_ai_confidence
+    min_conf = min_confidence if min_confidence is not None else tcfg.min_ai_confidence
 
     # ── Run engines ──────────────────────────────────────────────────────────
     if ai_capped:

@@ -362,7 +362,9 @@ class OpportunityHunter:
                 logger.debug("Live AI skip (cached rejection): %s", ticker[:40])
                 continue
             try:
-                decision = await make_decision_for_market(market, arb_signals, db=self.db)
+                decision = await make_decision_for_market(
+                    market, arb_signals, db=self.db, min_confidence=min_confidence
+                )
             except Exception as e:
                 logger.debug("Live AI eval failed for %s: %s", ticker, e)
                 continue

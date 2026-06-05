@@ -549,7 +549,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             top_live = await live_hunter.find_top_live(
                 live_markets   = all_live,
                 arb_signals    = all_signals,
-                min_confidence = settings.trading.min_ai_confidence,
+                min_confidence = 55.0,   # lower bar for live events — window is short, act faster
                 top_n          = 3,
                 ai_eval_n      = min(6, len(all_live)),
             )
