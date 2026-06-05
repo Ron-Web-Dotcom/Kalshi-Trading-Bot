@@ -655,17 +655,14 @@ class TradingBot:
 
         async def bot_alert_loop():
             """
-            Scans every 10 min — fires Discord ONLY when there is something NEW:
-              • A brand-new high-confidence live bid the bot just opted into
-              • A live event bid not previously alerted (or confidence jumped a band)
+            3-alert flow — LIVE SCAN events only (every 5 min scan feeds this):
 
-            SILENT when:
-              • No new picks found
-              • Same picks as last time (already in _alerted at same band)
-              • No live event happening right now
+              Alert 1 👀 BOT SEES IT   — bot spotted a live bid, not placed yet
+              Alert 2 ✅ BID PLACED    — trade executed (fired by trade_executed())
+              Alert 3 🚪 OPT OUT       — stop-loss hit / conditions changed
 
-            Follow-up result fires ~1 min after a position closes:
-              🟢 WE GOT THE BAG  🔴 WE LOST  🟡 HAVE TO OPT OUT  🟤 NEW BID
+            Only fires on confirmed live in-play events. Silent on regular markets.
+            Max once per 30 min to prevent spam.
             """
             from src.alerts.discord import DiscordAlerter
             from src.utils.daily_stats import stats as _da

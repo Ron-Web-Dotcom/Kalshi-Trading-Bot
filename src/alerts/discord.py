@@ -155,111 +155,57 @@ class DiscordAlerter:
                               reasoning: str = "", net_ev: Optional[float] = None,
                               exp_profit: Optional[float] = None,
                               market_title: str = "") -> None:
+        """✅ ALERT 2 of 3 — BID PLACED. Trade is in."""
         if not self.cfg.alert_on_trade:
             return
-        color    = 0x00FF00 if action == "BUY" else 0xFF4444
-        mode_tag = "📝 PAPER" if paper else "💰 LIVE"
-
-        # Source badge
-        if signal_source in ("internal_arb", "cross_market_arb"):
-            source_emoji = "⚡"
-        elif signal_source == "rule_based":
-            source_emoji = "📐"
-        else:
-            source_emoji = "🤖"
-
-        # Max payout if position resolves in our favour
+        mode_tag   = "📝 PAPER" if paper else "💰 LIVE"
         max_payout = contracts * (100 - price) / 100
+        ev_s       = f" | EV {net_ev:+.1f}¢" if net_ev is not None else ""
+        exp_s      = f" | Expected profit **${exp_profit:.2f}**" if exp_profit else ""
+        display    = self._display_ticker(ticker, market_title)
 
-        fields = [
-            {"name": "Side",      "value": f"**{side.upper()}**",       "inline": True},
-            {"name": "Price",     "value": f"{price:.0f}¢",             "inline": True},
-            {"name": "Contracts", "value": str(contracts),              "inline": True},
-            {"name": "Capital",   "value": f"${size_dollars:.2f}",      "inline": True},
-            {"name": "Max Payout","value": f"${max_payout:.2f}",        "inline": True},
-        ]
-        if ai_confidence is not None:
-            fields.append({"name": "AI Confidence", "value": f"{ai_confidence:.0f}%", "inline": True})
-        if net_ev is not None:
-            fields.append({"name": "Net EV / contract", "value": f"{net_ev:.1f}¢",    "inline": True})
-        if exp_profit is not None:
-            fields.append({"name": "Exp. Profit",  "value": f"${exp_profit:.2f}",     "inline": True})
-        if pnl is not None:
-            fields.append({"name": "PnL", "value": f"${pnl:+.2f}", "inline": True})
+        body = (
+            f"**{display}**\n"
+            f"Side: **{side.upper()}** @ **{price:.0f}¢** | {contracts} contracts | Capital: **${size_dollars:.2f}**\n"
+            f"Max payout: **${max_payout:.2f}**{ev_s}{exp_s}\n"
+            f"Confidence: **{ai_confidence:.0f}%**\n"
+        )
         if reasoning:
-            fields.append({"name": f"{source_emoji} AI Reasoning", "value": reasoning[:300], "inline": False})
+            body += f"\n_{reasoning[:200]}_"
 
-        display = self._display_ticker(ticker, market_title)
         payload = self._embed(
-            title=f"{source_emoji} {mode_tag} Trade Entered — {display}",
-            description=f"**{action} {side.upper()}** on _{display}_",
-            color=color,
-            fields=fields,
+            title=f"✅ BID PLACED  [{mode_tag}]",
+            description=body,
+            color=0x00C853,
         )
         await self._post(payload)
 
     async def bot_alert(self, picks: List[Dict], mode: str = "PAPER") -> None:
         """
-        🚨 BOT ALERT — single embed, ALL confident picks bundled in one message.
-        Fires only when bot has genuinely new high-confidence signals.
-        Never spams — caller is responsible for deduplication.
-
-        Each pick dict may contain:
-          ticker, title, platform, side, price_cents/yes_ask, confidence,
-          net_ev, reasoning, is_live (bool), close_time
+        👀 ALERT 1 of 3 — BOT SEES IT.
+        Bot spotted a potential bid and is watching it. Not placed yet.
+        Fires max once per 30 min. Up to 3 picks shown.
         """
         if not picks:
             return
 
         mode_tag = "📝 PAPER" if mode == "PAPER" else "💰 LIVE"
         now_utc  = datetime.now(timezone.utc)
+        has_live = any(p.get("is_live") or p.get("live") for p in picks)
+        color    = 0xFF6600 if has_live else 0xFFAA00
 
-        # ── Urgency tier ──────────────────────────────────────────────────────
-        has_live  = any(p.get("is_live") or p.get("live") for p in picks)
-        top_conf  = max(p.get("confidence", 0) for p in picks)
-        avg_conf  = sum(p.get("confidence", 0) for p in picks) / len(picks)
-
-        if has_live:
-            color   = 0xFF0000
-            urgency = "🔴 LIVE IN-PLAY BET"
-        elif top_conf >= 80:
-            color   = 0xFF4500
-            urgency = "🟠 HIGH CONFIDENCE"
-        elif top_conf >= 70:
-            color   = 0xFFD700
-            urgency = "🟡 SOLID EDGE FOUND"
-        else:
-            color   = 0x00BFFF
-            urgency = "🔵 CONFIDENT PICK"
-
-        # ── Build lines ───────────────────────────────────────────────────────
         lines = []
-        for i, p in enumerate(picks, 1):
+        for i, p in enumerate(picks[:3], 1):
             plat   = "🟣" if p.get("platform") == "polymarket" else "🟦"
             title  = self._display_ticker(p.get("ticker", ""), p.get("title", "") or "")[:55]
             side   = (p.get("side") or "YES").upper()
-            price  = float(p.get("price_cents") or p.get("yes_ask") or p.get("last_price") or 0)
+            price  = float(p.get("price_cents") or p.get("yes_ask") or 0)
             conf   = p.get("confidence", 0)
             ev     = p.get("net_ev")
-            ev_s   = f" | EV **{ev:+.1f}¢**" if ev is not None else ""
-            reason = (p.get("reasoning") or "")[:130]
+            ev_s   = f" | EV {ev:+.1f}¢" if ev is not None else ""
+            reason = (p.get("reasoning") or "")[:120]
+            live_s = " ⚡ **LIVE NOW**" if (p.get("is_live") or p.get("live")) else ""
 
-            # Category label
-            tl = (p.get("title") or "").lower()
-            if p.get("is_live") or p.get("live"):
-                cat = "⚡ LIVE"
-            elif any(k in tl for k in ["bitcoin","btc","eth","crypto","solana","xrp"]):
-                cat = "₿ CRYPTO"
-            elif any(k in tl for k in ["nfl","nba","mlb","nhl","soccer","game","match","score","cup","championship","ufc"]):
-                cat = "🏆 SPORTS"
-            elif any(k in tl for k in ["trump","biden","harris","elect","congress","senate","president","governor"]):
-                cat = "🗳 POLITICS"
-            elif any(k in tl for k in ["cpi","fed","rate","inflation","nasdaq","sp500","gdp","unemployment"]):
-                cat = "📊 ECONOMICS"
-            else:
-                cat = "🎯 PREDICTION"
-
-            # Timing
             ct = p.get("close_time", "")
             timing = ""
             if ct:
@@ -268,104 +214,69 @@ class DiscordAlerter:
                     if cd.tzinfo is None:
                         cd = cd.replace(tzinfo=timezone.utc)
                     hrs = (cd - now_utc).total_seconds() / 3600
-                    timing = (
-                        " ⏰ **resolving now**" if hrs < 0 else
-                        f" 🔥 **ends in {hrs:.0f}h**" if hrs <= 3 else
-                        f" ⏳ ends today" if hrs <= 24 else ""
-                    )
+                    timing = f" 🔥 ends in {hrs:.0f}h" if 0 < hrs <= 3 else f" ⏳ ends today" if hrs <= 24 else ""
                 except Exception:
                     pass
 
             lines.append(
-                f"**{i}. [{cat}] {plat} {title}**{timing}\n"
-                f"   → BUY **{side}** @ **{price:.0f}¢** | **{conf:.0f}% confident**{ev_s}\n"
-                f"   _{reason}_"
+                f"**{i}. {plat} {title}**{live_s}{timing}\n"
+                f"→ BUY **{side}** @ **{price:.0f}¢** | **{conf:.0f}% conf**{ev_s}\n"
+                f"_{reason}_"
             )
 
-        # ── Dynamic title ─────────────────────────────────────────────────────
-        n = len(picks)
-        if has_live and n > 1:
-            title_str = f"🚨 BOT ALERT — LIVE BET + {n - 1} more pick{'s' if n - 1 > 1 else ''}"
-        elif has_live:
-            title_str = "🚨 BOT ALERT — LIVE IN-PLAY BET JUST PLACED"
-        elif n > 1:
-            title_str = f"🚨 BOT ALERT — {n} CONFIDENT PICKS FOUND"
-        else:
-            title_str = "🚨 BOT ALERT — CONFIDENT PREDICTION FOUND"
-
-        payload = {
-            "embeds": [{
-                "title":       f"{title_str}  [{mode_tag}]",
-                "description": (
-                    f"{urgency} — **{avg_conf:.0f}% avg confidence** across {n} pick{'s' if n > 1 else ''}\n\n"
-                    + "\n\n".join(lines)
-                ),
-                "color":     color,
-                "timestamp": now_utc.isoformat(),
-                "footer":    {"text": "Only alerting when bot is genuinely confident — no spam"},
-            }]
-        }
+        n = len(picks[:3])
+        payload = self._embed(
+            title=f"👀 BOT SEES IT — {'LIVE EVENT ' if has_live else ''}{n} Pick{'s' if n > 1 else ''}  [{mode_tag}]",
+            description=(
+                "Bot is watching this. Bid not placed yet — evaluating now.\n\n"
+                + "\n\n".join(lines)
+            ),
+            color=color,
+        )
         await self._post(payload)
 
     async def bot_alert_result(self, pick: Dict, outcome: str, mode: str = "PAPER") -> None:
         """
-        Follow-up result message 1 minute after a BOT ALERT resolves.
+        🚪 ALERT 3 of 3 — OPT OUT / RESULT.
 
-        outcome must be one of:
-          "profit"  → 🟢 WE GOT THE BAG
-          "loss"    → 🔴 WE LOST BUT WE KEEP ON MOVING
-          "exit"    → 🟡 HAVE TO OPT OUT
-          "optin"   → 🟤 I SAW A SWEET BID I HAVE TO OPT IN
-
-        pick dict: same shape as bot_alert picks — ticker, title, side,
-                   price_cents/yes_ask, confidence, net_ev, reasoning,
-                   pnl (optional), exit_price (optional), reason (optional)
+        outcome:
+          "profit" → 🟢 WE GOT THE BAG
+          "loss"   → 🔴 WE LOST BUT WE KEEP ON MOVING
+          "exit"   → 🚪 HAD TO OPT OUT — here's why
         """
         outcome_map = {
-            "profit": (0x00C853, "🟢 WE GOT THE BAG",            "WINNER"),
-            "loss":   (0xFF1744, "🔴 WE LOST BUT WE KEEP ON MOVING", "LOSS"),
-            "exit":   (0xFFD600, "🟡 HAVE TO OPT OUT",            "EXITED"),
-            "optin":  (0x6D4C41, "🟤 I SAW A SWEET BID — OPTING IN", "NEW BID"),
+            "profit": (0x00C853, "🟢 WE GOT THE BAG"),
+            "loss":   (0xFF1744, "🔴 WE LOST BUT WE KEEP ON MOVING"),
+            "exit":   (0xFFD600, "🚪 HAD TO OPT OUT"),
         }
-        color, headline, badge = outcome_map.get(outcome, (0x888888, "⚪ RESULT", "RESULT"))
-        mode_tag  = "📝 PAPER" if mode == "PAPER" else "💰 LIVE"
-        now_utc   = datetime.now(timezone.utc)
+        color, headline = outcome_map.get(outcome, (0x888888, "⚪ CLOSED"))
+        mode_tag = "📝 PAPER" if mode == "PAPER" else "💰 LIVE"
 
-        title_str = self._display_ticker(pick.get("ticker", ""), pick.get("title", "") or "")[:80]
-        side      = (pick.get("side") or "YES").upper()
-        entry     = float(pick.get("price_cents") or pick.get("yes_ask") or 0)
-        conf      = pick.get("confidence", 0)
-        pnl       = pick.get("pnl")
-        exit_p    = pick.get("exit_price")
-        reason    = (pick.get("result_reason") or pick.get("reasoning") or "")[:200]
-        ev        = pick.get("net_ev")
+        display  = self._display_ticker(pick.get("ticker", ""), pick.get("title", "") or "")[:80]
+        side     = (pick.get("side") or "YES").upper()
+        entry    = float(pick.get("price_cents") or pick.get("yes_ask") or 0)
+        exit_p   = pick.get("exit_price")
+        pnl      = pick.get("pnl")
+        reason   = (pick.get("result_reason") or pick.get("reasoning") or "")[:200]
 
-        # Build the result body
-        body_lines = [f"**{title_str}**"]
-        body_lines.append(f"Side: **{side}** | Entry: **{entry:.0f}¢**{f' → Exit: **{exit_p:.0f}¢**' if exit_p else ''}")
-        body_lines.append(f"Confidence was: **{conf:.0f}%**{f' | EV was: {ev:+.1f}¢' if ev is not None else ''}")
-
-        if outcome == "profit" and pnl is not None:
-            body_lines.append(f"💰 **Profit: +${pnl:.2f}** — that's what we came for!")
-        elif outcome == "loss" and pnl is not None:
-            body_lines.append(f"📉 **Loss: ${pnl:.2f}** — shake it off, next one's ours.")
-        elif outcome == "exit":
-            body_lines.append("🚪 Conditions changed — cutting before resolution is the smart move.")
-        elif outcome == "optin":
-            body_lines.append("👀 Fresh signal spotted — jumping in now.")
-
+        body  = f"**{display}**\n"
+        body += f"Side: **{side}** | Entry: **{entry:.0f}¢**"
+        if exit_p:
+            body += f" → Exit: **{exit_p:.0f}¢**"
+        body += "\n"
+        if pnl is not None:
+            sign = "+" if pnl >= 0 else ""
+            body += f"Result: **${sign}{pnl:.2f}**\n"
+        if outcome == "exit":
+            body += "Bot cut the position before resolution — conditions changed.\n"
         if reason:
-            body_lines.append(f"\n_{reason}_")
+            body += f"\n_{reason}_"
 
-        payload = {
-            "embeds": [{
-                "title":       f"{headline}  [{badge}]  [{mode_tag}]",
-                "description": "\n".join(body_lines),
-                "color":       color,
-                "timestamp":   now_utc.isoformat(),
-                "footer":      {"text": "Bot result — 1 min after alert fired"},
-            }]
-        }
+        payload = self._embed(
+            title=f"{headline}  [{mode_tag}]",
+            description=body,
+            color=color,
+        )
         await self._post(payload)
 
     async def live_trades_alert(self, trades: List[Dict], mode: str = "PAPER") -> None:
