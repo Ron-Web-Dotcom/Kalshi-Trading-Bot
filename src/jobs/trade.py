@@ -546,10 +546,11 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         all_live = live_kalshi + live_poly
         if all_live:
             live_hunter = OpportunityHunter(db=db)
+            from src.utils.confidence_calibrator import get_threshold as _get_thresh
             top_live = await live_hunter.find_top_live(
                 live_markets   = all_live,
                 arb_signals    = all_signals,
-                min_confidence = 65.0,   # lower than regular(70%) but not reckless — live window is short
+                min_confidence = _get_thresh(),  # auto-calibrated daily (default 65%)
                 top_n          = 3,
                 ai_eval_n      = min(6, len(all_live)),
             )

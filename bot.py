@@ -575,6 +575,12 @@ class TradingBot:
                         unrealised_pnl=unrealised_pnl,
                     )
                     daily_stats.reset_for_new_day()
+                    # Auto-calibrate confidence threshold — silent, no Discord
+                    try:
+                        from src.utils.confidence_calibrator import calibrate as _calibrate
+                        await _calibrate(self.db)
+                    except Exception as _ce:
+                        logger.debug("Confidence calibration error (non-critical): %s", _ce)
                     logger.info("Midnight daily summary sent and stats reset.")
                 except Exception as e:
                     logger.error("Daily summary error: %s", e)
@@ -667,8 +673,10 @@ class TradingBot:
             # tickers whose results have already been reported
             _result_sent: set = set()
 
-            BOT_ALERT_INTERVAL = 600   # check every 10 min
-            MIN_CONF           = 65.0  # min confidence to alert on live picks
+            BOT_ALERT_INTERVAL = 600   # scan every 10 min
+            RESULT_CHECK_DELAY = 60    # check results 60s after alert
+            from src.utils.confidence_calibrator import get_threshold as _get_min_conf
+            MIN_CONF           = _get_min_conf()  # auto-calibrated daily (default 65%)
 
             async def _check_and_post_results(discord, mode: str):
                 """
@@ -735,6 +743,7 @@ class TradingBot:
                     discord   = DiscordAlerter()
                     mode      = "PAPER" if not settings.trading.live_trading_enabled else "LIVE"
                     now_utc   = datetime.now(timezone.utc)
+                    MIN_CONF  = _get_min_conf()  # refresh each cycle — picks up midnight recalibration
                     new_picks: list = []
 
                     # 1. Active live slots — already entered, highest urgency
