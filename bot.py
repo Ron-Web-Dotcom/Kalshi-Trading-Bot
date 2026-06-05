@@ -672,100 +672,61 @@ class TradingBot:
             # ticker → {band, pick_snapshot, alerted_at, result_sent}
             _alerted: dict = {}
             _alerted_date  = datetime.now(timezone.utc).date()
-            # frozenset of ticker+band keys sent in last alert — prevents re-sending same bundle
+            # frozenset of ticker+band keys sent in last watching alert
             _last_sent_keys: frozenset = frozenset()
+            # tickers whose results have already been reported
+            _result_sent: set = set()
 
-            BOT_ALERT_INTERVAL = 1800  # scan every 30 min — was 10min, too spammy
-            RESULT_CHECK_DELAY = 60    # check results 60s after alert
-            MIN_CONF           = 62.0  # alert threshold — between live(55%) and regular(70%)
+            BOT_ALERT_INTERVAL = 600   # check every 10 min
+            MIN_CONF           = 62.0  # min confidence to alert
 
             async def _check_and_post_results(discord, mode: str):
                 """
-                For every previously alerted pick, check if outcome is now known
-                and post a colour-coded result message (once per ticker).
+                ONE consolidated result message covering ALL closed/exited positions
+                since last check. Wins, losses, and opt-outs in a single summary.
                 """
-                now = datetime.now(timezone.utc)
+                wins   = []
+                losses = []
+                exits  = []
+
                 for ticker, info in list(_alerted.items()):
-                    if info.get("result_sent"):
+                    if ticker in _result_sent:
                         continue
-                    alerted_at = info.get("alerted_at")
-                    if not alerted_at:
-                        continue
-                    elapsed = (now - alerted_at).total_seconds()
-                    if elapsed < RESULT_CHECK_DELAY:
-                        continue
-
                     pick = info.get("pick", {})
-
                     try:
-                        # Check DB for this position's outcome
                         pos = await self.db.fetchone(
-                            "SELECT status, pnl, close_reason, current_price, avg_price "
-                            "FROM positions WHERE ticker=? ORDER BY opened_at DESC LIMIT 1",
+                            "SELECT status, pnl, close_reason, current_price FROM positions "
+                            "WHERE ticker=? ORDER BY opened_at DESC LIMIT 1",
                             (ticker,)
                         )
-
-                        outcome = None
-                        extra   = {}
-
-                        if pos:
-                            status = pos.get("status", "")
-                            pnl    = pos.get("pnl")
-                            reason = pos.get("close_reason", "") or ""
-                            exit_p = pos.get("current_price") or pos.get("avg_price")
-
-                            if status == "closed" and pnl is not None:
-                                extra["pnl"]        = float(pnl)
-                                extra["exit_price"] = float(exit_p or 0)
-                                if float(pnl) > 0:
-                                    outcome = "profit"
-                                    extra["result_reason"] = f"Closed at ${float(pnl):+.2f}. {reason}"
-                                else:
-                                    # Check if this was an early exit vs natural loss
-                                    if any(k in reason.lower() for k in ["exit","early","stop","cut"]):
-                                        outcome = "exit"
-                                        extra["result_reason"] = f"Opted out early. {reason}"
-                                    else:
-                                        outcome = "loss"
-                                        extra["result_reason"] = f"Closed at ${float(pnl):+.2f}. {reason}. Next one's ours."
-
-                            elif status == "open":
-                                # Position still open — check if bot just added a new entry
-                                # (new bid detected = optin signal)
-                                pass  # will check below
-
-                        # If no closed position, check if a new high-conf BUY just fired
-                        # on a DIFFERENT ticker (optin scenario)
-                        if outcome is None:
-                            for ev in list(_da.all_evaluations)[:5]:
-                                if ev.get("action") != "BUY":
-                                    continue
-                                ev_ticker = ev.get("ticker", "")
-                                ev_conf   = ev.get("confidence", 0)
-                                if ev_ticker == ticker or ev_conf < 70:
-                                    continue
-                                if ev_ticker not in _alerted:
-                                    # New high-conf pick not yet alerted — flag it as optin
-                                    outcome = "optin"
-                                    extra = {
-                                        "ticker":        ev_ticker,
-                                        "title":         ev.get("title", ""),
-                                        "side":          ev.get("side", "YES"),
-                                        "price_cents":   ev.get("yes_ask", 0),
-                                        "confidence":    ev_conf,
-                                        "net_ev":        ev.get("net_ev"),
-                                        "result_reason": ev.get("reasoning", "")[:150],
-                                    }
-                                    break
-
-                        if outcome:
-                            result_pick = {**pick, **extra}
-                            await discord.bot_alert_result(result_pick, outcome=outcome, mode=mode)
-                            _alerted[ticker]["result_sent"] = True
-                            logger.info("BOT ALERT RESULT fired: %s → %s", ticker, outcome)
-
+                        if not pos or pos.get("status") != "closed":
+                            continue
+                        pnl    = float(pos.get("pnl") or 0)
+                        reason = (pos.get("close_reason") or "")
+                        exit_p = float(pos.get("current_price") or pick.get("price_cents") or 0)
+                        entry  = float(pick.get("price_cents") or pick.get("yes_ask") or 0)
+                        title  = pick.get("title") or ticker[:35]
+                        side   = (pick.get("side") or "yes").upper()
+                        item   = {"title": title, "side": side, "entry": entry,
+                                  "exit": exit_p, "pnl": pnl, "reason": reason}
+                        if pnl > 0:
+                            wins.append(item)
+                        elif any(k in reason.lower() for k in ["stop","exit","cut","early"]):
+                            exits.append(item)
+                        else:
+                            losses.append(item)
+                        _result_sent.add(ticker)
                     except Exception as _re:
-                        logger.debug("Result check error for %s: %s", ticker, _re)
+                        logger.debug("Result check error %s: %s", ticker, _re)
+
+                if wins or losses or exits:
+                    await discord.live_results_summary(
+                        wins=wins, losses=losses, exits=exits, mode=mode
+                    )
+                    logger.info(
+                        "LIVE RESULTS fired: %dW %dL %d exits",
+                        len(wins), len(losses), len(exits)
+                    )
 
             await asyncio.sleep(120)
             while not self._shutdown.is_set():
@@ -830,24 +791,30 @@ class TradingBot:
                                 "alerted_at": now_utc, "result_sent": False,
                             }
 
-                    if new_picks:
-                        new_picks.sort(
-                            key=lambda x: (0 if x.get("is_live") else 1, -x.get("confidence", 0))
-                        )
-                        # Build a fingerprint of this batch — ticker + confidence band
-                        batch_keys = frozenset(
-                            f"{p.get('ticker')}:{int(p.get('confidence',0)//10)*10}"
-                            for p in new_picks
-                        )
-                        # Only fire if this is genuinely different from last alert
-                        if batch_keys != _last_sent_keys:
-                            await discord.bot_alert(new_picks[:6], mode=mode)
-                            _last_sent_keys = batch_keys
-                            logger.info("BOT ALERT fired: %d new picks", len(new_picks))
-                        else:
-                            logger.debug("BOT ALERT skipped — same picks as last send")
+                    # Build full watching list = all active live slots + new picks
+                    all_watching = list(new_picks)
+                    for ticker, slot in list(_ls.items()):
+                        if not any(p.get("ticker") == ticker for p in all_watching):
+                            all_watching.append({**slot, "is_live": True, "ticker": ticker})
 
-                    # Check results for previously alerted picks
+                    if all_watching:
+                        all_watching.sort(
+                            key=lambda x: (0 if x.get("is_live") else 1, -float(x.get("confidence", 0)))
+                        )
+                        batch_keys = frozenset(
+                            f"{p.get('ticker')}:{int(float(p.get('confidence',0))//10)*10}"
+                            for p in all_watching
+                        )
+                        if batch_keys != _last_sent_keys:
+                            await discord.bot_alert(all_watching, mode=mode)
+                            _last_sent_keys = batch_keys
+                            logger.info("BOT ALERT fired: %d picks watching", len(all_watching))
+                        else:
+                            logger.debug("BOT ALERT skipped — no changes")
+                    else:
+                        logger.debug("BOT ALERT: no live picks this check")
+
+                    # ONE consolidated result message for all closed positions
                     await _check_and_post_results(discord, mode)
 
                 except Exception as e:

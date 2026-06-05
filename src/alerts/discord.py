@@ -182,31 +182,33 @@ class DiscordAlerter:
 
     async def bot_alert(self, picks: List[Dict], mode: str = "PAPER") -> None:
         """
-        👀 ALERT 1 of 3 — BOT SEES IT.
-        Bot spotted a potential bid and is watching it. Not placed yet.
-        Fires max once per 30 min. Up to 3 picks shown.
+        👀 BOT ALERT — one big update every 10 min showing:
+          - Active bids already placed (⚡ IN BET)
+          - New picks being watched (👀 WATCHING)
+        Only fires when content changes. Never sends 10 separate messages.
         """
         if not picks:
             return
 
         mode_tag = "📝 PAPER" if mode == "PAPER" else "💰 LIVE"
         now_utc  = datetime.now(timezone.utc)
-        has_live = any(p.get("is_live") or p.get("live") for p in picks)
-        color    = 0xFF6600 if has_live else 0xFFAA00
 
-        lines = []
-        for i, p in enumerate(picks[:3], 1):
+        # Split into already-in and watching
+        in_bet   = [p for p in picks if p.get("_in_bet") or p.get("is_live") and p.get("contracts")]
+        watching = [p for p in picks if p not in in_bet]
+
+        sections = []
+
+        def _pick_line(p: Dict) -> str:
             plat   = "🟣" if p.get("platform") == "polymarket" else "🟦"
-            title  = self._display_ticker(p.get("ticker", ""), p.get("title", "") or "")[:55]
+            title  = self._display_ticker(p.get("ticker", ""), p.get("title", "") or "")[:52]
             side   = (p.get("side") or "YES").upper()
             price  = float(p.get("price_cents") or p.get("yes_ask") or 0)
-            conf   = p.get("confidence", 0)
+            conf   = float(p.get("confidence") or 0)
             ev     = p.get("net_ev")
-            ev_s   = f" | EV {ev:+.1f}¢" if ev is not None else ""
-            reason = (p.get("reasoning") or "")[:120]
-            live_s = " ⚡ **LIVE NOW**" if (p.get("is_live") or p.get("live")) else ""
-
-            ct = p.get("close_time", "")
+            ev_s   = f" EV {ev:+.1f}¢" if ev is not None else ""
+            reason = (p.get("reasoning") or "")[:100]
+            ct     = p.get("close_time", "")
             timing = ""
             if ct:
                 try:
@@ -214,23 +216,30 @@ class DiscordAlerter:
                     if cd.tzinfo is None:
                         cd = cd.replace(tzinfo=timezone.utc)
                     hrs = (cd - now_utc).total_seconds() / 3600
-                    timing = f" 🔥 ends in {hrs:.0f}h" if 0 < hrs <= 3 else f" ⏳ ends today" if hrs <= 24 else ""
+                    timing = f" 🔥 {hrs:.0f}h left" if 0 < hrs <= 3 else " ⏳ today" if hrs <= 24 else ""
                 except Exception:
                     pass
-
-            lines.append(
-                f"**{i}. {plat} {title}**{live_s}{timing}\n"
-                f"→ BUY **{side}** @ **{price:.0f}¢** | **{conf:.0f}% conf**{ev_s}\n"
+            return (
+                f"{plat} **{title}**{timing}\n"
+                f"→ **{side}** @ **{price:.0f}¢** | **{conf:.0f}%**{ev_s}\n"
                 f"_{reason}_"
             )
 
-        n = len(picks[:3])
+        if in_bet:
+            section = "**⚡ BIDS ACTIVE RIGHT NOW**\n" + "\n\n".join(_pick_line(p) for p in in_bet[:5])
+            sections.append(section)
+
+        if watching:
+            section = "**👀 WATCHING — evaluating, not placed yet**\n" + "\n\n".join(_pick_line(p) for p in watching[:5])
+            sections.append(section)
+
+        n_total = len(picks)
+        has_live = any(p.get("is_live") for p in picks)
+        color    = 0xFF4400 if in_bet else 0xFFAA00
+
         payload = self._embed(
-            title=f"👀 BOT SEES IT — {'LIVE EVENT ' if has_live else ''}{n} Pick{'s' if n > 1 else ''}  [{mode_tag}]",
-            description=(
-                "Bot is watching this. Bid not placed yet — evaluating now.\n\n"
-                + "\n\n".join(lines)
-            ),
+            title=f"🚨 BOT ALERT — {n_total} Live Pick{'s' if n_total > 1 else ''}  [{mode_tag}]",
+            description="\n\n".join(sections),
             color=color,
         )
         await self._post(payload)
@@ -275,6 +284,53 @@ class DiscordAlerter:
         payload = self._embed(
             title=f"{headline}  [{mode_tag}]",
             description=body,
+            color=color,
+        )
+        await self._post(payload)
+
+    async def live_results_summary(
+        self,
+        wins:   List[Dict],
+        losses: List[Dict],
+        exits:  List[Dict],
+        mode:   str = "PAPER",
+    ) -> None:
+        """
+        ONE consolidated result message covering all wins + losses + opt-outs.
+        Only fires when at least one position closed since last check.
+        """
+        mode_tag   = "📝 PAPER" if mode == "PAPER" else "💰 LIVE"
+        total_pnl  = sum(x.get("pnl", 0) for x in wins + losses + exits)
+        pnl_sign   = "+" if total_pnl >= 0 else ""
+        total      = len(wins) + len(losses) + len(exits)
+        lines      = []
+
+        def _item_line(item: Dict, icon: str) -> str:
+            title  = (item.get("title") or "?")[:50]
+            side   = (item.get("side") or "YES").upper()
+            entry  = item.get("entry", 0)
+            pnl    = item.get("pnl", 0)
+            reason = (item.get("reason") or "")[:60]
+            pnl_s  = f"**${pnl:+.2f}**"
+            return f"{icon} **{title}** {side} @ {entry:.0f}¢ → {pnl_s}  _{reason}_"
+
+        for w in wins:
+            lines.append(_item_line(w, "🟢"))
+        for e in exits:
+            lines.append(_item_line(e, "🚪"))
+        for l in losses:
+            lines.append(_item_line(l, "🔴"))
+
+        color = 0x00C853 if total_pnl > 0 else 0xFF1744 if total_pnl < 0 else 0x888888
+        payload = self._embed(
+            title=f"📊 LIVE BID RESULTS — {total} closed  [{mode_tag}]",
+            description=(
+                f"**Net: ${pnl_sign}{total_pnl:.2f}** across {total} position{'s' if total > 1 else ''} "
+                f"({len(wins)} win{'s' if len(wins)!=1 else ''}, "
+                f"{len(losses)} loss{'es' if len(losses)!=1 else ''}, "
+                f"{len(exits)} opt-out{'s' if len(exits)!=1 else ''})\n\n"
+                + "\n".join(lines)
+            ),
             color=color,
         )
         await self._post(payload)
