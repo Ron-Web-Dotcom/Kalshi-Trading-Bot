@@ -48,7 +48,6 @@ class PolyPaperTrader:
         true_prob:    Optional[float] = None,
         market_title: str = "",
         poly_token_id: Optional[str] = None,
-        is_live_event: bool = False,
     ) -> Optional[Dict]:
         """
         Simulate a Polymarket trade. Returns trade record or None if rejected.
@@ -189,7 +188,6 @@ class PolyPaperTrader:
                     net_ev=net_ev,
                     exp_profit=exp_profit,
                     market_title=market_title,
-                    is_live_event=is_live_event,
                 )
             except Exception:
                 pass

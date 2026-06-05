@@ -131,8 +131,7 @@ class DiscordAlerter:
                               paper: bool = True, signal_source: str = "",
                               reasoning: str = "", net_ev: Optional[float] = None,
                               exp_profit: Optional[float] = None,
-                              market_title: str = "",
-                              is_live_event: bool = False) -> None:
+                              market_title: str = "") -> None:
         if not self.cfg.alert_on_trade:
             return
         color    = 0x00FF00 if action == "BUY" else 0xFF4444
