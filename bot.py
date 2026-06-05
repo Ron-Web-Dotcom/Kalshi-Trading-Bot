@@ -746,29 +746,32 @@ class TradingBot:
                     MIN_CONF  = _get_min_conf()  # refresh each cycle — picks up midnight recalibration
                     new_picks: list = []
 
-                    # 1. Active live slots — already entered, highest urgency
-                    # Skip phrases — same list as opportunity hunter
-                    _BOT_ALERT_SKIP = [
-                        "gavin newsom", "2028 democratic", "2028 president",
-                        "win the 2026 nba finals", "win the 2026 nhl",
-                        "win the 2027", "win the 2028", "win the 2032",
-                        "stanley cup", "nba finals", "super bowl", "world series",
-                        "oprah", "lebron", "bernie endorse",
-                        "before 2027", "before 2028", "before 2029",
-                    ]
+                    # Bot alert = LIVE EVENTS HAPPENING RIGHT NOW only
+                    # Must close within 48 hours — anything longer is not a live event
+                    def _is_live_event(pick: dict) -> bool:
+                        ct = pick.get("close_time") or pick.get("expiration_time") or ""
+                        if not ct:
+                            return False  # no close time = unknown, skip
+                        try:
+                            cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                            if cd.tzinfo is None:
+                                cd = cd.replace(tzinfo=timezone.utc)
+                            hours_left = (cd - now_utc).total_seconds() / 3600
+                            return 0 < hours_left <= 48
+                        except Exception:
+                            return False
 
                     def _should_skip_alert(pick: dict) -> bool:
-                        title = (pick.get("title") or pick.get("ticker") or "").lower()
-                        return any(p in title for p in _BOT_ALERT_SKIP)
+                        return False  # all filtering now done by _is_live_event
 
+                    # 1. Active live slots — must have real price + close within 48h
                     for ticker, slot in list(_ls.items()):
                         conf  = float(slot.get("confidence", 0) or 0)
                         price = float(slot.get("price_cents") or slot.get("yes_ask") or 0)
-                        # Must have real price AND confidence — skip 0¢ ghost entries
                         if conf < MIN_CONF or not (5 <= price <= 95):
                             continue
                         pick = {**slot, "is_live": True, "ticker": ticker}
-                        if _should_skip_alert(pick):
+                        if not _is_live_event(pick):
                             continue
                         band = int(conf / 10) * 10
                         if _alerted.get(ticker, {}).get("band") != band:
@@ -778,19 +781,18 @@ class TradingBot:
                                 "alerted_at": now_utc, "result_sent": False,
                             }
 
-                    # 2. BUY evaluations where the underlying event is LIVE RIGHT NOW
+                    # 2. BUY evaluations — must close within 48h AND be live right now
                     for ev in list(_da.all_evaluations):
                         if ev.get("action") != "BUY":
                             continue
                         conf   = float(ev.get("confidence", 0) or 0)
                         price  = float(ev.get("price_cents") or ev.get("yes_ask") or 0)
                         ticker = ev.get("ticker", "")
-                        # Must have real confidence, tradeable price (5¢–95¢), and ticker
                         if conf < MIN_CONF or not (5 <= price <= 95) or not ticker:
                             continue
                         if ticker in _ls:
                             continue
-                        if _should_skip_alert(ev):
+                        if not _is_live_event(ev):
                             continue
                         title = ev.get("title", "") or ""
                         try:
@@ -808,11 +810,13 @@ class TradingBot:
                                 "alerted_at": now_utc, "result_sent": False,
                             }
 
-                    # Build full watching list = all active live slots + new picks
+                    # Full watching list = confirmed live picks only
                     all_watching = list(new_picks)
                     for ticker, slot in list(_ls.items()):
+                        pick = {**slot, "is_live": True, "ticker": ticker}
                         if not any(p.get("ticker") == ticker for p in all_watching):
-                            all_watching.append({**slot, "is_live": True, "ticker": ticker})
+                            if _is_live_event(pick):
+                                all_watching.append(pick)
 
                     if all_watching:
                         all_watching.sort(
