@@ -219,20 +219,35 @@ class PolymarketTradingClient:
         live_markets: List[Dict] = []
         seen_tickers: set = set()
 
-        # Sport tags only — no live=true (that returns all active markets)
-        _SPORT_TAGS = ["nhl", "mlb", "nba", "wnba", "tennis", "golf", "ufc",
-                       "soccer", "football", "boxing", "cricket", "rugby"]
+        # Tags covering sports AND non-sport live events
+        # Polymarket Gamma API supports tag filtering
+        _LIVE_TAGS = [
+            # Sports
+            "nhl", "mlb", "nba", "wnba", "tennis", "golf", "ufc",
+            "soccer", "football", "boxing", "cricket", "rugby",
+            # Non-sport real-time events
+            "politics", "elections", "debate", "congress", "government",
+            "weather", "news", "world",
+        ]
 
-        # Keywords that confirm an actual game/match is in progress
+        # Keywords that confirm an actual live event (game/match/hearing/debate/etc.)
         _GAME_KEYWORDS = [
+            # Sports
             "vs ", " vs ", "game ", "match ", "series ",
             "quarter", "half", "inning", "period", "set ",
             "overtime", "playoff", "championship", "finals",
             "bout", "fight", "round ", "race ", "leg ",
             "cover", "spread", "moneyline", "over/under",
+            # Non-sport live events
+            "debate", "hearing", "testimony", "press conference",
+            "vote today", "voting today", "election day",
+            "live ", "right now", "in session", "today",
+            "hurricane", "tornado", "storm today",
+            "fed meeting", "fomc", "rate decision",
+            "trial today", "verdict", "sentencing",
         ]
 
-        for tag in _SPORT_TAGS:
+        for tag in _LIVE_TAGS:
             if len(live_markets) >= max_markets:
                 break
             try:

@@ -183,11 +183,30 @@ class KalshiClient:
             logger.info("Kalshi LIVE NOW (/events): %d live markets", len(live_markets))
             return live_markets[:max_markets]
 
-        # Strategy 2: /markets with live-specific series tickers
-        # Kalshi live sports markets have series tickers like SOCCER-*, NBA-LIVE-*, etc.
+        # Strategy 2: /markets — scan for any real-time event closing soon
+        # Sports: soccer/NBA/MLB/NHL/UFC/tennis etc. closing within 6h
+        # Non-sports: debates, hearings, Fed decisions, weather, press conferences
+        #             closing within 3h (these events are time-bounded and short)
         live_series_prefixes = [
             "SOCCER", "NFL", "NBA", "MLB", "NHL", "UFC", "TENNIS",
             "F1", "GOLF", "RUGBY", "CRICKET", "BOXING",
+            "DEBATE", "HEARING", "FED", "ELECTION", "VOTE",
+        ]
+        _sport_title_kws = [
+            "vs ", " vs", "match", "game", "quarter", "half", "period",
+            "inning", "set ", "round", "bout", "race", "leg ",
+            "moneyline", "spread", "over/under", "cover",
+        ]
+        # Non-sport live events: debates, hearings, speeches, weather, etc.
+        _live_event_kws = [
+            "debate", "hearing", "press conference", "speech", "summit",
+            "fed meeting", "fomc", "rate decision", "vote today", "voting",
+            "live", "right now", "happening now", "in session",
+            "hurricane", "tornado", "storm", "earthquake",
+            "testimony", "trial", "verdict", "sentence",
+            "inauguration", "swearing in", "signing",
+            "launch", "landing", "spacewalk",
+            "ipo today", "earnings today",
         ]
         try:
             markets = []
@@ -208,7 +227,6 @@ class KalshiClient:
                 ticker = (m.get("ticker") or "").upper()
                 title  = (m.get("title") or "").lower()
                 ct     = m.get("close_time") or ""
-                # Must still be open
                 try:
                     close_dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
                     if close_dt.tzinfo is None:
@@ -218,22 +236,23 @@ class KalshiClient:
                         continue
                 except Exception:
                     continue
-                # Live sports markets on Kalshi close when the game ends (usually <3h)
-                # and have sport-related tickers or titles
                 is_sport_ticker = any(ticker.startswith(p) for p in live_series_prefixes)
-                is_sport_title  = any(kw in title for kw in [
-                    "vs ", " vs", "match", "game", "quarter", "half", "period",
-                    "inning", "set ", "round", "bout", "race", "leg ",
-                ])
+                is_sport_title  = any(kw in title for kw in _sport_title_kws)
+                is_live_event   = any(kw in title for kw in _live_event_kws)
+                # Sports: close within 6h; non-sport live events: close within 3h
                 if (is_sport_ticker or is_sport_title) and hours_left <= 6:
+                    m["_kalshi_live"] = True
+                    m["hours_to_close"] = round(hours_left, 2)
+                    live_markets.append(m)
+                elif is_live_event and hours_left <= 3:
                     m["_kalshi_live"] = True
                     m["hours_to_close"] = round(hours_left, 2)
                     live_markets.append(m)
 
         except Exception as e:
-            logger.debug("Kalshi live sports market scan: %s", e)
+            logger.debug("Kalshi live market scan: %s", e)
 
-        logger.info("Kalshi LIVE NOW (sports scan): %d confirmed live markets", len(live_markets))
+        logger.info("Kalshi LIVE NOW (fallback scan): %d confirmed live markets", len(live_markets))
         return live_markets[:max_markets]
 
     async def get_all_markets(self, status: str = "open", max_markets: int = 1000,
