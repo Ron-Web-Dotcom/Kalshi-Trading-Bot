@@ -212,6 +212,7 @@ class OpportunityHunter:
             score = score_opportunity(market, decision, poly_comp)
             if score <= 0:
                 self._mark_rejected(ticker, decision.get("reasoning", "")[:60])
+                continue  # zero-score market can never be best — skip it
             yes_ask = float(market.get("yes_ask") or market.get("last_price") or 0)
             no_ask  = float(market.get("no_ask")  or (100 - yes_ask))
 

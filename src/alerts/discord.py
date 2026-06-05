@@ -93,7 +93,8 @@ class DiscordAlerter:
         now = time.time()
         try:
             if os.path.exists(self._STARTUP_TS_FILE):
-                last_ts = float(open(self._STARTUP_TS_FILE).read().strip())
+                with open(self._STARTUP_TS_FILE) as _f:
+                    last_ts = float(_f.read().strip())
                 since_last = now - last_ts
                 if since_last < self._STARTUP_COOLDOWN_SECS:
                     logger.info(
@@ -104,7 +105,8 @@ class DiscordAlerter:
         except Exception:
             pass
         try:
-            open(self._STARTUP_TS_FILE, "w").write(str(now))
+            with open(self._STARTUP_TS_FILE, "w") as _f:
+                _f.write(str(now))
         except Exception:
             pass
         from src.config.settings import settings
