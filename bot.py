@@ -678,9 +678,9 @@ class TradingBot:
             # frozenset of ticker+band keys sent in last alert — prevents re-sending same bundle
             _last_sent_keys: frozenset = frozenset()
 
-            BOT_ALERT_INTERVAL = 600   # scan every 10 min
+            BOT_ALERT_INTERVAL = 1800  # scan every 30 min — was 10min, too spammy
             RESULT_CHECK_DELAY = 60    # check results 60s after alert
-            MIN_CONF           = settings.trading.min_ai_confidence  # 70%
+            MIN_CONF           = 62.0  # alert threshold — between live(55%) and regular(70%)
 
             async def _check_and_post_results(discord, mode: str):
                 """
