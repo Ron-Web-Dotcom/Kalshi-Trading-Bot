@@ -203,14 +203,19 @@ class TradingBot:
                 await asyncio.sleep(TRADE_INTERVAL)
 
         async def hourly_heartbeat_loop():
-            """Send an hourly heartbeat to Discord at the top of every ET hour."""
+            """Send a heartbeat at 3am/9am/3pm/9pm ET — fills gaps between the 4 check-ins."""
             from src.alerts.discord import DiscordAlerter
             from src.utils.eastern_time import now_et as _now_et
             from datetime import timedelta as _hb_td
-            # Sleep until the next top-of-hour ET, then fire every 3600s on the clock
+            # Fire at 3, 9, 15, 21 ET — halfway between the daytime_summary slots (0, 6, 12, 18)
+            _HB_HOURS = {3, 9, 15, 21}
             _et_now = _now_et()
-            _next_hour = _et_now.replace(minute=0, second=0, microsecond=0) + _hb_td(hours=1)
-            await asyncio.sleep((_next_hour - _et_now).total_seconds())
+            _upcoming = [
+                _et_now.replace(hour=h, minute=0, second=0, microsecond=0)
+                for h in _HB_HOURS
+            ]
+            _upcoming = [t if t > _et_now else t + _hb_td(days=1) for t in _upcoming]
+            await asyncio.sleep((min(_upcoming) - _et_now).total_seconds())
             while not self._shutdown.is_set():
                 try:
                     discord = DiscordAlerter()
@@ -383,10 +388,14 @@ class TradingBot:
                 except Exception as e:
                     logger.error("Hourly heartbeat error: %s", e)
 
-                # Sleep until the next top-of-hour ET
-                _et_now = _now_et()
-                _next_hour = _et_now.replace(minute=0, second=0, microsecond=0) + _hb_td(hours=1)
-                await asyncio.sleep((_next_hour - _et_now).total_seconds())
+                # Sleep until the next 3/9/15/21 ET slot
+                _et_now   = _now_et()
+                _upcoming = [
+                    _et_now.replace(hour=h, minute=0, second=0, microsecond=0)
+                    for h in _HB_HOURS
+                ]
+                _upcoming = [t if t > _et_now else t + _hb_td(days=1) for t in _upcoming]
+                await asyncio.sleep((min(_upcoming) - _et_now).total_seconds())
 
         async def daytime_summary_loop():
             """Post position digests at 12 AM, 6 AM, 12 PM, 6 PM Eastern time."""
@@ -494,26 +503,7 @@ class TradingBot:
                         best_buys=list(_ds_sum.all_evaluations),
                         live_positions=live_pos_list,
                     )
-                    # Missed trades — separate message at same 4 scheduled times only
-                    try:
-                        await discord.near_miss_digest(
-                            paper=not settings.trading.live_trading_enabled
-                        )
-                    except Exception:
-                        pass
-                    # Open position monitor — separate message at same 4 scheduled times only
-                    try:
-                        all_pos = await self.db.fetchall(
-                            "SELECT * FROM positions WHERE status='open' ORDER BY opened_at DESC"
-                        )
-                        all_pos = [dict(r) for r in (all_pos or [])]
-                        if all_pos:
-                            await discord.position_monitor(
-                                positions=all_pos,
-                                paper=not settings.trading.live_trading_enabled,
-                            )
-                    except Exception:
-                        pass
+                    # near_miss and position data are embedded in the daytime_summary message above
                 except Exception as e:
                     logger.error("Daytime summary error: %s", e)
                 finally:

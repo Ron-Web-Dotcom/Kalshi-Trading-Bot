@@ -1427,6 +1427,27 @@ class DiscordAlerter:
                 "inline": False,
             })
 
+        # ── Missed trades (near-misses) ───────────────────────────────────────
+        try:
+            from src.utils.daily_stats import stats as _ds_nm
+            nm_list = _ds_nm.top_near_misses(n=3)
+            if nm_list:
+                nm_lines = []
+                for nm in nm_list:
+                    plat_nm = "🟣" if nm.get("platform") == "polymarket" else "🟦"
+                    ttl_nm  = self._display_ticker(nm.get("ticker",""), nm.get("title","") or "")[:50]
+                    conf_nm = nm.get("confidence", 0)
+                    side_nm = (nm.get("side") or "YES").upper()
+                    skip_nm = (nm.get("skip_reason") or "below threshold")[:55]
+                    nm_lines.append(f"{plat_nm} **{ttl_nm}** — BUY {side_nm} {conf_nm:.0f}% conf\n_{skip_nm}_")
+                fields.append({
+                    "name":   "👀 Trades Bot Saw But Didn't Take",
+                    "value":  "\n\n".join(nm_lines),
+                    "inline": False,
+                })
+        except Exception:
+            pass
+
         # ── Track record ──────────────────────────────────────────────────────
         pnl_s = "+" if today_pnl >= 0 else ""
         if total_closed == 0:
