@@ -247,27 +247,57 @@ class TradingBot:
                             }
                             for r in (rows or [])
                         ]
+                    # Rotate candidates each hour — exclude tickers shown last time
+                    _shown_last = getattr(self, "_hb_shown_tickers", set())
+                    _exclude_sql = ""
+                    _exclude_params: tuple = ()
+                    if _shown_last:
+                        placeholders = ",".join("?" * len(_shown_last))
+                        _exclude_sql = f"AND ticker NOT IN ({placeholders}) "
+                        _exclude_params = tuple(_shown_last)
+
                     kal_cand = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time FROM markets "
                         "WHERE yes_ask > 5 AND yes_ask < 95 "
                         "AND (platform='kalshi' OR platform IS NULL) "
                         "AND (status='open' OR status='') "
                         "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
-                        "ORDER BY "
-                        "  CASE WHEN close_time IS NOT NULL AND close_time != '' THEN 1 ELSE 2 END, "
-                        "  close_time ASC LIMIT 4"
+                        + _exclude_sql +
+                        "ORDER BY ABS(yes_ask - 50) ASC, volume DESC LIMIT 6",
+                        _exclude_params,
                     )
+                    # Fallback — if exclusion left nothing, show any fresh markets
+                    if not kal_cand:
+                        kal_cand = await self.db.fetchall(
+                            "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time FROM markets "
+                            "WHERE yes_ask > 5 AND yes_ask < 95 "
+                            "AND (platform='kalshi' OR platform IS NULL) "
+                            "AND (status='open' OR status='') "
+                            "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
+                            "ORDER BY RANDOM() LIMIT 6"
+                        )
                     poly_cand = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time FROM markets "
                         "WHERE yes_ask > 5 AND yes_ask < 95 "
                         "AND platform='polymarket' "
                         "AND (status='open' OR status='') "
                         "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
-                        "ORDER BY "
-                        "  CASE WHEN close_time IS NOT NULL AND close_time != '' THEN 1 ELSE 2 END, "
-                        "  close_time ASC LIMIT 4"
+                        + _exclude_sql +
+                        "ORDER BY ABS(yes_ask - 50) ASC, volume DESC LIMIT 6",
+                        _exclude_params,
                     )
+                    if not poly_cand:
+                        poly_cand = await self.db.fetchall(
+                            "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time FROM markets "
+                            "WHERE yes_ask > 5 AND yes_ask < 95 "
+                            "AND platform='polymarket' "
+                            "AND (status='open' OR status='') "
+                            "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
+                            "ORDER BY RANDOM() LIMIT 6"
+                        )
                     top_candidates = _cand_rows(kal_cand) + _cand_rows(poly_cand)
+                    # Remember what we showed so next hour rotates to fresh ones
+                    self._hb_shown_tickers = {c["ticker"] for c in top_candidates}
 
                     # Today's closed trades with outcomes
                     closed_rows = await self.db.fetchall(

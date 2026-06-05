@@ -931,12 +931,12 @@ class DiscordAlerter:
         watch_lines = []
         kal_shown = poly_shown = 0
         for c in top_candidates:
-            if kal_shown >= 2 and poly_shown >= 2:
+            if kal_shown >= 3 and poly_shown >= 3:
                 break
             plat = c.get("platform", "kalshi")
-            if plat == "polymarket" and poly_shown >= 2:
+            if plat == "polymarket" and poly_shown >= 3:
                 continue
-            if plat != "polymarket" and kal_shown >= 2:
+            if plat != "polymarket" and kal_shown >= 3:
                 continue
 
             icon   = "🟣" if plat == "polymarket" else "🟦"
