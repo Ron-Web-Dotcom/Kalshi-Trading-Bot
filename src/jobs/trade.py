@@ -464,37 +464,25 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         except Exception as _le:
             logger.debug("Kalshi live now fetch skipped: %s", _le)
 
-        # ── Polymarket: check active markets with live-event keywords via is_event_live_now()
+        # ── Polymarket: use Poly's own live/sports API first ────────────────────
+        # Polymarket shows NHL, MLB, WNBA, Tennis live in their app.
+        # get_live_now_markets() hits the Gamma API with live=true + sport tags.
         poly_time_raw = []
         if poly_enabled:
+            try:
+                live_poly_raw = await poly_client.get_live_now_markets(max_markets=300)
+                logger.info("Polymarket live now: %d confirmed in-play markets", len(live_poly_raw))
+            except Exception as _le:
+                logger.debug("Polymarket live now fetch skipped: %s", _le)
             try:
                 poly_time_raw = await poly_client.get_live_markets(max_hours=48.0, max_markets=500)
             except Exception as _le:
                 logger.debug("Live Polymarket fetch skipped: %s", _le)
 
-        poly_live_check = [
-            (m, is_event_live_now(m.get("title", "")))
-            for m in poly_time_raw
-            if _could_be_live(m.get("title", ""))
-        ]
-        try:
-            if poly_live_check:
-                poly_tasks   = [t for _, t in poly_live_check]
-                poly_markets_chk = [m for m, _ in poly_live_check]
-                poly_results = await asyncio.gather(*poly_tasks, return_exceptions=True)
-                for m, result in zip(poly_markets_chk, poly_results):
-                    if result is True:
-                        m["_live_confirmed"] = True
-                        live_poly_raw.append(m)
-                    else:
-                        expiring_poly_raw.append(m)
-        except Exception as _le:
-            logger.debug("Poly live event detector failed: %s", _le)
-
-        # Non-live-keyword Poly markets → expiring pool
+        # Non-live Poly markets → expiring pool
         live_poly_tickers = {m.get("ticker") for m in live_poly_raw}
         for m in poly_time_raw:
-            if not _could_be_live(m.get("title", "")) and m.get("ticker") not in live_poly_tickers:
+            if m.get("ticker") not in live_poly_tickers:
                 expiring_poly_raw.append(m)
 
         # All Kalshi time-window markets that aren't in the live set → expiring

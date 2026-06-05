@@ -207,10 +207,76 @@ class PolymarketTradingClient:
             logger.debug("Polymarket parse error: %s — %s", e, str(m)[:100])
             return None
 
+    async def get_live_now_markets(self, max_markets: int = 200) -> List[Dict]:
+        """
+        Fetch Polymarket markets for games/events happening RIGHT NOW.
+
+        Polymarket shows NHL, MLB, Tennis, WNBA, NBA etc. live in their app.
+        The Gamma API supports ?live=true and sports tag filters to get these.
+
+        Returns only markets where an actual game/match is in progress.
+        """
+        live_markets: List[Dict] = []
+        seen_tickers: set = set()
+
+        # Strategy 1: Gamma API live=true flag
+        try:
+            r = await self._client().get(
+                f"{GAMMA_BASE}/markets",
+                params={"active": "true", "closed": "false", "live": "true", "limit": 500},
+            )
+            if r.status_code == 200:
+                raw = r.json()
+                items = raw if isinstance(raw, list) else (raw.get("data") or raw.get("markets") or [])
+                for m in items:
+                    parsed = self._parse_market(m)
+                    if parsed and (parsed.get("yes_ask") or 0) > 1:
+                        parsed["_poly_live"] = True
+                        ticker = parsed.get("ticker") or parsed.get("condition_id") or ""
+                        if ticker not in seen_tickers:
+                            live_markets.append(parsed)
+                            seen_tickers.add(ticker)
+                logger.info("Polymarket live=true: %d markets", len(live_markets))
+        except Exception as e:
+            logger.debug("Polymarket live=true fetch: %s", e)
+
+        # Strategy 2: Sports tag — covers NHL, MLB, NBA, WNBA, Tennis, Golf, UFC
+        _SPORT_TAGS = ["sports", "nhl", "mlb", "nba", "wnba", "tennis", "golf", "ufc", "soccer", "football"]
+        for tag in _SPORT_TAGS:
+            if len(live_markets) >= max_markets:
+                break
+            try:
+                r = await self._client().get(
+                    f"{GAMMA_BASE}/markets",
+                    params={"active": "true", "closed": "false", "tag": tag, "limit": 200},
+                )
+                if r.status_code != 200:
+                    continue
+                raw = r.json()
+                items = raw if isinstance(raw, list) else (raw.get("data") or raw.get("markets") or [])
+                for m in items:
+                    parsed = self._parse_market(m)
+                    if not parsed or (parsed.get("yes_ask") or 0) <= 1:
+                        continue
+                    ticker = parsed.get("ticker") or parsed.get("condition_id") or ""
+                    if ticker in seen_tickers:
+                        continue
+                    title = (parsed.get("title") or "").lower()
+                    # Only include if it looks like a live game (has vs, team names, score context)
+                    if any(kw in title for kw in ["vs ", " vs", "win", "cover", "score", "over", "under",
+                                                   "quarter", "half", "inning", "period", "set ", "game "]):
+                        parsed["_poly_live"] = True
+                        live_markets.append(parsed)
+                        seen_tickers.add(ticker)
+            except Exception as e:
+                logger.debug("Polymarket tag=%s fetch: %s", tag, e)
+
+        logger.info("Polymarket LIVE NOW: %d confirmed sports/live markets", len(live_markets))
+        return live_markets[:max_markets]
+
     async def get_live_markets(self, max_hours: float = 6.0, max_markets: int = 60) -> List[Dict]:
         """
-        Fetch active Polymarket markets. Polymarket markets resolve weeks/months out
-        so we ignore close_time and just return active markets with valid prices.
+        Fetch active Polymarket markets with valid prices (used for expiring pool).
         """
         try:
             all_markets = await self.get_markets(limit=500)
@@ -218,7 +284,6 @@ class PolymarketTradingClient:
                 logger.warning("Polymarket live markets: get_markets returned 0 — API may be down")
                 return []
 
-            # Filter to markets with a valid price and title
             live = [
                 m for m in all_markets
                 if (m.get("yes_ask") or 0) > 1
@@ -228,9 +293,8 @@ class PolymarketTradingClient:
             if not live and all_markets:
                 sample = all_markets[0]
                 logger.warning(
-                    "Polymarket live: 0/%d have valid price. Sample: close_time=%r yes_ask=%.1f title=%s",
-                    len(all_markets),
-                    sample.get("close_time"), sample.get("yes_ask", 0),
+                    "Polymarket live: 0/%d have valid price. Sample: yes_ask=%.1f title=%s",
+                    len(all_markets), sample.get("yes_ask", 0),
                     (sample.get("title") or "")[:60],
                 )
             else:
