@@ -56,7 +56,9 @@ class DatabaseManager:
                         status TEXT DEFAULT 'open',
                         opened_at TEXT NOT NULL,
                         closed_at TEXT,
-                        close_reason TEXT
+                        close_reason TEXT,
+                        last_alerted_price REAL,
+                        platform TEXT DEFAULT 'kalshi'
                     );
 
                     CREATE TABLE IF NOT EXISTS trade_logs (
@@ -150,6 +152,7 @@ class DatabaseManager:
                     "ALTER TABLE positions  ADD COLUMN poly_token_id TEXT",
                     "ALTER TABLE positions  ADD COLUMN title TEXT DEFAULT ''",
                     "ALTER TABLE positions  ADD COLUMN size_usd REAL DEFAULT 0",
+                    "ALTER TABLE positions  ADD COLUMN last_alerted_price REAL",
                     "ALTER TABLE markets    ADD COLUMN platform TEXT DEFAULT 'kalshi'",
                 ]:
                     try:

@@ -237,13 +237,25 @@ async def run_tracking(db_manager) -> None:
                         "MTM  %-28s  %s  cur=%.0f¢  entry=%.0f¢  PnL=%+.2f  (%.1f%%)",
                         ticker, side, cur_price, avg_price, pnl, pct_change,
                     )
-                    # Discord: AI re-eval held (optional, gated by ALERT_ON_SIGNAL)
-                    if enable_reeval and 'reeval' in locals():
-                        if reeval.get("verdict") == "HOLD" and reeval.get("confidence", 0) >= reeval_min_conf:
-                            await discord.ai_reeval_hold(
-                                ticker=ticker, side=side, pct_change=pct_change,
-                                reasoning=reeval.get("reasoning", ""), paper=paper,
-                            )
+                    # Discord position update — ONLY when something meaningful changed:
+                    #   • Price moved ±5% or more since last alert
+                    #   • AI re-eval signals a notable shift (not routine HOLD)
+                    last_alerted_price = float(pos.get("last_alerted_price") or avg_price)
+                    price_shift = abs(cur_price - last_alerted_price)
+                    price_shift_pct = (price_shift / last_alerted_price * 100) if last_alerted_price else 0
+
+                    if price_shift_pct >= 5.0:
+                        # Price moved 5%+ — worth telling the user
+                        direction = "📈" if cur_price > last_alerted_price else "📉"
+                        await discord.ai_reeval_hold(
+                            ticker=ticker, side=side, pct_change=pct_change,
+                            reasoning=f"{direction} Price moved {price_shift_pct:.1f}% (now {cur_price:.0f}¢, was {last_alerted_price:.0f}¢)",
+                            paper=paper,
+                        )
+                        await db_manager.execute(
+                            "UPDATE positions SET last_alerted_price=? WHERE id=?",
+                            (cur_price, pos_id)
+                        )
 
             except Exception as e:
                 logger.warning("Track error for %s: %s", ticker, e)
