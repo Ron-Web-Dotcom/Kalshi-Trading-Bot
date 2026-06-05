@@ -143,6 +143,21 @@ class TradingBot:
     async def run_loop(self):
         await self.startup()
 
+        # ── Sleep mode: 3:00–5:00 AM ET — bot pauses all scanning ───────────
+        # Returns seconds until sleep window ends (0 if not in window).
+        async def _sleep_mode_wait() -> bool:
+            """If in quiet hours (3–5am ET), sleep until 5am and return True."""
+            from src.utils.eastern_time import now_et as _net
+            from datetime import timedelta as _td
+            et = _net()
+            if 3 <= et.hour < 5:
+                wake = et.replace(hour=5, minute=0, second=0, microsecond=0)
+                secs = (wake - et).total_seconds()
+                logger.info("😴 Sleep mode: quiet hours 3–5am ET — resuming at 5:00am (%.0f min)", secs / 60)
+                await asyncio.sleep(secs)
+                return True
+            return False
+
         async def ingest_loop():
             while not self._shutdown.is_set():
                 await asyncio.sleep(INGEST_INTERVAL)
@@ -163,6 +178,8 @@ class TradingBot:
 
         async def trade_loop():
             while not self._shutdown.is_set():
+                if await _sleep_mode_wait():
+                    continue
                 try:
                     await self.run_cycle()
                 except Exception as e:
@@ -740,6 +757,8 @@ class TradingBot:
                 await asyncio.sleep(BOT_ALERT_INTERVAL)
                 if self._shutdown.is_set():
                     break
+                if await _sleep_mode_wait():
+                    continue
 
                 try:
                     today = datetime.now(timezone.utc).date()
@@ -849,10 +868,37 @@ class TradingBot:
             await asyncio.sleep(90)   # let bot warm up first
             logger.info("Live miss scan loop started — scanning every %ds", LIVE_SCAN_INTERVAL)
 
+            # Morning wake-up summary at 5am ET after sleep mode
+            _morning_summary_sent = False
+
             while not self._shutdown.is_set():
                 await asyncio.sleep(LIVE_SCAN_INTERVAL)
                 if self._shutdown.is_set():
                     break
+
+                # Sleep mode 3–5am ET
+                if await _sleep_mode_wait():
+                    _morning_summary_sent = False  # reset so morning summary fires
+                    continue
+
+                # 5am morning wake-up summary
+                et_now = now_et()
+                if et_now.hour == 5 and not _morning_summary_sent:
+                    try:
+                        from src.alerts.discord import DiscordAlerter as _DA
+                        _d = _DA()
+                        open_pos = await self.db.fetchone("SELECT COUNT(*) as n FROM positions WHERE status='open'") or {}
+                        unreal   = await self.db.fetchone("SELECT COALESCE(SUM(pnl),0) as p FROM positions WHERE status='open'") or {}
+                        await _d.send_message(
+                            f"☀️ **Good morning! Bot back online — 5:00 AM ET**\n"
+                            f"📊 Open positions: **{open_pos.get('n', 0)}**\n"
+                            f"💰 Unrealised PnL: **${float(unreal.get('p', 0) or 0):.2f}**\n"
+                            f"🔍 Resuming live scan + trading now."
+                        )
+                        _morning_summary_sent = True
+                        logger.info("Morning wake-up summary sent")
+                    except Exception as _me:
+                        logger.debug("Morning summary error: %s", _me)
 
                 try:
                     mode = "PAPER" if not settings.trading.live_trading_enabled else "LIVE"
