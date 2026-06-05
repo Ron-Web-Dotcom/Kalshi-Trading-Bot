@@ -183,6 +183,10 @@ class OpportunityHunter:
             "before agi", "agi by",
             "invades taiwan", "china taiwan",
             "world war", "nuclear",
+            "jesus christ", "second coming", "rapture",
+            "gavin newsom", "2028 democratic", "2028 president",
+            "bernie endorse", "endorse dan osborn",
+            "waymo launch", "waymo nashville",
             "before 2027", "before 2028", "before 2029", "before 2030",
             "before 203", "before 204", "before 205",
         ]
