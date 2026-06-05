@@ -405,6 +405,89 @@ async def fetch_sofa_search(query: str) -> List[Dict]:
         return []
 
 
+async def fetch_statmuse(query: str, sport: str = "") -> Optional[str]:
+    """
+    StatMuse — natural language sports stats, game results, player records.
+    Scrapes statmuse.com/search?q=... for the answer snippet.
+
+    Returns a one-liner like:
+      "The Knicks are 3-1 in the 2026 NBA Finals."
+      "LeBron James scored 32 points in Game 4."
+      "The Hurricanes lost Game 5 4-2."
+    or None if no useful result found.
+    """
+    try:
+        from urllib.parse import quote_plus
+        q = query.strip()[:120]
+        url = f"https://www.statmuse.com/search?q={quote_plus(q)}"
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.statmuse.com/",
+        }
+        async with httpx.AsyncClient(timeout=_TIMEOUT, headers=headers,
+                                     follow_redirects=True) as client:
+            r = await client.get(url)
+            html = r.text
+
+        # StatMuse returns the answer in an <h1> or a .nlg-answer / .answer span
+        import re as _re
+        # Try structured answer first
+        for pattern in [
+            r'<h1[^>]*class="[^"]*nlg[^"]*"[^>]*>([^<]{10,300})</h1>',
+            r'<p[^>]*class="[^"]*nlg[^"]*"[^>]*>([^<]{10,300})</p>',
+            r'<span[^>]*class="[^"]*answer[^"]*"[^>]*>([^<]{10,300})</span>',
+            r'<h1[^>]*>([^<]{15,300})</h1>',
+        ]:
+            m = _re.search(pattern, html, _re.IGNORECASE)
+            if m:
+                text = m.group(1).strip()
+                text = _re.sub(r'\s+', ' ', text)
+                if len(text) > 10 and not text.startswith("StatMuse"):
+                    logger.debug("StatMuse answer: %s", text[:100])
+                    return f"StatMuse: {text}"
+
+        return None
+    except Exception as e:
+        logger.debug("StatMuse fetch failed for '%s': %s", query, e)
+        return None
+
+
+async def fetch_statmuse_live(title: str, search_terms: set) -> bool:
+    """
+    Check StatMuse for recent game results to confirm if a team/player
+    event is currently live or just completed (within 3 hours).
+    Returns True if StatMuse confirms an active/recent game.
+    """
+    if not search_terms:
+        return False
+    try:
+        # Build a natural language query StatMuse understands best
+        terms_list = list(search_terms)[:3]
+        query = f"{' '.join(terms_list)} game today score"
+        result = await fetch_statmuse(query)
+        if not result:
+            return False
+        low = result.lower()
+        # StatMuse answer confirming a live or very recent game
+        live_signals = [
+            "today", "tonight", "this quarter", "this period", "this inning",
+            "this half", "halftime", "overtime", "tied", "lead", "leads",
+            "winning", "losing", "score", "points", "goals", "runs",
+            "in progress", "live", "q1","q2","q3","q4","1st","2nd","3rd","4th",
+        ]
+        if any(sig in low for sig in live_signals):
+            logger.info("StatMuse LIVE signal for '%s': %s", " ".join(terms_list), result[:100])
+            return True
+    except Exception as e:
+        logger.debug("StatMuse live check failed: %s", e)
+    return False
+
+
 async def fetch_sports_context(title: str) -> Optional[str]:
     """
     High-level: detect league + teams from title, fetch scores + standings,

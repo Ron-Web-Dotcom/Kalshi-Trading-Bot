@@ -190,6 +190,10 @@ async def build_market_context(
             tasks["sports"] = fetch_comprehensive_sports_context(
                 title, league, teams, team_names, timeout=min(timeout_seconds - 2, 8.0)
             )
+            # StatMuse: natural language stats query run in parallel
+            from src.data.sports_fetcher import fetch_statmuse
+            stat_query = f"{title.replace('Will','').replace('?','').strip()} stats record"
+            tasks["statmuse"] = fetch_statmuse(stat_query)
         except ImportError:
             tasks["sports"] = fetch_sports_context(title)
         # Use soccer-specific news feeds for soccer markets
@@ -244,6 +248,10 @@ async def build_market_context(
         blocks.append(sports)
     elif isinstance(sports, Exception):
         logger.debug("Sports fetch error: %s", sports)
+
+    statmuse = results.get("statmuse")
+    if isinstance(statmuse, str) and statmuse:
+        blocks.append(f"=== STATMUSE STATS ===\n{statmuse}")
 
     economics = results.get("economics")
     if isinstance(economics, str) and economics:

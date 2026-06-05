@@ -254,8 +254,10 @@ async def _sports_live(title: str) -> bool:
             pass
         return False
 
+    from src.data.sports_fetcher import fetch_statmuse_live
     coros = [_check_sofa(s) for s in sport_slugs]
     coros += [_check_espn(sport, league) for league, (sport, _) in LEAGUES.items()]
+    coros += [fetch_statmuse_live(title, search_terms)]
     results = await asyncio.gather(*coros, return_exceptions=True)
     return any(r is True for r in results)
 
