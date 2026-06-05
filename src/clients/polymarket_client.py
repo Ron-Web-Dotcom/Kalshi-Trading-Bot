@@ -211,37 +211,27 @@ class PolymarketTradingClient:
         """
         Fetch Polymarket markets for games/events happening RIGHT NOW.
 
-        Polymarket shows NHL, MLB, Tennis, WNBA, NBA etc. live in their app.
-        The Gamma API supports ?live=true and sports tag filters to get these.
+        Only returns actual in-progress sports/events — NOT prediction markets
+        that happen to be active. 'Rihanna album' is NOT a live event.
 
-        Returns only markets where an actual game/match is in progress.
+        Uses sport-specific tags + strict game-context keyword filter.
         """
         live_markets: List[Dict] = []
         seen_tickers: set = set()
 
-        # Strategy 1: Gamma API live=true flag
-        try:
-            r = await self._client().get(
-                f"{GAMMA_BASE}/markets",
-                params={"active": "true", "closed": "false", "live": "true", "limit": 500},
-            )
-            if r.status_code == 200:
-                raw = r.json()
-                items = raw if isinstance(raw, list) else (raw.get("data") or raw.get("markets") or [])
-                for m in items:
-                    parsed = self._parse_market(m)
-                    if parsed and (parsed.get("yes_ask") or 0) > 1:
-                        parsed["_poly_live"] = True
-                        ticker = parsed.get("ticker") or parsed.get("condition_id") or ""
-                        if ticker not in seen_tickers:
-                            live_markets.append(parsed)
-                            seen_tickers.add(ticker)
-                logger.info("Polymarket live=true: %d markets", len(live_markets))
-        except Exception as e:
-            logger.debug("Polymarket live=true fetch: %s", e)
+        # Sport tags only — no live=true (that returns all active markets)
+        _SPORT_TAGS = ["nhl", "mlb", "nba", "wnba", "tennis", "golf", "ufc",
+                       "soccer", "football", "boxing", "cricket", "rugby"]
 
-        # Strategy 2: Sports tag — covers NHL, MLB, NBA, WNBA, Tennis, Golf, UFC
-        _SPORT_TAGS = ["sports", "nhl", "mlb", "nba", "wnba", "tennis", "golf", "ufc", "soccer", "football"]
+        # Keywords that confirm an actual game/match is in progress
+        _GAME_KEYWORDS = [
+            "vs ", " vs ", "game ", "match ", "series ",
+            "quarter", "half", "inning", "period", "set ",
+            "overtime", "playoff", "championship", "finals",
+            "bout", "fight", "round ", "race ", "leg ",
+            "cover", "spread", "moneyline", "over/under",
+        ]
+
         for tag in _SPORT_TAGS:
             if len(live_markets) >= max_markets:
                 break
@@ -262,16 +252,15 @@ class PolymarketTradingClient:
                     if ticker in seen_tickers:
                         continue
                     title = (parsed.get("title") or "").lower()
-                    # Only include if it looks like a live game (has vs, team names, score context)
-                    if any(kw in title for kw in ["vs ", " vs", "win", "cover", "score", "over", "under",
-                                                   "quarter", "half", "inning", "period", "set ", "game "]):
+                    # Must look like an actual game market — not a general prediction
+                    if any(kw in title for kw in _GAME_KEYWORDS):
                         parsed["_poly_live"] = True
                         live_markets.append(parsed)
                         seen_tickers.add(ticker)
             except Exception as e:
                 logger.debug("Polymarket tag=%s fetch: %s", tag, e)
 
-        logger.info("Polymarket LIVE NOW: %d confirmed sports/live markets", len(live_markets))
+        logger.info("Polymarket LIVE NOW: %d actual game markets", len(live_markets))
         return live_markets[:max_markets]
 
     async def get_live_markets(self, max_hours: float = 6.0, max_markets: int = 60) -> List[Dict]:
