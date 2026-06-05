@@ -330,7 +330,7 @@ class TradingBot:
                         )
                     poly_cand = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time FROM markets "
-                        "WHERE yes_ask > 5 AND yes_ask < 95 "
+                        "WHERE yes_ask > 10 AND yes_ask < 90 "
                         "AND platform='polymarket' "
                         "AND (status='open' OR status='') "
                         "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
@@ -341,7 +341,7 @@ class TradingBot:
                     if not poly_cand:
                         poly_cand = await self.db.fetchall(
                             "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time FROM markets "
-                            "WHERE yes_ask > 5 AND yes_ask < 95 "
+                            "WHERE yes_ask > 10 AND yes_ask < 90 "
                             "AND platform='polymarket' "
                             "AND (status='open' OR status='') "
                             "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
@@ -1067,14 +1067,31 @@ class TradingBot:
                         )
 
                     # Update shared scan state for hourly heartbeat
+                    # Pull fresh Kalshi candidates from DB so they always appear alongside Poly
+                    _kal_top = []
+                    try:
+                        _kal_rows = await self.db.fetchall(
+                            "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time "
+                            "FROM markets "
+                            "WHERE (platform='kalshi' OR platform IS NULL) "
+                            "AND yes_ask > 5 AND yes_ask < 95 "
+                            "AND (status='open' OR status='') "
+                            "AND title IS NOT NULL AND title != '' "
+                            "AND title NOT LIKE '0x%' "
+                            "ORDER BY volume DESC LIMIT 4"
+                        )
+                        _kal_top = [dict(r) for r in (_kal_rows or [])]
+                    except Exception:
+                        pass
+                    _poly_regular = [
+                        dict(m, _scan_type="regular")
+                        for m in candidates[:4]
+                        if m.get("title") and not m.get("_platform_live")
+                    ]
                     from src.utils.daily_stats import stats as _scan_stats
                     _scan_stats.update_scan_state(
                         live_markets=live_candidates,
-                        regular_top=[
-                            dict(m, _scan_type="regular")
-                            for m in candidates[:6]
-                            if m.get("title") and not m.get("_platform_live")
-                        ],
+                        regular_top=_kal_top + _poly_regular,
                     )
 
                     # ── 3. AI-EVALUATE live candidates — find cheeky bids ─────

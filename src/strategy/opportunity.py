@@ -189,6 +189,12 @@ class OpportunityHunter:
             "waymo launch", "waymo nashville",
             "before 2027", "before 2028", "before 2029", "before 2030",
             "before 203", "before 204", "before 205",
+            # Long-shot celebrity/novelty markets — not real edges
+            "oprah", "lebron", "lebron james", "dwayne johnson", "the rock",
+            "kanye west", "taylor swift president", "elon musk president",
+            "mark zuckerberg president", "joe rogan president",
+            "win the 2028", "win the 2032", "2028 us presidential",
+            "uzbekistan win", "win the world cup 2026",
         ]
 
         # ── Stage 1: rule-based pre-score (FREE — no AI calls) ───────────────
