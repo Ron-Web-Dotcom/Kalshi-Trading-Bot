@@ -82,10 +82,31 @@ class DiscordAlerter:
             logger.warning("Discord test alert failed — check DISCORD_WEBHOOK_URL in .env")
         return ok
 
+    _STARTUP_COOLDOWN_SECS: float = 180.0  # suppress banner if restarted within 3 min
+    _STARTUP_TS_FILE: str = "/tmp/kalshi_bot_last_startup.txt"
+
     async def startup_banner(self, mode: str, balance: Optional[float] = None,
                               poly_enabled: bool = False,
                               health_results: Optional[Dict] = None) -> None:
-        """Send bot startup notification."""
+        """Send bot startup notification — rate-limited to once per 3 minutes."""
+        import time, os
+        now = time.time()
+        try:
+            if os.path.exists(self._STARTUP_TS_FILE):
+                last_ts = float(open(self._STARTUP_TS_FILE).read().strip())
+                since_last = now - last_ts
+                if since_last < self._STARTUP_COOLDOWN_SECS:
+                    logger.info(
+                        "Startup banner suppressed (restarted %.0fs ago — cooldown %.0fs)",
+                        since_last, self._STARTUP_COOLDOWN_SECS,
+                    )
+                    return
+        except Exception:
+            pass
+        try:
+            open(self._STARTUP_TS_FILE, "w").write(str(now))
+        except Exception:
+            pass
         from src.config.settings import settings
         poly_on = poly_enabled or settings.polymarket.enabled
         color = 0xFF4444 if mode == "LIVE" else 0x00FF7F
