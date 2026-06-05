@@ -334,7 +334,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         poly_markets = []
         if poly_enabled:
             try:
-                raw_poly = await poly_client.get_markets(limit=1000)
+                raw_poly = await poly_client.get_markets(limit=300)
                 now_ts   = __import__("datetime").datetime.now(
                     __import__("datetime").timezone.utc).isoformat()
 

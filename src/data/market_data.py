@@ -26,8 +26,8 @@ class MarketDataFetcher:
         """
         logger.info("━━━ MARKET INGEST START ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         # Two pools: top-1000 by volume + top-200 soonest-closing (for short-duration markets)
-        markets_by_vol   = await self.kalshi.get_all_markets(status="open", max_markets=1000)
-        markets_by_close = await self.kalshi.get_all_markets(status="open", max_markets=200, sort_by_close=True)
+        markets_by_vol   = await self.kalshi.get_all_markets(status="open", max_markets=500)
+        markets_by_close = await self.kalshi.get_all_markets(status="open", max_markets=100, sort_by_close=True)
 
         # Merge — deduplicate by ticker, volume pool first
         seen = {m.get("ticker") for m in markets_by_vol}

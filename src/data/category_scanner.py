@@ -455,7 +455,7 @@ class CategoryScanner:
         # Bulk fetch + Kalshi concurrently
         extras = []
         if include_bulk:
-            extras.append(_fetch_poly_bulk(500))
+            extras.append(_fetch_poly_bulk(200))
         extras.append(self._kalshi_all_categories(max_per_tag))
 
         extra_results = await asyncio.gather(*extras, return_exceptions=True)
