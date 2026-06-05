@@ -451,18 +451,20 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
         expiring_kalshi_raw = []  # closing soon but NOT confirmed live
         expiring_poly_raw   = []  # same for Poly
-        live_kalshi_raw     = []  # confirmed live by is_event_live_now()
-        live_poly_raw       = []  # confirmed live by is_event_live_now()
+        live_kalshi_raw     = []  # confirmed live — actual game/match in progress
+        live_poly_raw       = []  # confirmed live on Polymarket
 
-        # Fetch all markets closing within time windows for event checking
+        # ── Kalshi: use Kalshi's own live event API first (most accurate) ────────
+        # Kalshi shows "LIVE 38" in their nav — these are real in-progress events
+        # like "Czechia vs Guatemala 74'" — not just markets closing soon.
         try:
-            kalshi_6h_raw  = await kalshi.get_live_markets(max_hours=6.0,  max_markets=500)
-            kalshi_24h_raw = await kalshi.get_live_markets(max_hours=24.0, max_markets=500)
+            kalshi_live_now = await kalshi.get_live_now_markets(max_markets=300)
+            live_kalshi_raw = kalshi_live_now
+            logger.info("Kalshi live now: %d confirmed in-play markets", len(live_kalshi_raw))
         except Exception as _le:
-            logger.debug("Live Kalshi fetch skipped: %s", _le)
-            kalshi_6h_raw  = []
-            kalshi_24h_raw = []
+            logger.debug("Kalshi live now fetch skipped: %s", _le)
 
+        # ── Polymarket: check active markets with live-event keywords via is_event_live_now()
         poly_time_raw = []
         if poly_enabled:
             try:
@@ -470,48 +472,40 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             except Exception as _le:
                 logger.debug("Live Polymarket fetch skipped: %s", _le)
 
-        # Run is_event_live_now() on all candidates that COULD be live events
-        all_kalshi_candidates = {m.get("ticker"): m for m in kalshi_24h_raw}
-        kalshi_live_check = [
-            (m, is_event_live_now(m.get("title", "")))
-            for m in all_kalshi_candidates.values()
-            if _could_be_live(m.get("title", ""))
-        ]
         poly_live_check = [
             (m, is_event_live_now(m.get("title", "")))
             for m in poly_time_raw
             if _could_be_live(m.get("title", ""))
         ]
-
-        # Gather all live checks in parallel
         try:
-            if kalshi_live_check or poly_live_check:
-                all_tasks   = [t for _, t in kalshi_live_check] + [t for _, t in poly_live_check]
-                all_markets = [m for m, _ in kalshi_live_check] + [m for m, _ in poly_live_check]
-                all_results = await asyncio.gather(*all_tasks, return_exceptions=True)
-                k_len = len(kalshi_live_check)
-                for m, result in zip(all_markets[:k_len], all_results[:k_len]):
-                    if result is True:
-                        m["_live_confirmed"] = True
-                        live_kalshi_raw.append(m)
-                    else:
-                        expiring_kalshi_raw.append(m)
-                for m, result in zip(all_markets[k_len:], all_results[k_len:]):
+            if poly_live_check:
+                poly_tasks   = [t for _, t in poly_live_check]
+                poly_markets_chk = [m for m, _ in poly_live_check]
+                poly_results = await asyncio.gather(*poly_tasks, return_exceptions=True)
+                for m, result in zip(poly_markets_chk, poly_results):
                     if result is True:
                         m["_live_confirmed"] = True
                         live_poly_raw.append(m)
                     else:
                         expiring_poly_raw.append(m)
         except Exception as _le:
-            logger.debug("Live event detector failed: %s", _le)
+            logger.debug("Poly live event detector failed: %s", _le)
 
-        # Markets without live-event keywords → expiring only (no live check)
-        for m in all_kalshi_candidates.values():
-            if not _could_be_live(m.get("title", "")) and m.get("ticker") not in {x.get("ticker") for x in live_kalshi_raw}:
-                expiring_kalshi_raw.append(m)
+        # Non-live-keyword Poly markets → expiring pool
+        live_poly_tickers = {m.get("ticker") for m in live_poly_raw}
         for m in poly_time_raw:
-            if not _could_be_live(m.get("title", "")) and m.get("ticker") not in {x.get("ticker") for x in live_poly_raw}:
+            if not _could_be_live(m.get("title", "")) and m.get("ticker") not in live_poly_tickers:
                 expiring_poly_raw.append(m)
+
+        # All Kalshi time-window markets that aren't in the live set → expiring
+        try:
+            kalshi_24h_raw = await kalshi.get_live_markets(max_hours=24.0, max_markets=500)
+        except Exception:
+            kalshi_24h_raw = []
+        live_k_tickers = {m.get("ticker") for m in live_kalshi_raw}
+        for m in kalshi_24h_raw:
+            if m.get("ticker") not in live_k_tickers:
+                expiring_kalshi_raw.append(m)
 
         live_kalshi = [
             m for m in live_kalshi_raw

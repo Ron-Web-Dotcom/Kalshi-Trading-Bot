@@ -137,6 +137,105 @@ class KalshiClient:
             params["cursor"] = cursor
         return await self._request("GET", "/markets", params=params)
 
+    async def get_live_now_markets(self, max_markets: int = 200) -> List[Dict]:
+        """
+        Fetch markets that are ACTUALLY LIVE RIGHT NOW using Kalshi's live event API.
+
+        Kalshi shows "LIVE 38" in the nav — these are real in-progress events
+        (Czechia vs Guatemala 74', NBA game Q3, etc.), not just closing-soon markets.
+
+        Uses the /events endpoint with status=active which returns events where
+        a live game/match is in progress. Falls back to /markets with live-specific
+        category tags if events endpoint unavailable.
+        """
+        live_markets: List[Dict] = []
+
+        # Strategy 1: /events endpoint — Kalshi groups markets under events
+        # An event being "active" means the underlying game/match is live NOW
+        try:
+            data = await self._request("GET", "/events", params={
+                "status": "open",
+                "limit": 200,
+            })
+            events = data.get("events") or []
+            for event in events:
+                # Events with a live score or "in_game" flag are truly live
+                event_status = (event.get("event_status") or "").lower()
+                mutually_ex  = event.get("mutually_exclusive_restriction")
+                # Kalshi sets category to "Sports" and has live game data for live events
+                category = (event.get("category") or "").lower()
+                title    = event.get("title") or event.get("event_title") or ""
+                if not title:
+                    continue
+                # Check for live indicator in the event data
+                if event_status in ("live", "active", "in_progress", "in_game"):
+                    # Pull the sub-markets for this event
+                    for m in (event.get("markets") or []):
+                        if isinstance(m, dict):
+                            m.setdefault("title", title)
+                            m.setdefault("category", category)
+                            m["_kalshi_live"] = True
+                            live_markets.append(m)
+        except Exception as e:
+            logger.debug("Kalshi /events live fetch: %s", e)
+
+        if live_markets:
+            logger.info("Kalshi LIVE NOW (/events): %d live markets", len(live_markets))
+            return live_markets[:max_markets]
+
+        # Strategy 2: /markets with live-specific series tickers
+        # Kalshi live sports markets have series tickers like SOCCER-*, NBA-LIVE-*, etc.
+        live_series_prefixes = [
+            "SOCCER", "NFL", "NBA", "MLB", "NHL", "UFC", "TENNIS",
+            "F1", "GOLF", "RUGBY", "CRICKET", "BOXING",
+        ]
+        try:
+            markets = []
+            cursor = ""
+            while len(markets) < max_markets:
+                data = await self.get_markets(limit=200, cursor=cursor, status="open")
+                batch = data.get("markets") or []
+                if not batch:
+                    break
+                markets.extend(batch)
+                cursor = data.get("cursor") or ""
+                if not cursor:
+                    break
+                await asyncio.sleep(0.1)
+
+            now = datetime.now(timezone.utc)
+            for m in markets:
+                ticker = (m.get("ticker") or "").upper()
+                title  = (m.get("title") or "").lower()
+                ct     = m.get("close_time") or ""
+                # Must still be open
+                try:
+                    close_dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                    if close_dt.tzinfo is None:
+                        close_dt = close_dt.replace(tzinfo=timezone.utc)
+                    hours_left = (close_dt - now).total_seconds() / 3600
+                    if hours_left <= 0:
+                        continue
+                except Exception:
+                    continue
+                # Live sports markets on Kalshi close when the game ends (usually <3h)
+                # and have sport-related tickers or titles
+                is_sport_ticker = any(ticker.startswith(p) for p in live_series_prefixes)
+                is_sport_title  = any(kw in title for kw in [
+                    "vs ", " vs", "match", "game", "quarter", "half", "period",
+                    "inning", "set ", "round", "bout", "race", "leg ",
+                ])
+                if (is_sport_ticker or is_sport_title) and hours_left <= 6:
+                    m["_kalshi_live"] = True
+                    m["hours_to_close"] = round(hours_left, 2)
+                    live_markets.append(m)
+
+        except Exception as e:
+            logger.debug("Kalshi live sports market scan: %s", e)
+
+        logger.info("Kalshi LIVE NOW (sports scan): %d confirmed live markets", len(live_markets))
+        return live_markets[:max_markets]
+
     async def get_all_markets(self, status: str = "open", max_markets: int = 1000,
                                sort_by_close: bool = False) -> List[Dict]:
         """
