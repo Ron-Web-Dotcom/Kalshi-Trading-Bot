@@ -125,6 +125,17 @@ class OpportunityHunter:
             len(markets), len(poly_markets) if poly_markets else 0, len(all_candidates),
         )
 
+        # Long-term speculation markets — not tradeable, skip before AI
+        _SKIP_PHRASES = [
+            "before gta", "gta vi", "gta 6",
+            "rihanna", "kanye", "playboi carti", "drake album",
+            "before agi", "agi by",
+            "invades taiwan", "china taiwan",
+            "world war", "nuclear",
+            "before 2027", "before 2028", "before 2029", "before 2030",
+            "before 203", "before 204", "before 205",
+        ]
+
         # ── Stage 1: rule-based pre-score (FREE — no AI calls) ───────────────
         prescored = []
         for market in all_candidates:
@@ -134,6 +145,10 @@ class OpportunityHunter:
             if yes_ask <= 1 or yes_ask >= 99:
                 continue
             if not title or len(title) < 10 or title.startswith("0x"):
+                continue
+            # Skip obvious long-term speculation — no edge, wastes AI calls
+            title_lower = title.lower()
+            if any(p in title_lower for p in _SKIP_PHRASES):
                 continue
 
             poly_comp  = poly_by_ticker.get(market.get("ticker", ""))

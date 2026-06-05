@@ -114,7 +114,7 @@ class KalshiClient:
                 return resp.json()
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 401:
-                    logger.warning("Kalshi 401 on %s %s — body: %s", method, path, e.response.text[:300])
+                    logger.debug("Kalshi 401 on %s %s — %s", method, path, e.response.text[:100])
                     return {}
                 if attempt == retries - 1:
                     _safe = e.response.text[:200]
