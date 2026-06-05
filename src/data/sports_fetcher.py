@@ -14,6 +14,7 @@ Endpoints used (all public, no auth):
              https://api.sofascore.com/api/v1/search/all?q={query}
 """
 
+import asyncio
 import logging
 import re
 from typing import Dict, List, Optional, Tuple
@@ -457,35 +458,64 @@ async def fetch_statmuse(query: str, sport: str = "") -> Optional[str]:
         return None
 
 
-async def fetch_statmuse_live(title: str, search_terms: set) -> bool:
+async def fetch_statmuse_player_context(title: str) -> Optional[str]:
     """
-    Check StatMuse for recent game results to confirm if a team/player
-    event is currently live or just completed (within 3 hours).
-    Returns True if StatMuse confirms an active/recent game.
+    Pull deep player history from StatMuse — per-game averages, career stats,
+    recent form, head-to-head records.
+
+    Runs multiple natural language queries in parallel:
+      - Points/goals per game this season
+      - Career averages
+      - Last 5 games performance
+      - Head-to-head vs opponent (if two teams detected)
+      - Player injury/status signals
+
+    Returns a formatted context block or None.
     """
-    if not search_terms:
-        return False
-    try:
-        # Build a natural language query StatMuse understands best
-        terms_list = list(search_terms)[:3]
-        query = f"{' '.join(terms_list)} game today score"
-        result = await fetch_statmuse(query)
-        if not result:
-            return False
-        low = result.lower()
-        # StatMuse answer confirming a live or very recent game
-        live_signals = [
-            "today", "tonight", "this quarter", "this period", "this inning",
-            "this half", "halftime", "overtime", "tied", "lead", "leads",
-            "winning", "losing", "score", "points", "goals", "runs",
-            "in progress", "live", "q1","q2","q3","q4","1st","2nd","3rd","4th",
+    import re as _re
+
+    # Extract player names — capitalized words that look like names
+    players = _re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", title)
+    # Extract team names
+    teams   = _re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", title)
+
+    # Build targeted queries StatMuse handles best
+    queries = []
+    for player in players[:2]:
+        queries += [
+            f"how many points does {player} average per game this season",
+            f"{player} stats last 5 games",
+            f"{player} career averages per game",
         ]
-        if any(sig in low for sig in live_signals):
-            logger.info("StatMuse LIVE signal for '%s': %s", " ".join(terms_list), result[:100])
-            return True
-    except Exception as e:
-        logger.debug("StatMuse live check failed: %s", e)
-    return False
+
+    # Team H2H if two teams detected
+    if len(teams) >= 2:
+        queries.append(f"{teams[0]} vs {teams[1]} last 5 games results")
+        queries.append(f"{teams[0]} record this season")
+
+    # Fallback — use the market title directly as a natural language query
+    if not queries:
+        clean = title.replace("Will ","").replace("?","").replace(" win ","").strip()
+        queries = [
+            f"{clean} stats this season",
+            f"{clean} average per game",
+        ]
+
+    # Run all queries in parallel, cap at 5
+    results = await asyncio.gather(
+        *[fetch_statmuse(q) for q in queries[:5]],
+        return_exceptions=True,
+    )
+
+    lines = []
+    for q, r in zip(queries[:5], results):
+        if isinstance(r, str) and r:
+            lines.append(f"Q: {q}\n→ {r}")
+
+    if not lines:
+        return None
+
+    return "=== STATMUSE PLAYER & TEAM HISTORY ===\n" + "\n\n".join(lines)
 
 
 async def fetch_sports_context(title: str) -> Optional[str]:
