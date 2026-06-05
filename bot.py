@@ -756,8 +756,8 @@ class TradingBot:
                     for ticker, slot in list(_ls.items()):
                         conf = float(slot.get("confidence", 0) or 0)
                         price = float(slot.get("price_cents") or slot.get("yes_ask") or 0)
-                        # Skip if no real confidence or price data
-                        if conf < MIN_CONF or price <= 0:
+                        # Skip if no real confidence or untradeable price (must be 5¢–95¢)
+                        if conf < MIN_CONF or not (5 <= price <= 95):
                             continue
                         band = int(conf / 10) * 10
                         if _alerted.get(ticker, {}).get("band") != band:
@@ -775,8 +775,8 @@ class TradingBot:
                         conf   = float(ev.get("confidence", 0) or 0)
                         price  = float(ev.get("price_cents") or ev.get("yes_ask") or 0)
                         ticker = ev.get("ticker", "")
-                        # Must have real confidence, real price, and meet threshold
-                        if conf < MIN_CONF or price <= 0 or not ticker:
+                        # Must have real confidence, tradeable price (5¢–95¢), and ticker
+                        if conf < MIN_CONF or not (5 <= price <= 95) or not ticker:
                             continue
                         if ticker in _ls:
                             continue
