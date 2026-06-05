@@ -144,18 +144,32 @@ class TradingBot:
         await self.startup()
 
         # ── Sleep mode: 3:00–5:00 AM ET — bot pauses all scanning ───────────
-        # Returns seconds until sleep window ends (0 if not in window).
+        _sleep_mode_notified = False  # track if we've sent the sleep Discord msg
+
         async def _sleep_mode_wait() -> bool:
-            """If in quiet hours (3–5am ET), sleep until 5am and return True."""
+            """If in quiet hours (3–5am ET), notify Discord once, sleep until 5am, return True."""
+            nonlocal _sleep_mode_notified
             from src.utils.eastern_time import now_et as _net
             from datetime import timedelta as _td
             et = _net()
             if 3 <= et.hour < 5:
+                if not _sleep_mode_notified:
+                    try:
+                        from src.alerts.discord import DiscordAlerter as _DA
+                        await _DA().send_message(
+                            "😴 **Sleep Mode Activated — 3:00 AM ET**\n"
+                            "Bot pausing all scanning & alerts until 5:00 AM ET.\n"
+                            "Existing positions are safe — no changes during sleep. 💤"
+                        )
+                        _sleep_mode_notified = True
+                    except Exception:
+                        pass
                 wake = et.replace(hour=5, minute=0, second=0, microsecond=0)
                 secs = (wake - et).total_seconds()
                 logger.info("😴 Sleep mode: quiet hours 3–5am ET — resuming at 5:00am (%.0f min)", secs / 60)
                 await asyncio.sleep(secs)
                 return True
+            _sleep_mode_notified = False  # reset for next night
             return False
 
         async def ingest_loop():
@@ -881,24 +895,67 @@ class TradingBot:
                     _morning_summary_sent = False  # reset so morning summary fires
                     continue
 
-                # 5am morning wake-up summary
                 et_now = now_et()
+
+                # 5am — health check style wake-up (same as bot startup)
                 if et_now.hour == 5 and not _morning_summary_sent:
                     try:
                         from src.alerts.discord import DiscordAlerter as _DA
+                        import time as _time
                         _d = _DA()
+                        # Run health checks same as startup
+                        _checks = {}
+                        for _name, _coro in [
+                            ("Kalshi",     self.kalshi.get_markets(limit=1)),
+                            ("Polymarket", __import__("src.clients.polymarket_client",
+                                           fromlist=["PolymarketTradingClient"]).PolymarketTradingClient().get_markets(limit=1)),
+                        ]:
+                            _t0 = _time.monotonic()
+                            try:
+                                await _coro
+                                _checks[_name] = f"✅ {int((_time.monotonic()-_t0)*1000)}ms"
+                            except Exception:
+                                _checks[_name] = "❌ error"
+                        _check_str = "\n".join(f"{k} — {v}" for k, v in _checks.items())
                         open_pos = await self.db.fetchone("SELECT COUNT(*) as n FROM positions WHERE status='open'") or {}
-                        unreal   = await self.db.fetchone("SELECT COALESCE(SUM(pnl),0) as p FROM positions WHERE status='open'") or {}
                         await _d.send_message(
-                            f"☀️ **Good morning! Bot back online — 5:00 AM ET**\n"
-                            f"📊 Open positions: **{open_pos.get('n', 0)}**\n"
-                            f"💰 Unrealised PnL: **${float(unreal.get('p', 0) or 0):.2f}**\n"
-                            f"🔍 Resuming live scan + trading now."
+                            f"☀️ **Good Morning — Bot Back Online 5:00 AM ET**\n"
+                            f"Scanning resuming now. 6AM summary coming up.\n\n"
+                            f"**Service Health**\n```\n{_check_str}\n```\n"
+                            f"📊 Open positions holding: **{open_pos.get('n', 0)}**"
                         )
                         _morning_summary_sent = True
-                        logger.info("Morning wake-up summary sent")
+                        logger.info("Morning wake-up health check sent")
                     except Exception as _me:
-                        logger.debug("Morning summary error: %s", _me)
+                        logger.debug("Morning wake-up error: %s", _me)
+
+                # 6am — full morning summary
+                if et_now.hour == 6 and _morning_summary_sent and not getattr(_sleep_mode_wait, '_summary_6am_sent', False):
+                    try:
+                        from src.alerts.discord import DiscordAlerter as _DA
+                        _d = _DA()
+                        open_pos  = await self.db.fetchone("SELECT COUNT(*) as n FROM positions WHERE status='open'") or {}
+                        unreal    = await self.db.fetchone("SELECT COALESCE(SUM(pnl),0) as p FROM positions WHERE status='open'") or {}
+                        wl        = await self.db.fetchone(
+                            "SELECT COUNT(*) as total, SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins, "
+                            "COALESCE(SUM(pnl),0) as pnl FROM positions WHERE status='closed' AND pnl IS NOT NULL"
+                        ) or {}
+                        total     = wl.get("total") or 0
+                        wins      = wl.get("wins") or 0
+                        wr        = f"{wins/total*100:.0f}%" if total else "n/a"
+                        await _d.send_message(
+                            f"📋 **6 AM Morning Summary**\n"
+                            f"📊 Open positions: **{open_pos.get('n', 0)}**\n"
+                            f"💰 Unrealised PnL: **${float(unreal.get('p', 0) or 0):.2f}**\n"
+                            f"🏆 All-time: {total} closed | Win rate: {wr} | PnL: ${float(wl.get('pnl',0) or 0):.2f}\n"
+                            f"🔍 Live scan active — bot alert firing every 10 min"
+                        )
+                        _sleep_mode_wait._summary_6am_sent = True
+                        logger.info("6am morning summary sent")
+                    except Exception as _me:
+                        logger.debug("6am summary error: %s", _me)
+                elif et_now.hour == 7:
+                    _sleep_mode_wait._summary_6am_sent = False  # reset for next day
 
                 try:
                     mode = "PAPER" if not settings.trading.live_trading_enabled else "LIVE"
