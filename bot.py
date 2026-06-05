@@ -747,15 +747,31 @@ class TradingBot:
                     new_picks: list = []
 
                     # 1. Active live slots — already entered, highest urgency
+                    # Skip phrases — same list as opportunity hunter
+                    _BOT_ALERT_SKIP = [
+                        "gavin newsom", "2028 democratic", "2028 president",
+                        "win the 2026 nba finals", "win the 2026 nhl",
+                        "win the 2027", "win the 2028", "win the 2032",
+                        "stanley cup", "nba finals", "super bowl", "world series",
+                        "oprah", "lebron", "bernie endorse",
+                        "before 2027", "before 2028", "before 2029",
+                    ]
+
+                    def _should_skip_alert(pick: dict) -> bool:
+                        title = (pick.get("title") or pick.get("ticker") or "").lower()
+                        return any(p in title for p in _BOT_ALERT_SKIP)
+
                     for ticker, slot in list(_ls.items()):
-                        conf = float(slot.get("confidence", 0) or 0)
+                        conf  = float(slot.get("confidence", 0) or 0)
                         price = float(slot.get("price_cents") or slot.get("yes_ask") or 0)
-                        # Skip if no real confidence or untradeable price (must be 5¢–95¢)
+                        # Must have real price AND confidence — skip 0¢ ghost entries
                         if conf < MIN_CONF or not (5 <= price <= 95):
+                            continue
+                        pick = {**slot, "is_live": True, "ticker": ticker}
+                        if _should_skip_alert(pick):
                             continue
                         band = int(conf / 10) * 10
                         if _alerted.get(ticker, {}).get("band") != band:
-                            pick = {**slot, "is_live": True, "ticker": ticker}
                             new_picks.append(pick)
                             _alerted[ticker] = {
                                 "band": band, "pick": pick,
@@ -773,6 +789,8 @@ class TradingBot:
                         if conf < MIN_CONF or not (5 <= price <= 95) or not ticker:
                             continue
                         if ticker in _ls:
+                            continue
+                        if _should_skip_alert(ev):
                             continue
                         title = ev.get("title", "") or ""
                         try:
