@@ -592,8 +592,8 @@ class DiscordAlerter:
         """Disabled — individual near-miss alerts replaced by hourly near_miss_digest."""
         return
 
-    # Tracks the set of tickers in the last sent missed-trade digest — never re-send same 5
-    _last_missed_tickers: frozenset = frozenset()
+    # Timestamp of last near_miss_digest send — only fire again when genuinely new misses exist
+    _last_near_miss_digest_at: str = ""
 
     async def live_miss_digest(self, paper: bool = True) -> None:
         """
@@ -653,27 +653,34 @@ class DiscordAlerter:
 
     async def near_miss_digest(self, paper: bool = True) -> None:
         """
-        Top-5 missed trades digest — single Discord block, no spam.
-        Only fires if the list has changed since the last send.
-        Sorted newest-first; any new miss goes to the top.
+        Missed-trades digest — fires ONLY when there are genuinely NEW misses since last send.
+        One consolidated message, never repeated for the same misses.
         """
         from src.utils.daily_stats import stats as _ds
         from src.utils.eastern_time import format_et, et_label
+
         misses = _ds.top_near_misses(n=5)
         if not misses:
             return
 
-        current_tickers = frozenset(nm.get("ticker", "") for nm in misses)
-        if current_tickers == self.__class__._last_missed_tickers:
-            return   # nothing new — don't spam
+        last_sent = self.__class__._last_near_miss_digest_at
 
-        # Find which tickers are genuinely new since last send
-        prev_tickers = self.__class__._last_missed_tickers
-        new_tickers  = current_tickers - prev_tickers
-        self.__class__._last_missed_tickers = current_tickers
+        # Only send if at least one miss was recorded AFTER the last digest
+        new_misses = [
+            nm for nm in misses
+            if (nm.get("recorded_at") or "") > last_sent
+        ]
+        if not new_misses:
+            return  # nothing new since last send — stay silent
+
+        # Update the watermark before posting so concurrent calls don't double-send
+        now_iso = datetime.now(timezone.utc).isoformat()
+        self.__class__._last_near_miss_digest_at = now_iso
+
         mode_tag = "📝 PAPER" if paper else "💰 LIVE"
         et_time  = format_et(fmt="%I:%M %p") + f" {et_label()}"
-        lines    = []
+        new_tickers = {nm.get("ticker", "") for nm in new_misses}
+        lines = []
 
         for i, nm in enumerate(misses, 1):
             ev_str  = f" EV {nm['net_ev']:+.1f}¢" if nm.get("net_ev") is not None else ""
@@ -692,12 +699,12 @@ class DiscordAlerter:
             )
 
         description = (
-            f"Top 5 opportunities the bot passed on • {et_time}\n"
-            "New misses appear at top. Won't re-alert if the same trades reappear.\n\n"
+            f"**{len(new_misses)} new miss{'es' if len(new_misses) > 1 else ''}** since last check • {et_time}\n"
+            "Won't re-send the same misses. 🆕 = new since last digest.\n\n"
             + "\n\n".join(lines)
         )
         payload = self._embed(
-            title=f"🟡 Missed Trades — Top 5  [{mode_tag}]",
+            title=f"🟡 Missed Trades  [{mode_tag}]",
             description=description,
             color=0xFFAA00,
         )
