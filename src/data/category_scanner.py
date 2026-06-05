@@ -45,68 +45,16 @@ _HEADERS    = {
 # ── ALL Polymarket tag slugs — main categories + all sub-categories ────────────
 
 POLY_TAG_SLUGS = [
-    # ── Politics ──
-    "politics", "us-politics", "elections", "us-elections", "senate",
-    "house", "governor", "congress", "midterms", "president", "trump",
-    "biden", "harris", "uk-politics", "eu-politics", "global-politics",
-    "republican", "democrat", "electoral-college", "iran", "israel",
-    "russia", "ukraine", "china", "taiwan", "north-korea", "nato",
-    "middle-east", "geopolitics", "foreign-policy",
-
-    # ── Sports — American ──
-    "sports", "nfl", "nba", "mlb", "nhl", "ncaa", "college-football",
-    "college-basketball", "super-bowl", "nba-finals", "world-series",
-    "stanley-cup", "nfl-draft", "nba-draft", "ufc", "mma", "boxing",
-    "wrestling",
-
-    # ── Sports — Soccer / Football ──
-    "soccer", "football", "premier-league", "epl", "la-liga", "bundesliga",
-    "serie-a", "ligue-1", "champions-league", "europa-league",
-    "world-cup", "euros", "mls", "international-football",
-
-    # ── Sports — Other ──
-    "tennis", "golf", "formula-1", "f1", "racing", "athletics",
-    "olympics", "cycling", "rugby", "cricket", "esports", "league-of-legends",
-    "counter-strike", "dota", "valorant", "call-of-duty",
-
-    # ── Crypto ──
-    "crypto", "bitcoin", "btc", "ethereum", "eth", "solana", "sol",
-    "defi", "nft", "crypto-etf", "altcoins", "stablecoins",
-    "ripple", "xrp", "dogecoin", "doge", "cardano", "polygon",
-
-    # ── Finance ──
-    "finance", "stocks", "sp500", "nasdaq", "dow", "markets",
-    "commodities", "oil", "gold", "silver", "forex", "interest-rates",
-    "fed", "recession", "ipo", "earnings",
-
-    # ── Economics ──
-    "economics", "economy", "inflation", "cpi", "gdp", "jobs",
-    "unemployment", "trade", "debt", "budget", "fiscal",
-
-    # ── Science / Tech ──
-    "tech", "technology", "science", "spacex", "nasa", "space",
-    "ai", "artificial-intelligence", "openai", "elon-musk", "tesla",
-    "apple", "google", "meta", "microsoft", "nvidia", "climate",
-
-    # ── Culture / Entertainment ──
-    "culture", "entertainment", "oscars", "emmys", "grammys",
-    "movies", "tv", "music", "books", "gaming", "celebrity",
-    "social-media", "viral",
-
-    # ── Health ──
-    "health", "medicine", "fda", "pandemic", "who", "vaccines",
-    "covid", "drug-approval",
-
-    # ── Weather / Environment ──
-    "weather", "hurricane", "tornado", "earthquake", "wildfire",
-    "climate-change", "temperature", "flooding",
-
-    # ── World / International ──
-    "world", "international", "un", "g7", "g20", "eu",
-    "africa", "asia", "latin-america", "europe",
-
-    # ── Trending / General ──
-    "trending", "new", "breaking", "mentions",
+    # Politics
+    "politics", "us-politics", "elections", "trump",
+    # Sports
+    "nfl", "nba", "mlb", "nhl", "ufc", "soccer", "tennis", "golf",
+    # Crypto
+    "crypto", "bitcoin", "ethereum",
+    # Finance
+    "finance", "stocks", "fed",
+    # World
+    "world", "weather",
 ]
 
 # Remove duplicates while preserving order
@@ -422,7 +370,7 @@ class CategoryScanner:
 
     async def scan_all_categories(
         self,
-        max_per_tag: int = 15,
+        max_per_tag: int = 10,
         max_total: int = 300,
         include_bulk: bool = True,
     ) -> List[Dict]:
@@ -455,7 +403,7 @@ class CategoryScanner:
         # Bulk fetch + Kalshi concurrently
         extras = []
         if include_bulk:
-            extras.append(_fetch_poly_bulk(200))
+            extras.append(_fetch_poly_bulk(100))
         extras.append(self._kalshi_all_categories(max_per_tag))
 
         extra_results = await asyncio.gather(*extras, return_exceptions=True)
