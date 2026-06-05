@@ -8,11 +8,12 @@ Order placement requires API key + secret (only used when POLY_LIVE_TRADING=true
 import base64
 import json
 import logging
+import os
+import random
 import time
 from typing import Dict, List, Optional
 
 import httpx
-import os
 
 logger = logging.getLogger("trading.polymarket_client")
 
@@ -20,14 +21,18 @@ GAMMA_BASE = "https://gamma-api.polymarket.com"
 CLOB_BASE  = "https://clob.polymarket.com"
 _TIMEOUT   = httpx.Timeout(20.0)
 
-_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; trading-bot/1.0)",
-    "Accept": "application/json",
-}
+# Rotate User-Agents to look like normal browser traffic
+_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
+]
 
-# Set POLY_PROXY_URL in .env to route Polymarket through a residential proxy:
-# e.g. POLY_PROXY_URL=http://username:password@proxy-host:port
-_PROXY_URL = os.environ.get("POLY_PROXY_URL", "")
+# Proxy base URL — ports 10001-10007 each route through a different exit IP
+_PROXY_BASE = os.environ.get("POLY_PROXY_URL", "")
+_PROXY_PORTS = list(range(10001, 10008))  # 10001–10007
 
 
 class PolymarketTradingClient:
@@ -48,12 +53,18 @@ class PolymarketTradingClient:
 
     def _client(self) -> httpx.AsyncClient:
         if self._http is None or self._http.is_closed:
-            proxy = _PROXY_URL or None
-            if proxy:
-                logger.debug("Polymarket: using proxy %s", proxy.split("@")[-1])
+            proxy = None
+            if _PROXY_BASE:
+                # Rotate through ports 10001-10007 — each is a different exit IP
+                port = random.choice(_PROXY_PORTS)
+                # Replace port in proxy URL: swap out whatever port was set
+                import re
+                proxy = re.sub(r':\d+$', f':{port}', _PROXY_BASE)
+                logger.debug("Polymarket: proxy exit port %d", port)
+            ua = random.choice(_USER_AGENTS)
             self._http = httpx.AsyncClient(
                 timeout=_TIMEOUT,
-                headers=_HEADERS,
+                headers={"User-Agent": ua, "Accept": "application/json"},
                 proxy=proxy,
             )
         return self._http
@@ -422,3 +433,4 @@ class PolymarketTradingClient:
     async def close(self):
         if self._http and not self._http.is_closed:
             await self._http.aclose()
+        self._http = None  # Force new proxy port + UA on next use
