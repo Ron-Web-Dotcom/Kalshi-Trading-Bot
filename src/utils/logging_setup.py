@@ -63,8 +63,8 @@ def setup_logging(log_level: str = "INFO") -> None:
         fmt = "%(asctime)s [%(levelname)-8s] %(name)s: %(message)s"
         fh  = RotatingFileHandler(
             log_file,
-            maxBytes=50 * 1024 * 1024,  # 50 MB per file
-            backupCount=14,              # keep 14 rotated files (~700 MB max)
+            maxBytes=20 * 1024 * 1024,  # 20 MB per file
+            backupCount=7,               # keep 7 rotated files (~140 MB max)
             encoding="utf-8",
         )
         fh.setLevel(level)
