@@ -12,9 +12,7 @@ import sqlite3
 import os
 from datetime import datetime, timezone, timedelta
 
-DB_PATH  = os.environ.get("DB_PATH", os.path.join(os.path.dirname(__file__), "trading_system.db"))
-OUT_DIR  = os.path.join(os.path.dirname(__file__), "reports")
-os.makedirs(OUT_DIR, exist_ok=True)
+DB_PATH = os.environ.get("DB_PATH", os.path.join(os.path.dirname(__file__), "trading_system.db"))
 
 WEEK_AGO = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
 
@@ -228,14 +226,8 @@ def run():
 
     con.close()
 
-    # Save to file
-    report = "\n".join(lines)
-    filename = os.path.join(OUT_DIR, f"weekly_{now.strftime('%Y-%m-%d')}.txt")
-    with open(filename, "w") as f:
-        f.write(report)
-
-    print(report)
-    print(f"\n✅ Report saved to: {filename}")
+    # Print to screen only — no file saved
+    print("\n".join(lines))
 
 
 if __name__ == "__main__":
