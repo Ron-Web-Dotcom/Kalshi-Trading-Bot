@@ -342,7 +342,7 @@ class CategoryScanner:
                 "AND (platform='kalshi' OR platform IS NULL) "
                 "AND (yes_ask > 0 OR last_price > 0) "
                 "AND title IS NOT NULL AND title != '' "
-                "ORDER BY volume DESC"
+                "ORDER BY volume DESC LIMIT 200"
             ) or []
 
             def _norm_price(v):
