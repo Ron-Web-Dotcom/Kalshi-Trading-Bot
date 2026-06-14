@@ -654,7 +654,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
                 # live_trades_alert is owned by live_market_manager — skip here to avoid duplicate alerts
 
-        # Long-term pool: higher-volume markets (any close time)
+        # Long-term pool: markets closing within 7 days (upcoming events worth watching)
         long_term = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
@@ -662,6 +662,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             and 2 < _tradeable_price(m) < 98
             and m.get("volume", 0) >= min_vol
             and (m.get("title") or "")
+            and _closes_within(m, 168)   # 7 days = 168 hours
         ]
 
         # Short-duration pool: closes within 24h — any volume, for 1min/5min/1hr/daily markets
@@ -693,12 +694,14 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 and m.get("ticker") not in arb_tickers
                 and not _already_open(m)
                 and 2 < _tradeable_price(m) < 98
+                and _closes_within(m, 168)   # 7 days
             ]
             cat_poly = [
                 m for m in cat_markets
                 if m.get("platform") == "polymarket"
                 and not _already_open(m)
                 and m.get("yes_ask", 0) > 1
+                and _closes_within(m, 168)   # 7 days
             ]
             # Merge category-scanned markets in, deduplicating by ticker
             existing_kalshi_tickers = {m.get("ticker") for m in long_term + short_term + live_kalshi}
