@@ -165,15 +165,10 @@ class TradingBot:
                         _sleep_mode_notified = True
                     except Exception:
                         pass
-                    # Flush journal to free memory before sleeping
+                    # GC before sleeping to free unreferenced memory
                     try:
-                        import subprocess
-                        subprocess.run(
-                            ["journalctl", "--vacuum-size=20M"],
-                            capture_output=True, timeout=15
-                        )
                         gc.collect()
-                        logger.info("🧹 Journal vacuumed + GC run before sleep")
+                        logger.info("🧹 GC run before sleep")
                     except Exception:
                         pass
                 wake = et.replace(hour=5, minute=0, second=0, microsecond=0)
