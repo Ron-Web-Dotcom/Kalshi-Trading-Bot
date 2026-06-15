@@ -203,6 +203,14 @@ class OpportunityHunter:
             # Price targets far out
             "hit $150k", "hit $1m", "by december 31", "by end of 2026",
             "airdrop by",
+            # Political futures in other countries / long-term
+            "ivan cepeda", "colombian presiden", "colombian president",
+            "keir starmer", "labour par",
+            "democratic union of hungarians",
+            # Long-term crypto/tech novelty
+            "megaeth", "before agi",
+            # Weather markets in distant cities (no edge)
+            "kuala lumpur",
         ]
 
         # ── Stage 1: rule-based pre-score (FREE — no AI calls) ───────────────

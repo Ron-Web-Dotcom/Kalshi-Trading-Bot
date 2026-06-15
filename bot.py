@@ -810,10 +810,14 @@ class TradingBot:
                         "nba finals winner", "nba champion", "stanley cup winner",
                         "win the nba championship", "win the stanley cup",
                         # Novelty / never-happening markets
-                        "before gta", "jesus christ", "bitcoin hit $",
-                        "hit $150k", "hit $1m", "airdrop by",
+                        "before gta", "gta vi", "playboi carti", "jesus christ",
+                        "bitcoin hit $", "hit $150k", "hit $1m", "airdrop by",
+                        "megaeth",
                         "by december 31", "by end of 2026",
                         "before 2027", "before 2028",
+                        # Foreign political long-term
+                        "ivan cepeda", "colombian presiden",
+                        "keir starmer", "kuala lumpur",
                     ]
 
                     def _should_skip_alert(pick: dict) -> bool:
