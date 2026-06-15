@@ -193,11 +193,19 @@ class AIDecisionEngine:
         else:
             conf_ceiling = "Context is limited — cap confidence at 60% and HOLD. 70%+ requires real evidence you do not have here."
 
+        from src.utils.eastern_time import now_et as _now_et
+        _et_now   = _now_et()
+        _today_str = _et_now.strftime("%A, %B %d, %Y")
+        _time_str  = _et_now.strftime("%I:%M %p ET")
+
         return f"""You are a professional prediction market trader managing real money. Your job is to find high-conviction bets backed by real-world evidence.
 
 GOLDEN RULE: Use ALL the context provided — news, Wikipedia, Reddit, prediction markets. The more sources agree, the higher your confidence CAN go.
 KEY INSIGHT: When multiple independent sources (news + Reddit + Manifold/Metaculus) all point the same direction, that is strong signal. Trust it.
 {conf_ceiling}
+
+TODAY: {_today_str} at {_time_str}
+IMPORTANT: Only evaluate events that are happening TODAY or within the next 7 days. If the market question refers to something already resolved or far in the future, output HOLD with confidence 0.
 
 === MARKET ===
 Ticker:   {ticker}
