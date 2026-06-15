@@ -320,8 +320,10 @@ class TradingBot:
                         "AND (platform='kalshi' OR platform IS NULL) "
                         "AND (status='open' OR status='') "
                         "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
+                        "AND close_time > datetime('now') "
+                        "AND close_time < datetime('now', '+7 days') "
                         + _exclude_sql +
-                        "ORDER BY ABS(yes_ask - 50) ASC, volume DESC LIMIT 6",
+                        "ORDER BY close_time ASC LIMIT 6",
                         _exclude_params,
                     )
                     # Fallback — if exclusion left nothing, show any fresh markets
@@ -332,6 +334,8 @@ class TradingBot:
                             "AND (platform='kalshi' OR platform IS NULL) "
                             "AND (status='open' OR status='') "
                             "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
+                            "AND close_time > datetime('now') "
+                            "AND close_time < datetime('now', '+7 days') "
                             "ORDER BY RANDOM() LIMIT 6"
                         )
                     poly_cand = await self.db.fetchall(
@@ -340,8 +344,10 @@ class TradingBot:
                         "AND platform='polymarket' "
                         "AND (status='open' OR status='') "
                         "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
+                        "AND close_time > datetime('now') "
+                        "AND close_time < datetime('now', '+7 days') "
                         + _exclude_sql +
-                        "ORDER BY ABS(yes_ask - 50) ASC, volume DESC LIMIT 6",
+                        "ORDER BY close_time ASC LIMIT 6",
                         _exclude_params,
                     )
                     if not poly_cand:
@@ -351,6 +357,8 @@ class TradingBot:
                             "AND platform='polymarket' "
                             "AND (status='open' OR status='') "
                             "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
+                            "AND close_time > datetime('now') "
+                            "AND close_time < datetime('now', '+7 days') "
                             "ORDER BY RANDOM() LIMIT 6"
                         )
                     top_candidates = _cand_rows(kal_cand) + _cand_rows(poly_cand)
