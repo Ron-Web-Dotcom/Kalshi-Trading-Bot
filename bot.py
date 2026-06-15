@@ -753,7 +753,7 @@ class TradingBot:
                     new_picks: list = []
 
                     # Bot alert = LIVE EVENTS HAPPENING RIGHT NOW only
-                    # Must close within 12 hours — anything longer is not a live event
+                    # Must close within 24 hours — daily live events only
                     def _is_live_event(pick: dict) -> bool:
                         ct = pick.get("close_time") or pick.get("expiration_time") or ""
                         if not ct:
@@ -763,20 +763,39 @@ class TradingBot:
                             if cd.tzinfo is None:
                                 cd = cd.replace(tzinfo=timezone.utc)
                             hours_left = (cd - now_utc).total_seconds() / 3600
-                            return (5 / 60) <= hours_left <= 12
+                            return (5 / 60) <= hours_left <= 24
                         except Exception:
                             return False
 
-                    def _should_skip_alert(pick: dict) -> bool:
-                        return False  # all filtering now done by _is_live_event
+                    _ALERT_JUNK = [
+                        "gavin newsom", "2028 president", "2028 democrat",
+                        "win the 2026 fifa world cup", "win the 2026 world cup",
+                        "win the world cup", "fifa world cup winner",
+                        "france win", "spain win", "brazil win", "germany win",
+                        "nba finals winner", "stanley cup winner",
+                        "before gta", "jesus christ", "bitcoin hit $",
+                        "hit $150k", "hit $1m", "airdrop by",
+                        "by december 31", "by end of 2026",
+                    ]
 
-                    # 1. Active live slots — must have real price + close within 12h
+                    def _should_skip_alert(pick: dict) -> bool:
+                        title = (pick.get("title") or pick.get("ticker") or "").lower()
+                        if any(p in title for p in _ALERT_JUNK):
+                            return True
+                        price = float(pick.get("price_cents") or pick.get("yes_ask") or 0)
+                        if price < 5 or price > 95:
+                            return True
+                        return False
+
+                    # 1. Active live slots — must have real price + close within 24h
                     for ticker, slot in list(_ls.items()):
                         conf  = float(slot.get("confidence", 0) or 0)
                         price = float(slot.get("price_cents") or slot.get("yes_ask") or 0)
                         if conf < MIN_CONF or not (5 <= price <= 95):
                             continue
                         pick = {**slot, "is_live": True, "ticker": ticker}
+                        if _should_skip_alert(pick):
+                            continue
                         if not _is_live_event(pick):
                             continue
                         band = int(conf / 10) * 10
@@ -787,7 +806,7 @@ class TradingBot:
                                 "alerted_at": now_utc, "result_sent": False,
                             }
 
-                    # 2. BUY evaluations — must close within 12h AND be live right now
+                    # 2. BUY evaluations — must close within 24h AND be live right now
                     for ev in list(_da.all_evaluations):
                         if ev.get("action") != "BUY":
                             continue
@@ -795,6 +814,8 @@ class TradingBot:
                         price  = float(ev.get("price_cents") or ev.get("yes_ask") or 0)
                         ticker = ev.get("ticker", "")
                         if conf < MIN_CONF or not (5 <= price <= 95) or not ticker:
+                            continue
+                        if _should_skip_alert(ev):
                             continue
                         if ticker in _ls:
                             continue
