@@ -274,14 +274,15 @@ class TradingBot:
                     )
                     unrealised_pnl = (unrealised_row or {}).get("pnl", 0.0) or 0.0
 
-                    # All-time win rate — the bot's track record
+                    # All-time win rate — exclude cleanup-closed positions
                     wl_row = await self.db.fetchone(
                         "SELECT "
                         "  COUNT(*) as total, "
                         "  SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
                         "  SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
                         "  COALESCE(SUM(pnl), 0) as total_pnl "
-                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL"
+                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL "
+                        "AND (close_reason IS NULL OR close_reason NOT LIKE 'cleanup:%')"
                     )
                     wl = wl_row or {}
                     total_closed = wl.get("total", 0) or 0
@@ -314,6 +315,29 @@ class TradingBot:
                         _exclude_sql = f"AND ticker NOT IN ({placeholders}) "
                         _exclude_params = tuple(_shown_last)
 
+                    _junk_sql = (
+                        "AND title NOT LIKE '%jesus christ%' "
+                        "AND title NOT LIKE '%gta vi%' "
+                        "AND title NOT LIKE '%before gta%' "
+                        "AND title NOT LIKE '%gavin newsom%' "
+                        "AND title NOT LIKE '%2028 democrat%' "
+                        "AND title NOT LIKE '%2028 president%' "
+                        "AND title NOT LIKE '%bernie endorse%' "
+                        "AND title NOT LIKE '%waymo launch%' "
+                        "AND title NOT LIKE '%waymo nashville%' "
+                        "AND title NOT LIKE '%win the world cup%' "
+                        "AND title NOT LIKE '%world cup winner%' "
+                        "AND title NOT LIKE '%world cup champion%' "
+                        "AND title NOT LIKE '%nba champion%' "
+                        "AND title NOT LIKE '%stanley cup winner%' "
+                        "AND title NOT LIKE '%invades taiwan%' "
+                        "AND title NOT LIKE '%hit $150k%' "
+                        "AND title NOT LIKE '%hit $1m%' "
+                        "AND title NOT LIKE '%airdrop by%' "
+                        "AND title NOT LIKE '%by december 31%' "
+                        "AND title NOT LIKE '%before 2027%' "
+                        "AND title NOT LIKE '%before 2028%' "
+                    )
                     kal_cand = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time FROM markets "
                         "WHERE yes_ask > 5 AND yes_ask < 95 "
@@ -322,11 +346,10 @@ class TradingBot:
                         "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
                         "AND close_time > datetime('now') "
                         "AND close_time < datetime('now', '+7 days') "
-                        + _exclude_sql +
+                        + _junk_sql + _exclude_sql +
                         "ORDER BY close_time ASC LIMIT 6",
                         _exclude_params,
                     )
-                    # Fallback — if exclusion left nothing, show any fresh markets
                     if not kal_cand:
                         kal_cand = await self.db.fetchall(
                             "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time FROM markets "
@@ -336,6 +359,7 @@ class TradingBot:
                             "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
                             "AND close_time > datetime('now') "
                             "AND close_time < datetime('now', '+7 days') "
+                            + _junk_sql +
                             "ORDER BY RANDOM() LIMIT 6"
                         )
                     poly_cand = await self.db.fetchall(
@@ -346,7 +370,7 @@ class TradingBot:
                         "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
                         "AND close_time > datetime('now') "
                         "AND close_time < datetime('now', '+7 days') "
-                        + _exclude_sql +
+                        + _junk_sql + _exclude_sql +
                         "ORDER BY close_time ASC LIMIT 6",
                         _exclude_params,
                     )
@@ -359,6 +383,7 @@ class TradingBot:
                             "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
                             "AND close_time > datetime('now') "
                             "AND close_time < datetime('now', '+7 days') "
+                            + _junk_sql +
                             "ORDER BY RANDOM() LIMIT 6"
                         )
                     top_candidates = _cand_rows(kal_cand) + _cand_rows(poly_cand)
