@@ -73,63 +73,19 @@ kept          = 0
 now_str       = now_utc.isoformat()
 
 for row in rows:
-    title     = (row["title"] or row["ticker"] or "").lower()
-    opened_at = row["opened_at"] or ""
-    close_time = row["close_time"] or ""
-    reason    = None
-
-    # 1. Check if close_time is beyond 3 days
-    if close_time and not reason:
-        try:
-            close_dt = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
-            if close_dt.tzinfo is None:
-                close_dt = close_dt.replace(tzinfo=timezone.utc)
-            if close_dt > now_utc + timedelta(days=3):
-                reason = f"closes too far out ({close_dt.strftime('%b %d, %Y')})"
-                closed_far += 1
-        except Exception:
-            pass
-
-    # 2. Check junk title
-    if not reason:
-        for phrase in JUNK_PHRASES:
-            if phrase in title:
-                reason = f"junk market: '{phrase}'"
-                closed_junk += 1
-                break
-
-    # 3. Check if opened more than 7 days ago
-    if not reason and opened_at:
-        try:
-            opened_dt = datetime.fromisoformat(opened_at.replace("Z", "+00:00"))
-            if opened_dt.tzinfo is None:
-                opened_dt = opened_dt.replace(tzinfo=timezone.utc)
-            if opened_dt < now_utc - timedelta(days=7):
-                reason = "opened more than 7 days ago"
-                closed_old += 1
-        except Exception:
-            pass
-
-    if reason:
-        con.execute("""
-            UPDATE positions
-            SET status='closed', close_reason=?, closed_at=?, pnl=COALESCE(pnl, 0)
-            WHERE id=?
-        """, (f"cleanup: {reason}", now_str, row["id"]))
-        label = (row["title"] or row["ticker"] or "?")[:55]
-        print(f"  CLOSED  {label}")
-        print(f"          → {reason}")
-    else:
-        kept += 1
-        label = (row["title"] or row["ticker"] or "?")[:55]
-        print(f"  KEPT    {label}")
+    label = (row["title"] or row["ticker"] or "?")[:60]
+    con.execute("""
+        UPDATE positions
+        SET status='closed', close_reason='cleanup: fresh start June 15 2026',
+            closed_at=?, pnl=COALESCE(pnl, 0)
+        WHERE id=?
+    """, (now_str, row["id"]))
+    print(f"  CLOSED  {label}")
+    closed_old += 1
 
 con.commit()
 con.close()
 
 print("=" * 65)
-print(f"\n✅ Closed {closed_far} positions resolving beyond 7 days")
-print(f"✅ Closed {closed_junk} junk/long-term market positions")
-print(f"✅ Closed {closed_old} positions opened more than 7 days ago")
-print(f"   Kept   {kept} valid near-term positions")
-print(f"\nBot now has room for today's live events.\n")
+print(f"\n✅ Closed all {closed_old} open positions — fresh start")
+print(f"\nBot will now find real events for June 15, 2026 onwards.\n")
