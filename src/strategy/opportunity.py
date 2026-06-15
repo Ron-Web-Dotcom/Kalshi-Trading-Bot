@@ -354,6 +354,27 @@ class OpportunityHunter:
             except Exception as e:
                 logger.debug("Momentum check error: %s", e)
 
+        # Junk filter — same phrases blocked in the regular scan
+        _LIVE_SKIP = [
+            "before gta", "gta vi", "gta 6", "playboi carti", "drake album",
+            "rihanna", "kanye", "before agi", "agi by",
+            "invades taiwan", "china taiwan", "world war", "nuclear",
+            "jesus christ", "second coming", "rapture",
+            "gavin newsom", "2028 democratic", "2028 president",
+            "bernie endorse", "waymo launch", "waymo nashville",
+            "before 2027", "before 2028", "before 2029", "before 2030",
+            "oprah", "lebron", "taylor swift president", "elon musk president",
+            "win the 2028", "win the 2032", "2028 us presidential",
+            "win the 2026 fifa world cup", "win the 2026 world cup",
+            "win the world cup", "fifa world cup winner", "world cup champion",
+            "nba finals winner", "nba champion", "stanley cup winner",
+            "win the nba championship", "win the stanley cup",
+            "hit $150k", "hit $1m", "by december 31", "by end of 2026",
+            "airdrop by", "megaeth",
+            "ivan cepeda", "colombian presiden", "keir starmer", "kuala lumpur",
+            "uzbekistan win",
+        ]
+
         # Pre-score — give live markets an extra boost for being time-sensitive
         prescored = []
         for market in live_markets:
@@ -362,6 +383,8 @@ class OpportunityHunter:
             if yes_ask <= 1 or yes_ask >= 99:
                 continue
             if not title or len(title) < 5 or title.startswith("0x"):
+                continue
+            if any(p in title.lower() for p in _LIVE_SKIP):
                 continue
             pre = _pre_score(market) * 1.5   # live boost
             # Extra boost for price momentum markets
