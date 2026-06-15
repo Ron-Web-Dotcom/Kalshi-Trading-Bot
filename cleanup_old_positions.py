@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-One-time cleanup: close all open paper positions opened more than 7 days ago.
-Also closes positions with junk titles (long-term futures, novelty markets).
+Cleanup: close all open paper positions that don't belong.
+
+Closes positions if ANY of these are true:
+  1. close_time is beyond 7 days from today (not a near-term event)
+  2. Title matches a known junk/long-term phrase
+  3. Opened more than 7 days ago
 
 Usage: python cleanup_old_positions.py
 """
@@ -13,61 +17,91 @@ from datetime import datetime, timezone, timedelta
 DB_PATH = os.environ.get("DB_PATH", os.path.join(os.path.dirname(__file__), "trading_system.db"))
 
 JUNK_PHRASES = [
+    # Long-term futures / novelty
     "before gta", "gta vi", "gta 6",
-    "jesus christ", "second coming",
+    "jesus christ", "second coming", "rapture",
     "before 2027", "before 2028", "before 2029", "before 2030",
+    "before 203", "before 204",
     "win the 2028", "win the 2032", "2028 us presidential",
-    "gavin newsom", "2028 democratic",
+    "gavin newsom", "2028 democratic", "2028 president",
     "waymo launch", "waymo nashville",
     "bernie endorse", "endorse dan osborn",
-    "bitcoin hit $150k", "bitcoin hit $1", "bitcoin hit $500",
-    "hit $150k", "hit $1m", "hit $500k",
+    "bitcoin hit $150k", "hit $150k", "hit $1m", "hit $500k",
     "oprah", "lebron james president", "taylor swift president",
     "elon musk president", "win the world cup 2026",
-    "uzbekistan win",
+    "uzbekistan win", "world cup 2026 winner",
+    "nba finals 2026 winner", "nba champion", "stanley cup 2026 winner",
+    "win the nba", "win the stanley cup",
+    "megaeth", "airdrop by",
+    # Price targets way out in the future
+    "by december 31", "by december 2026", "by end of 2026",
+    "by january 2027", "by 2027",
+    # Political futures beyond this year
+    "win the 2026 nba", "2026 nba finals",
 ]
 
-cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+now_utc     = datetime.now(timezone.utc)
+cutoff_open = (now_utc - timedelta(days=7)).isoformat()   # opened > 7 days ago
+cutoff_close = (now_utc + timedelta(days=7)).isoformat()  # closes > 7 days from now
 
 con = sqlite3.connect(DB_PATH)
 con.row_factory = sqlite3.Row
 
-# Find all open positions
 rows = con.execute("""
-    SELECT id, ticker, title, platform, opened_at, avg_price, pnl
-    FROM positions WHERE status='open'
+    SELECT p.id, p.ticker, p.title, p.platform, p.opened_at, p.avg_price, p.pnl,
+           m.close_time
+    FROM positions p
+    LEFT JOIN markets m ON m.ticker = p.ticker
+    WHERE p.status='open'
 """).fetchall()
 
-print(f"\nFound {len(rows)} open positions total")
-print("=" * 60)
+print(f"\nToday: {now_utc.strftime('%B %d, %Y')}")
+print(f"Found {len(rows)} open positions")
+print("=" * 65)
 
-closed_old   = 0
-closed_junk  = 0
-kept         = 0
-
-now_str = datetime.now(timezone.utc).isoformat()
+closed_far    = 0
+closed_junk   = 0
+closed_old    = 0
+kept          = 0
+now_str       = now_utc.isoformat()
 
 for row in rows:
-    title      = (row["title"] or row["ticker"] or "").lower()
-    opened_at  = row["opened_at"] or ""
-    reason     = None
+    title     = (row["title"] or row["ticker"] or "").lower()
+    opened_at = row["opened_at"] or ""
+    close_time = row["close_time"] or ""
+    reason    = None
 
-    # Check if older than 7 days
-    try:
-        opened_dt = datetime.fromisoformat(opened_at.replace("Z", "+00:00"))
-        if opened_dt.tzinfo is None:
-            opened_dt = opened_dt.replace(tzinfo=timezone.utc)
-        if opened_dt < datetime.fromisoformat(cutoff):
-            reason = "older than 7 days"
-    except Exception:
-        pass
+    # 1. Check if close_time is beyond 7 days
+    if close_time and not reason:
+        try:
+            close_dt = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
+            if close_dt.tzinfo is None:
+                close_dt = close_dt.replace(tzinfo=timezone.utc)
+            if close_dt > now_utc + timedelta(days=7):
+                reason = f"closes too far out ({close_dt.strftime('%b %d, %Y')})"
+                closed_far += 1
+        except Exception:
+            pass
 
-    # Check if junk title
+    # 2. Check junk title
     if not reason:
         for phrase in JUNK_PHRASES:
             if phrase in title:
                 reason = f"junk market: '{phrase}'"
+                closed_junk += 1
                 break
+
+    # 3. Check if opened more than 7 days ago
+    if not reason and opened_at:
+        try:
+            opened_dt = datetime.fromisoformat(opened_at.replace("Z", "+00:00"))
+            if opened_dt.tzinfo is None:
+                opened_dt = opened_dt.replace(tzinfo=timezone.utc)
+            if opened_dt < now_utc - timedelta(days=7):
+                reason = "opened more than 7 days ago"
+                closed_old += 1
+        except Exception:
+            pass
 
     if reason:
         con.execute("""
@@ -76,20 +110,19 @@ for row in rows:
             WHERE id=?
         """, (f"cleanup: {reason}", now_str, row["id"]))
         label = (row["title"] or row["ticker"] or "?")[:55]
-        print(f"  CLOSED [{row['platform'] or 'kalshi'}] {label}")
-        print(f"         reason: {reason}")
-        if "junk" in reason:
-            closed_junk += 1
-        else:
-            closed_old += 1
+        print(f"  CLOSED  {label}")
+        print(f"          → {reason}")
     else:
         kept += 1
+        label = (row["title"] or row["ticker"] or "?")[:55]
+        print(f"  KEPT    {label}")
 
 con.commit()
 con.close()
 
-print("=" * 60)
-print(f"\n✅ Closed {closed_old} old positions (>7 days)")
-print(f"✅ Closed {closed_junk} junk market positions")
-print(f"   Kept   {kept} active positions")
-print(f"\nBot will now have room for fresh trades on new markets.\n")
+print("=" * 65)
+print(f"\n✅ Closed {closed_far} positions resolving beyond 7 days")
+print(f"✅ Closed {closed_junk} junk/long-term market positions")
+print(f"✅ Closed {closed_old} positions opened more than 7 days ago")
+print(f"   Kept   {kept} valid near-term positions")
+print(f"\nBot now has room for today's live events.\n")
