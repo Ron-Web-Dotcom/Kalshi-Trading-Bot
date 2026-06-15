@@ -194,7 +194,15 @@ class OpportunityHunter:
             "kanye west", "taylor swift president", "elon musk president",
             "mark zuckerberg president", "joe rogan president",
             "win the 2028", "win the 2032", "2028 us presidential",
-            "uzbekistan win", "win the world cup 2026",
+            "uzbekistan win",
+            # World Cup/tournament WINNER markets — individual games are fine
+            "win the 2026 fifa world cup", "win the 2026 world cup",
+            "win the world cup", "fifa world cup winner", "world cup champion",
+            "nba finals winner", "nba champion", "stanley cup winner",
+            "win the nba championship", "win the stanley cup",
+            # Price targets far out
+            "hit $150k", "hit $1m", "by december 31", "by end of 2026",
+            "airdrop by",
         ]
 
         # ── Stage 1: rule-based pre-score (FREE — no AI calls) ───────────────

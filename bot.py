@@ -769,13 +769,18 @@ class TradingBot:
 
                     _ALERT_JUNK = [
                         "gavin newsom", "2028 president", "2028 democrat",
+                        # World Cup WINNER (tournament outcome) — not individual games
                         "win the 2026 fifa world cup", "win the 2026 world cup",
                         "win the world cup", "fifa world cup winner",
-                        "france win", "spain win", "brazil win", "germany win",
-                        "nba finals winner", "stanley cup winner",
+                        "world cup champion", "lift the world cup",
+                        # Other long-term tournament winners
+                        "nba finals winner", "nba champion", "stanley cup winner",
+                        "win the nba championship", "win the stanley cup",
+                        # Novelty / never-happening markets
                         "before gta", "jesus christ", "bitcoin hit $",
                         "hit $150k", "hit $1m", "airdrop by",
                         "by december 31", "by end of 2026",
+                        "before 2027", "before 2028",
                     ]
 
                     def _should_skip_alert(pick: dict) -> bool:
