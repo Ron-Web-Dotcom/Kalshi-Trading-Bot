@@ -880,6 +880,8 @@ class TradingBot:
                     for ticker, slot in list(_ls.items()):
                         pick = {**slot, "is_live": True, "ticker": ticker}
                         if not any(p.get("ticker") == ticker for p in all_watching):
+                            if _should_skip_alert(pick):
+                                continue
                             if _is_live_event(pick):
                                 all_watching.append(pick)
 
