@@ -33,6 +33,13 @@ JUNK_PHRASES = [
     "nba finals 2026 winner", "nba champion", "stanley cup 2026 winner",
     "win the nba", "win the stanley cup",
     "megaeth", "airdrop by",
+    "korea republic vs. czechia", "korea republic vs czechia",
+    "russia vs. trinidad", "russia vs trinidad",
+    "victor wembanyama", "wembanyama rebounds",
+    "gen.g esports", "lck 2026",
+    "keir starmer", "labour par",
+    "ivan cepeda", "colombian presiden",
+    "democratic union of hungarians",
     # Price targets way out in the future
     "by december 31", "by december 2026", "by end of 2026",
     "by january 2027", "by 2027",
@@ -42,7 +49,7 @@ JUNK_PHRASES = [
 
 now_utc     = datetime.now(timezone.utc)
 cutoff_open = (now_utc - timedelta(days=7)).isoformat()   # opened > 7 days ago
-cutoff_close = (now_utc + timedelta(days=7)).isoformat()  # closes > 7 days from now
+cutoff_close = (now_utc + timedelta(days=3)).isoformat()  # closes > 3 days from now
 
 con = sqlite3.connect(DB_PATH)
 con.row_factory = sqlite3.Row
@@ -71,13 +78,13 @@ for row in rows:
     close_time = row["close_time"] or ""
     reason    = None
 
-    # 1. Check if close_time is beyond 7 days
+    # 1. Check if close_time is beyond 3 days
     if close_time and not reason:
         try:
             close_dt = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
             if close_dt.tzinfo is None:
                 close_dt = close_dt.replace(tzinfo=timezone.utc)
-            if close_dt > now_utc + timedelta(days=7):
+            if close_dt > now_utc + timedelta(days=3):
                 reason = f"closes too far out ({close_dt.strftime('%b %d, %Y')})"
                 closed_far += 1
         except Exception:
