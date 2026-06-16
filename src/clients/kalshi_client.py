@@ -149,56 +149,70 @@ class KalshiClient:
         category tags if events endpoint unavailable.
         """
         live_markets: List[Dict] = []
+        now = datetime.now(timezone.utc)
 
-        # Strategy 1: /events endpoint — Kalshi groups markets under events
-        # An event being "active" means the underlying game/match is live NOW
+        # Strategy 1: /events endpoint — grab all open sport events closing within 24h
+        # Kalshi doesn't expose an "in_game" flag, so we rely on:
+        #   a) category == "Sports" AND closes within 24h (game is today)
+        #   b) title contains "vs" / game keywords (individual match, not tournament winner)
+        _sport_categories = {"sports", "sport", "soccer", "football", "baseball", "basketball",
+                             "hockey", "tennis", "golf", "ufc", "mma", "boxing", "racing",
+                             "cricket", "rugby", "esports"}
+        _game_title_kws   = ["vs ", " vs ", " vs.", "game ", "match ", "inning", "quarter",
+                             "half", "period", "set ", "overtime", "bout", "race "]
         try:
-            data = await self._request("GET", "/events", params={
-                "status": "open",
-                "limit": 200,
-            })
+            data = await self._request("GET", "/events", params={"status": "open", "limit": 200})
             events = data.get("events") or []
             for event in events:
-                # Events with a live score or "in_game" flag are truly live
-                event_status = (event.get("event_status") or "").lower()
-                mutually_ex  = event.get("mutually_exclusive_restriction")
-                # Kalshi sets category to "Sports" and has live game data for live events
                 category = (event.get("category") or "").lower()
                 title    = event.get("title") or event.get("event_title") or ""
                 if not title:
                     continue
-                # Check for live indicator in the event data
-                if event_status in ("live", "active", "in_progress", "in_game"):
-                    # Pull the sub-markets for this event
-                    for m in (event.get("markets") or []):
-                        if isinstance(m, dict):
-                            m.setdefault("title", title)
-                            m.setdefault("category", category)
-                            m["_kalshi_live"] = True
-                            live_markets.append(m)
+                title_l = title.lower()
+                is_sport    = category in _sport_categories
+                is_game     = any(kw in title_l for kw in _game_title_kws)
+                # Accept: sport category OR game keywords in title
+                if not (is_sport or is_game):
+                    continue
+                # Check close_time on the event or its markets
+                event_close = event.get("close_time") or event.get("end_date") or ""
+                hours_away  = None
+                if event_close:
+                    try:
+                        cdt = datetime.fromisoformat(str(event_close).replace("Z", "+00:00"))
+                        if cdt.tzinfo is None:
+                            cdt = cdt.replace(tzinfo=timezone.utc)
+                        hours_away = (cdt - now).total_seconds() / 3600
+                    except Exception:
+                        pass
+                for m in (event.get("markets") or []):
+                    if not isinstance(m, dict):
+                        continue
+                    # Use market close_time if event didn't have one
+                    m_close = m.get("close_time") or event_close
+                    if m_close and hours_away is None:
+                        try:
+                            cdt = datetime.fromisoformat(str(m_close).replace("Z", "+00:00"))
+                            if cdt.tzinfo is None:
+                                cdt = cdt.replace(tzinfo=timezone.utc)
+                            hours_away = (cdt - now).total_seconds() / 3600
+                        except Exception:
+                            pass
+                    if hours_away is not None and 0 < hours_away <= 24:
+                        m.setdefault("title", title)
+                        m.setdefault("category", category)
+                        m.setdefault("close_time", m_close)
+                        m["_kalshi_live"] = True
+                        m["hours_to_close"] = round(hours_away, 2)
+                        live_markets.append(m)
         except Exception as e:
             logger.debug("Kalshi /events live fetch: %s", e)
 
         if live_markets:
-            logger.info("Kalshi LIVE NOW (/events): %d live markets", len(live_markets))
+            logger.info("Kalshi LIVE NOW (/events): %d sport/game markets closing ≤24h", len(live_markets))
             return live_markets[:max_markets]
 
-        # Strategy 2: /markets — scan for any real-time event closing soon
-        # Sports: soccer/NBA/MLB/NHL/UFC/tennis etc. closing within 6h
-        # Non-sports: debates, hearings, Fed decisions, weather, press conferences
-        #             closing within 3h (these events are time-bounded and short)
-        live_series_prefixes = [
-            "SOCCER", "FIFA", "NFL", "NBA", "MLB", "NHL", "UFC", "TENNIS",
-            "F1", "GOLF", "RUGBY", "CRICKET", "BOXING", "WNBA", "MLS",
-            "NCAAF", "NCAAB", "PGA", "NASCAR", "ESPORTS",
-            "DEBATE", "HEARING", "FED", "ELECTION", "VOTE",
-        ]
-        _sport_title_kws = [
-            "vs ", " vs", "match", "game", "quarter", "half", "period",
-            "inning", "set ", "round", "bout", "race", "leg ",
-            "moneyline", "spread", "over/under", "cover",
-        ]
-        # Non-sport live events: debates, hearings, speeches, weather, etc.
+        # Strategy 2: query each sport series directly — much faster than paginating all markets
         _live_event_kws = [
             "debate", "hearing", "press conference", "speech", "summit",
             "fed meeting", "fomc", "rate decision", "vote today", "voting",
@@ -209,19 +223,38 @@ class KalshiClient:
             "launch", "landing", "spacewalk",
             "ipo today", "earnings today",
         ]
+        _sport_title_kws = [
+            "vs ", " vs", "match", "game", "quarter", "half", "period",
+            "inning", "set ", "round", "bout", "race", "leg ",
+            "moneyline", "spread", "over/under", "cover",
+        ]
+        live_series_prefixes = [
+            "SOCCER", "FIFA", "NFL", "NBA", "MLB", "NHL", "UFC", "TENNIS",
+            "F1", "GOLF", "RUGBY", "CRICKET", "BOXING", "WNBA", "MLS",
+            "NCAAF", "NCAAB", "PGA", "NASCAR", "ESPORTS",
+            "DEBATE", "HEARING", "FED", "ELECTION", "VOTE",
+        ]
         try:
             markets = []
-            cursor = ""
-            while len(markets) < max_markets:
-                data = await self.get_markets(limit=200, cursor=cursor, status="open")
-                batch = data.get("markets") or []
-                if not batch:
-                    break
-                markets.extend(batch)
-                cursor = data.get("cursor") or ""
-                if not cursor:
-                    break
-                await asyncio.sleep(0.1)
+            # Fetch each sport series_ticker directly — avoids paginating 5000+ markets
+            for prefix in live_series_prefixes:
+                try:
+                    data = await self._request("GET", "/markets", params={
+                        "status": "open",
+                        "series_ticker": prefix,
+                        "limit": 100,
+                    })
+                    batch = data.get("markets") or []
+                    markets.extend(batch)
+                    await asyncio.sleep(0.05)
+                except Exception:
+                    pass
+            # Also do one broad pass capped at 200 to catch any uncategorized markets
+            try:
+                data = await self.get_markets(limit=200, status="open")
+                markets.extend(data.get("markets") or [])
+            except Exception:
+                pass
 
             now = datetime.now(timezone.utc)
             for m in markets:
