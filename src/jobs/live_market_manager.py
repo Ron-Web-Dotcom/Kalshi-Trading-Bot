@@ -271,16 +271,16 @@ async def _fill_slots(
     live_k = [
         m for m in live_k
         if m.get("ticker") not in open_tickers
-        and 1 < _kalshi_price(m) < 99
+        and 8 < _kalshi_price(m) < 92               # min 8¢ — no near-resolved markets
         and m.get("close_time")                      # must have a close time
-        and not is_junk(m.get("title", ""))          # no junk titles
+        and not is_junk(m.get("title", ""))
     ]
     live_p = [
         m for m in live_p
         if m.get("ticker") not in open_tickers
-        and m.get("yes_ask", 0) > 1
+        and m.get("yes_ask", 0) > 8                 # min 8¢ — no near-resolved markets
         and m.get("close_time")                      # must have a close time
-        and not is_junk(m.get("title", ""))          # no junk titles
+        and not is_junk(m.get("title", ""))
     ]
 
     if not live_k and raw_k:

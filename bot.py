@@ -805,14 +805,16 @@ class TradingBot:
                         title = pick.get("title") or pick.get("ticker") or ""
                         if _is_junk(title):
                             return True
-                        # Use current market price first — catches resolved/collapsed markets
-                        # entry_price is what we paid, not what the market is worth now
-                        price = float(
-                            pick.get("yes_ask") or
-                            pick.get("price_cents") or
-                            pick.get("current_price") or
-                            pick.get("entry_price") or 0
-                        )
+                        # Explicitly handle 0 (resolved markets) — don't let falsy 0 fall through
+                        yes_ask = pick.get("yes_ask")
+                        cur     = pick.get("current_price")
+                        entry   = pick.get("entry_price") or pick.get("price_cents") or 0
+                        if yes_ask is not None:
+                            price = float(yes_ask)
+                        elif cur is not None:
+                            price = float(cur)
+                        else:
+                            price = float(entry)
                         if price < 5 or price > 95:
                             return True
                         return False
