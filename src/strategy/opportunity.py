@@ -107,7 +107,7 @@ class OpportunityHunter:
     _REJECTION_TTL_SECS: int = 3600   # 1 hour
     _REJECTION_FILE: str = "/tmp/kalshi_ai_rejections.json"
 
-    def __init__(self, db=None, ai_top_n: int = 3):
+    def __init__(self, db=None, ai_top_n: int = 6):
         self.db = db
         self.ai_top_n = ai_top_n
         # Load persisted rejections on first instantiation
@@ -179,7 +179,8 @@ class OpportunityHunter:
         )
 
         # ── Stage 1: rule-based pre-score (FREE — no AI calls) ───────────────
-        prescored = []
+        prescored_kalshi = []
+        prescored_poly   = []
         for market in all_candidates:
             yes_ask = float(market.get("yes_ask") or market.get("last_price") or 0)
             title   = market.get("title", "")
@@ -193,15 +194,26 @@ class OpportunityHunter:
 
             poly_comp  = poly_by_ticker.get(market.get("ticker", ""))
             pre        = _pre_score(market, poly_comp)
-            prescored.append((pre, market, poly_comp))
+            if market.get("platform") == "polymarket":
+                prescored_poly.append((pre, market, poly_comp))
+            else:
+                prescored_kalshi.append((pre, market, poly_comp))
 
-        # Sort by pre-score desc, take top N for AI evaluation
-        prescored.sort(key=lambda x: x[0], reverse=True)
-        top_candidates = prescored[:self.ai_top_n]
+        # Guarantee at least 2 Kalshi + 2 Polymarket get AI evaluation
+        # then fill remaining slots from whichever has higher pre-scores
+        prescored_kalshi.sort(key=lambda x: x[0], reverse=True)
+        prescored_poly.sort(key=lambda x: x[0], reverse=True)
+        guaranteed = prescored_kalshi[:2] + prescored_poly[:2]
+        guaranteed_ids = {id(m) for _, m, _ in guaranteed}
+        remaining = sorted(
+            [c for c in (prescored_kalshi[2:] + prescored_poly[2:]) if id(c[1]) not in guaranteed_ids],
+            key=lambda x: x[0], reverse=True,
+        )
+        top_candidates = guaranteed + remaining[: max(0, self.ai_top_n - len(guaranteed))]
 
         logger.info(
-            "Pre-scored %d candidates — sending top %d to AI",
-            len(prescored), len(top_candidates),
+            "Pre-scored %d Kalshi + %d Polymarket — sending top %d to AI (%d guaranteed each platform)",
+            len(prescored_kalshi), len(prescored_poly), len(top_candidates), 2,
         )
 
         # ── Stage 2: AI evaluation on top N only ─────────────────────────────
