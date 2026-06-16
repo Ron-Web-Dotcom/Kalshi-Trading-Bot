@@ -1171,6 +1171,14 @@ class TradingBot:
                             "AND (status='open' OR status='') "
                             "AND title IS NOT NULL AND title != '' "
                             "AND title NOT LIKE '0x%' "
+                            "AND LOWER(title) NOT LIKE '%ivan cepeda%' "
+                            "AND LOWER(title) NOT LIKE '%abelardo%' "
+                            "AND LOWER(title) NOT LIKE '%colombian presiden%' "
+                            "AND LOWER(title) NOT LIKE '%gavin newsom%' "
+                            "AND LOWER(title) NOT LIKE '%2028 president%' "
+                            "AND LOWER(title) NOT LIKE '%world cup winner%' "
+                            "AND LOWER(title) NOT LIKE '%nba champion%' "
+                            "AND LOWER(title) NOT LIKE '%stanley cup winner%' "
                             "AND close_time > datetime('now', '+24 hours') "
                             "AND close_time < datetime('now', '+7 days') "
                             + _kal_excl +
@@ -1190,6 +1198,14 @@ class TradingBot:
                                 "AND (status='open' OR status='') "
                                 "AND title IS NOT NULL AND title != '' "
                                 "AND title NOT LIKE '0x%' "
+                                "AND LOWER(title) NOT LIKE '%ivan cepeda%' "
+                                "AND LOWER(title) NOT LIKE '%abelardo%' "
+                                "AND LOWER(title) NOT LIKE '%colombian presiden%' "
+                                "AND LOWER(title) NOT LIKE '%gavin newsom%' "
+                                "AND LOWER(title) NOT LIKE '%2028 president%' "
+                                "AND LOWER(title) NOT LIKE '%world cup winner%' "
+                                "AND LOWER(title) NOT LIKE '%nba champion%' "
+                                "AND LOWER(title) NOT LIKE '%stanley cup winner%' "
                                 "AND close_time > datetime('now', '+24 hours') "
                                 "AND close_time < datetime('now', '+7 days') "
                                 "ORDER BY RANDOM() LIMIT 10"
@@ -1208,6 +1224,16 @@ class TradingBot:
                                 ",".join("?" * len(_shown_reg_poly))
                             )
                             _poly_excl_params = tuple(_shown_reg_poly)
+                        _POLY_SQL_JUNK = (
+                            "AND LOWER(title) NOT LIKE '%ivan cepeda%' "
+                            "AND LOWER(title) NOT LIKE '%abelardo%' "
+                            "AND LOWER(title) NOT LIKE '%colombian presiden%' "
+                            "AND LOWER(title) NOT LIKE '%gavin newsom%' "
+                            "AND LOWER(title) NOT LIKE '%2028 president%' "
+                            "AND LOWER(title) NOT LIKE '%world cup winner%' "
+                            "AND LOWER(title) NOT LIKE '%nba champion%' "
+                            "AND LOWER(title) NOT LIKE '%stanley cup winner%' "
+                        )
                         _poly_rows = await self.db.fetchall(
                             "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time, category "
                             "FROM markets "
@@ -1216,6 +1242,7 @@ class TradingBot:
                             "AND (status='open' OR status='') "
                             "AND title IS NOT NULL AND title != '' "
                             "AND title NOT LIKE '0x%' "
+                            + _POLY_SQL_JUNK +
                             "AND close_time > datetime('now', '+24 hours') "
                             "AND close_time < datetime('now', '+7 days') "
                             + _poly_excl +
@@ -1235,6 +1262,7 @@ class TradingBot:
                                 "AND (status='open' OR status='') "
                                 "AND title IS NOT NULL AND title != '' "
                                 "AND title NOT LIKE '0x%' "
+                                + _POLY_SQL_JUNK +
                                 "AND close_time > datetime('now', '+24 hours') "
                                 "AND close_time < datetime('now', '+7 days') "
                                 "ORDER BY RANDOM() LIMIT 10"
