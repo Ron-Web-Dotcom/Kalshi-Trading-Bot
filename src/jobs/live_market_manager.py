@@ -25,6 +25,8 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 
+from src.utils.junk_filter import is_junk
+
 logger = logging.getLogger("trading.live_manager")
 
 MAX_LIVE_POSITIONS   = 3     # keep exactly this many in-play trades at a time
@@ -641,26 +643,10 @@ async def run_live_manager_cycle(db, discord, settings, kalshi_trader, poly_trad
                 _live_slots.pop(t, None)
 
         # Add DB positions not yet in memory (e.g., after restart)
-        _SLOT_JUNK = [
-            "gavin newsom", "2028 president", "2028 democrat",
-            "win the 2026 fifa world cup", "win the world cup", "world cup winner",
-            "world cup champion", "fifa world cup winner",
-            "nba finals winner", "nba champion", "stanley cup winner",
-            "before gta", "gta vi", "playboi carti", "jesus christ",
-            "hit $150k", "hit $1m", "airdrop by", "megaeth",
-            "by december 31", "before 2027", "before 2028",
-            "world cup winner", "fifa world cup winner", "world cup champion", "lift the 2026",
-            "france win the 2026", "spain win the 2026", "brazil win the 2026",
-            "germany win the 2026", "argentina win the 2026", "england win the 2026",
-            "portugal win the 2026", "usa win the 2026", "mexico win the 2026",
-            "morocco win the 2026",
-            "ivan cepeda", "abelardo de la", "colombian presiden", "keir starmer", "kuala lumpur",
-        ]
         for p in db_positions:
             t = p["ticker"]
             if t not in _live_slots:
-                title_lower = (p.get("title") or "").lower()
-                if any(j in title_lower for j in _SLOT_JUNK):
+                if is_junk(p.get("title") or ""):
                     logger.info("LIVE SLOT SKIPPED (junk title): %s", t)
                     continue
                 # Look up close_time from markets table (works for Kalshi tickers)

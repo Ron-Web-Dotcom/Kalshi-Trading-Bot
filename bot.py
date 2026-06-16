@@ -800,35 +800,13 @@ class TradingBot:
                         except Exception:
                             return False
 
-                    _ALERT_JUNK = [
-                        "gavin newsom", "2028 president", "2028 democrat",
-                        # World Cup WINNER (tournament outcome) — not individual games
-                        "win the 2026 fifa world cup", "win the 2026 world cup",
-                        "win the world cup", "fifa world cup winner",
-                        "world cup champion", "world cup winner", "lift the 2026",
-                        "spain win the 2026", "france win the 2026", "brazil win the 2026",
-                        "germany win the 2026", "argentina win the 2026", "england win the 2026",
-                        "portugal win the 2026", "usa win the 2026", "mexico win the 2026",
-                        "morocco win the 2026",
-                        # Other long-term tournament winners
-                        "nba finals winner", "nba champion", "stanley cup winner",
-                        "win the nba championship", "win the stanley cup",
-                        # Novelty / never-happening markets
-                        "before gta", "gta vi", "playboi carti", "jesus christ",
-                        "bitcoin hit $", "hit $150k", "hit $1m", "airdrop by",
-                        "megaeth",
-                        "by december 31", "by end of 2026",
-                        "before 2027", "before 2028",
-                        # Foreign political long-term
-                        "ivan cepeda", "colombian presiden",
-                        "keir starmer", "kuala lumpur",
-                    ]
-
                     def _should_skip_alert(pick: dict) -> bool:
-                        title = (pick.get("title") or pick.get("ticker") or "").lower()
-                        if any(p in title for p in _ALERT_JUNK):
+                        from src.utils.junk_filter import is_junk as _is_junk
+                        title = pick.get("title") or pick.get("ticker") or ""
+                        if _is_junk(title):
                             return True
-                        price = float(pick.get("price_cents") or pick.get("yes_ask") or 0)
+                        price = float(pick.get("price_cents") or pick.get("yes_ask") or
+                                      pick.get("entry_price") or pick.get("current_price") or 0)
                         if price < 5 or price > 95:
                             return True
                         return False

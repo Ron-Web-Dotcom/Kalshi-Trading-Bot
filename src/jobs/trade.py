@@ -4,6 +4,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from src.utils.junk_filter import is_junk
+
 logger = logging.getLogger("trading.jobs.trade")
 
 
@@ -199,6 +201,11 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 logger.warning("SKIP arb %s — not in cached markets", ticker)
                 results.skipped += 1
                 daily_stats.record_skip("not_in_cached_markets")
+                continue
+
+            if is_junk(market.get("title", "")):
+                logger.info("SKIP arb %s — junk market title", ticker)
+                results.skipped += 1
                 continue
 
             if src == "internal_arb":

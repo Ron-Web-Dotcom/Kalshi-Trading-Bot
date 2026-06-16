@@ -13,6 +13,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
+from src.utils.junk_filter import is_junk
+
 logger = logging.getLogger("trading.opportunity")
 
 
@@ -176,46 +178,6 @@ class OpportunityHunter:
             len(markets), len(poly_markets) if poly_markets else 0, len(all_candidates),
         )
 
-        # Long-term speculation markets — not tradeable, skip before AI
-        _SKIP_PHRASES = [
-            "before gta", "gta vi", "gta 6",
-            "rihanna", "kanye", "playboi carti", "drake album",
-            "before agi", "agi by",
-            "invades taiwan", "china taiwan",
-            "world war", "nuclear",
-            "jesus christ", "second coming", "rapture",
-            "gavin newsom", "2028 democratic", "2028 president",
-            "bernie endorse", "endorse dan osborn",
-            "waymo launch", "waymo nashville",
-            "before 2027", "before 2028", "before 2029", "before 2030",
-            "before 203", "before 204", "before 205",
-            # Long-shot celebrity/novelty markets — not real edges
-            "oprah", "lebron", "lebron james", "dwayne johnson", "the rock",
-            "kanye west", "taylor swift president", "elon musk president",
-            "mark zuckerberg president", "joe rogan president",
-            "win the 2028", "win the 2032", "2028 us presidential",
-            "uzbekistan win",
-            # World Cup/tournament WINNER markets — individual games are fine
-            "win the 2026 fifa world cup", "win the 2026 world cup",
-            "win the world cup", "fifa world cup winner", "world cup champion",
-            "world cup winner", "lift the 2026",
-            "spain win the 2026", "france win the 2026", "brazil win the 2026",
-            "germany win the 2026", "argentina win the 2026", "england win the 2026",
-            "portugal win the 2026", "usa win the 2026", "mexico win the 2026",
-            "morocco win the 2026",
-            "nba finals winner", "nba champion", "stanley cup winner",
-            "win the nba championship", "win the stanley cup",
-            # Price targets far out
-            "hit $150k", "hit $1m", "by december 31", "by end of 2026",
-            "airdrop by", "megaeth",
-            # Political futures in other countries / long-term
-            "ivan cepeda", "abelardo de la", "colombian presiden", "colombian president",
-            "keir starmer", "labour par",
-            "democratic union of hungarians",
-            # Weather markets in distant cities (no edge)
-            "kuala lumpur",
-        ]
-
         # ── Stage 1: rule-based pre-score (FREE — no AI calls) ───────────────
         prescored = []
         for market in all_candidates:
@@ -226,9 +188,7 @@ class OpportunityHunter:
                 continue
             if not title or len(title) < 10 or title.startswith("0x"):
                 continue
-            # Skip obvious long-term speculation — no edge, wastes AI calls
-            title_lower = title.lower()
-            if any(p in title_lower for p in _SKIP_PHRASES):
+            if is_junk(title):
                 continue
 
             poly_comp  = poly_by_ticker.get(market.get("ticker", ""))
@@ -357,35 +317,6 @@ class OpportunityHunter:
             except Exception as e:
                 logger.debug("Momentum check error: %s", e)
 
-        # Junk filter — same phrases blocked in the regular scan
-        _LIVE_SKIP = [
-            "before gta", "gta vi", "gta 6", "playboi carti", "drake album",
-            "rihanna", "kanye", "before agi", "agi by",
-            "invades taiwan", "china taiwan", "world war", "nuclear",
-            "jesus christ", "second coming", "rapture",
-            "gavin newsom", "2028 democratic", "2028 president",
-            "bernie endorse", "waymo launch", "waymo nashville",
-            "before 2027", "before 2028", "before 2029", "before 2030",
-            "oprah", "lebron", "taylor swift president", "elon musk president",
-            "win the 2028", "win the 2032", "2028 us presidential",
-            # ALL World Cup tournament WINNER markets (any country)
-            "win the 2026 fifa world cup", "win the 2026 world cup",
-            "win the world cup", "fifa world cup winner", "world cup champion",
-            "world cup winner", "lift the 2026",
-            # Catch individual country WC winner markets: "Will Spain/France/Brazil... win"
-            "spain win the 2026", "france win the 2026", "brazil win the 2026",
-            "germany win the 2026", "argentina win the 2026", "england win the 2026",
-            "portugal win the 2026", "usa win the 2026", "mexico win the 2026",
-            "morocco win the 2026",
-            # Other tournament winners
-            "nba finals winner", "nba champion", "stanley cup winner",
-            "win the nba championship", "win the stanley cup",
-            "hit $150k", "hit $1m", "by december 31", "by end of 2026",
-            "airdrop by", "megaeth",
-            "ivan cepeda", "abelardo de la", "colombian presiden", "keir starmer",
-            "kuala lumpur", "uzbekistan win",
-        ]
-
         # Pre-score — give live markets an extra boost for being time-sensitive
         prescored = []
         for market in live_markets:
@@ -395,7 +326,7 @@ class OpportunityHunter:
                 continue
             if not title or len(title) < 5 or title.startswith("0x"):
                 continue
-            if any(p in title.lower() for p in _LIVE_SKIP):
+            if is_junk(title):
                 continue
             pre = _pre_score(market) * 1.5   # live boost
             # Extra boost for price momentum markets
