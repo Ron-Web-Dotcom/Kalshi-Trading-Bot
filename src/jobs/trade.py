@@ -828,8 +828,13 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             logger.info("Trade size: $%.2f [%s]%s", planned_size_usd, size_tier,
                         " [LIVE]" if is_live_market else "")
             contracts_est  = (planned_size_usd / (price / 100)) if price > 0 else 0
-            exp_profit_usd = contracts_est * (net_ev / 100) if net_ev is not None else None
-            roi_pct        = (exp_profit_usd / planned_size_usd * 100) if (exp_profit_usd and planned_size_usd) else None
+            if net_ev is not None and net_ev > 0:
+                exp_profit_usd = contracts_est * (net_ev / 100)
+            else:
+                # No EV from AI — estimate from confidence: treat conf-65 as edge
+                edge = max(0.0, confidence - 65) * 0.002  # 70%→$0.01, 85%→$0.04
+                exp_profit_usd = planned_size_usd * edge if edge > 0 else None
+            roi_pct = (exp_profit_usd / planned_size_usd * 100) if (exp_profit_usd and planned_size_usd) else None
 
             # Use settings directly — no hardcoded floors overriding config
             min_roi = settings.trading.min_profit_roi_pct

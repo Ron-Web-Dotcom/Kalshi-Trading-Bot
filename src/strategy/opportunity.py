@@ -69,8 +69,17 @@ def score_opportunity(
     confidence = decision.get("confidence", 0.0)
     volume     = market.get("volume", 0)
 
-    if net_ev <= 0 or confidence <= 0:
+    if confidence <= 0:
         return 0.0
+
+    # If EV is missing/zero but confidence is high, use confidence alone
+    # Many markets won't have EV — don't silently drop them
+    if net_ev <= 0:
+        if confidence >= 70:
+            # Synthetic EV: treat high confidence as small positive EV
+            net_ev = (confidence - 65) * 0.2  # 70%→1.0, 80%→3.0, 90%→5.0
+        else:
+            return 0.0
 
     ev_score         = min(net_ev / 10.0, 1.0)
     confidence_score = confidence / 100.0
