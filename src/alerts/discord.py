@@ -1405,7 +1405,16 @@ class DiscordAlerter:
             })
 
         # ── Bot's radar — top picks it's watching ────────────────────────────
-        buy_signals = [b for b in buys if b.get("action") == "BUY"][:3]
+        buy_signals_raw = [b for b in buys if b.get("action") == "BUY"]
+        # Deduplicate by ticker — keep highest-confidence entry
+        seen_tickers: set = set()
+        buy_signals = []
+        for b in sorted(buy_signals_raw, key=lambda x: x.get("confidence", 0), reverse=True):
+            t = b.get("ticker", "")
+            if t not in seen_tickers:
+                seen_tickers.add(t)
+                buy_signals.append(b)
+        buy_signals = buy_signals[:3]
         if buy_signals:
             rlines = []
             for b in buy_signals:
