@@ -390,10 +390,13 @@ class TradingBot:
                     # Remember what we showed so next hour rotates to fresh ones
                     self._hb_shown_tickers = {c["ticker"] for c in top_candidates}
 
-                    # Today's closed trades with outcomes
+                    # Today's closed trades with outcomes — skip $0.00 ghost closes and cleanup
                     closed_rows = await self.db.fetchall(
                         "SELECT ticker, side, pnl, close_reason FROM positions "
-                        "WHERE status='closed' AND closed_at >= ? ORDER BY closed_at DESC LIMIT 10",
+                        "WHERE status='closed' AND closed_at >= ? "
+                        "AND pnl IS NOT NULL AND pnl != 0 "
+                        "AND (close_reason IS NULL OR close_reason NOT LIKE 'cleanup:%') "
+                        "ORDER BY closed_at DESC LIMIT 10",
                         (today + "T00:00:00",)
                     )
                     closed_trades = [dict(r) for r in (closed_rows or [])]
@@ -591,7 +594,10 @@ class TradingBot:
                     ) or {}
                     closed_today = await self.db.fetchall(
                         "SELECT ticker, side, pnl, close_reason, title FROM positions "
-                        "WHERE status='closed' AND closed_at >= ? AND closed_at < ? ORDER BY closed_at DESC",
+                        "WHERE status='closed' AND closed_at >= ? AND closed_at < ? "
+                        "AND pnl IS NOT NULL AND pnl != 0 "
+                        "AND (close_reason IS NULL OR close_reason NOT LIKE 'cleanup:%') "
+                        "ORDER BY closed_at DESC",
                         (report_date + "T00:00:00", report_date + "T23:59:59")
                     ) or []
                     open_row = await self.db.fetchone(
