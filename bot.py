@@ -720,7 +720,7 @@ class TradingBot:
             # tickers whose results have already been reported
             _result_sent: set = set()
 
-            BOT_ALERT_INTERVAL = 600   # scan every 10 min
+            BOT_ALERT_INTERVAL = 300   # scan every 5 min — aligned with trade cycle
             RESULT_CHECK_DELAY = 60    # check results 60s after alert
             from src.utils.confidence_calibrator import get_threshold as _get_min_conf
             MIN_CONF           = _get_min_conf()  # auto-calibrated daily (default 65%)
@@ -790,30 +790,27 @@ class TradingBot:
                     discord   = DiscordAlerter()
                     mode      = "PAPER" if not settings.trading.live_trading_enabled else "LIVE"
                     now_utc   = datetime.now(timezone.utc)
-                    MIN_CONF  = _get_min_conf()  # refresh each cycle — picks up midnight recalibration
+                    MIN_CONF  = _get_min_conf()  # refresh each cycle (default 65%)
                     new_picks: list = []
 
-                    # Bot alert = LIVE EVENTS HAPPENING RIGHT NOW only
-                    # Must close within 24 hours — daily live events only
-                    def _is_live_event(pick: dict) -> bool:
+                    def _hours_left(pick: dict) -> float:
+                        """Hours until this market closes. -1 if unknown."""
                         ct = pick.get("close_time") or pick.get("expiration_time") or ""
                         if not ct:
-                            return False  # no close time = unknown, skip
+                            return -1
                         try:
                             cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
                             if cd.tzinfo is None:
                                 cd = cd.replace(tzinfo=timezone.utc)
-                            hours_left = (cd - now_utc).total_seconds() / 3600
-                            return (5 / 60) <= hours_left <= 24
+                            return (cd - now_utc).total_seconds() / 3600
                         except Exception:
-                            return False
+                            return -1
 
                     def _should_skip_alert(pick: dict) -> bool:
                         from src.utils.junk_filter import is_junk as _is_junk
                         title = pick.get("title") or pick.get("ticker") or ""
                         if _is_junk(title):
                             return True
-                        # Explicitly handle 0 (resolved markets) — don't let falsy 0 fall through
                         yes_ask = pick.get("yes_ask")
                         cur     = pick.get("current_price")
                         entry   = pick.get("entry_price") or pick.get("price_cents") or 0
@@ -827,16 +824,14 @@ class TradingBot:
                             return True
                         return False
 
-                    # 1. Active live slots — must have real price + close within 24h
+                    # 1. All active live slots — any open position in live manager
                     for ticker, slot in list(_ls.items()):
                         conf  = float(slot.get("confidence", 0) or 0)
                         price = float(slot.get("price_cents") or slot.get("yes_ask") or 0)
-                        if conf < MIN_CONF or not (5 <= price <= 95):
+                        if not (5 <= price <= 95):
                             continue
                         pick = {**slot, "is_live": True, "ticker": ticker}
                         if _should_skip_alert(pick):
-                            continue
-                        if not _is_live_event(pick):
                             continue
                         band = int(conf / 10) * 10
                         if _alerted.get(ticker, {}).get("band") != band:
@@ -846,50 +841,61 @@ class TradingBot:
                                 "alerted_at": now_utc, "result_sent": False,
                             }
 
-                    # 2. BUY evaluations — alert on:
-                    #    a) Any high-confidence pick (≥75%) closing within 24h (today's events)
-                    #    b) Any pick closing within 24h that passes is_event_live_now (in-game)
+                    # 2. ALL BUY evaluations across every category — sports, crypto,
+                    #    politics, weather, economics, etc. — no live-API gate.
+                    #    Tiers by time window + confidence:
+                    #      ≤6h  (closing very soon)  → MIN_CONF (65%)
+                    #      ≤24h (today's events)     → 70%
+                    #      ≤48h (tomorrow too)       → 80%
+                    #      ≤7d  (regular scan)       → 85%
                     for ev in list(_da.all_evaluations):
                         if ev.get("action") != "BUY":
                             continue
                         conf   = float(ev.get("confidence", 0) or 0)
                         price  = float(ev.get("price_cents") or ev.get("yes_ask") or 0)
                         ticker = ev.get("ticker", "")
-                        if conf < MIN_CONF or not (5 <= price <= 95) or not ticker:
+                        if not ticker or not (5 <= price <= 95):
                             continue
                         if _should_skip_alert(ev):
                             continue
                         if ticker in _ls:
                             continue
-                        if not _is_live_event(ev):
+                        hl = _hours_left(ev)
+                        if hl <= 0:
                             continue
-                        # High-confidence picks (≥75%) alert immediately — no live API check needed
-                        # Lower confidence still requires external confirmation
-                        if conf < 75:
-                            title = ev.get("title", "") or ""
-                            try:
-                                live_now = await is_event_live_now(title)
-                            except Exception:
-                                live_now = False
-                            if not live_now:
-                                continue
+                        # Confidence threshold scales with how far out the event is
+                        if hl <= 6:
+                            min_c = MIN_CONF          # 65% — closing soon, any edge
+                        elif hl <= 24:
+                            min_c = max(MIN_CONF, 70) # 70% — today
+                        elif hl <= 48:
+                            min_c = 80                # 80% — tomorrow
+                        else:
+                            min_c = 85                # 85% — further out
+                        if conf < min_c:
+                            continue
                         band = int(conf / 10) * 10
                         if _alerted.get(ticker, {}).get("band") != band:
-                            pick = {**ev, "is_live": True}
+                            pick = {**ev, "is_live": hl <= 24}
                             new_picks.append(pick)
                             _alerted[ticker] = {
                                 "band": band, "pick": pick,
                                 "alerted_at": now_utc, "result_sent": False,
                             }
 
-                    # Full watching list = confirmed live picks only
-                    all_watching = list(new_picks)
+                    # Full watching list — live slots + new picks, deduped
+                    seen_watch = set()
+                    all_watching = []
+                    for p in new_picks:
+                        t = p.get("ticker", "")
+                        if t not in seen_watch:
+                            seen_watch.add(t)
+                            all_watching.append(p)
                     for ticker, slot in list(_ls.items()):
-                        pick = {**slot, "is_live": True, "ticker": ticker}
-                        if not any(p.get("ticker") == ticker for p in all_watching):
-                            if _should_skip_alert(pick):
-                                continue
-                            if _is_live_event(pick):
+                        if ticker not in seen_watch:
+                            pick = {**slot, "is_live": True, "ticker": ticker}
+                            if not _should_skip_alert(pick):
+                                seen_watch.add(ticker)
                                 all_watching.append(pick)
 
                     if all_watching:

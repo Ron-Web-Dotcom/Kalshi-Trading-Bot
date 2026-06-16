@@ -29,7 +29,7 @@ from src.utils.junk_filter import is_junk
 
 logger = logging.getLogger("trading.live_manager")
 
-MAX_LIVE_POSITIONS   = 5     # keep up to 5 in-play trades — more variety across live events
+MAX_LIVE_POSITIONS   = 10    # up to 10 in-play trades — broad coverage across all live categories
 SCAN_INTERVAL        = 300   # seconds between manager cycles (5 minutes)
 LIVE_WINDOW_HOURS    = 24.0  # Kalshi: live events happening today only
 POLY_LIVE_WINDOW_HOURS = 24.0  # Polymarket: live events happening today only
