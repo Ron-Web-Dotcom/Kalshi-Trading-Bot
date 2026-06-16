@@ -245,22 +245,28 @@ class PolymarketTradingClient:
         # Tags covering sports AND non-sport live events
         # Polymarket Gamma API supports tag filtering
         _LIVE_TAGS = [
-            # Sports
-            "nhl", "mlb", "nba", "wnba", "tennis", "golf", "ufc",
-            "soccer", "football", "boxing", "cricket", "rugby",
+            # Major sports
+            "nhl", "mlb", "nba", "wnba", "nfl", "tennis", "golf", "ufc",
+            "soccer", "football", "boxing", "cricket", "rugby", "mls",
+            # World Cup / international soccer
+            "world-cup", "fifa", "champions-league", "euro",
+            "copa-america", "concacaf",
+            # Motor sports / other
+            "f1", "formula-1", "nascar", "esports",
             # Non-sport real-time events
             "politics", "elections", "debate", "congress", "government",
-            "weather", "news", "world",
+            "weather", "news", "world", "economy",
         ]
 
         # Keywords that confirm an actual live event (game/match/hearing/debate/etc.)
         _GAME_KEYWORDS = [
-            # Sports
-            "vs ", " vs ", "game ", "match ", "series ",
+            # Sports — game in progress
+            "vs ", " vs ", "vs.", "game ", "match ", "series ",
             "quarter", "half", "inning", "period", "set ",
             "overtime", "playoff", "championship", "finals",
             "bout", "fight", "round ", "race ", "leg ",
             "cover", "spread", "moneyline", "over/under",
+            "score", "goals", "points", "winner",
             # Non-sport live events
             "debate", "hearing", "testimony", "press conference",
             "vote today", "voting today", "election day",

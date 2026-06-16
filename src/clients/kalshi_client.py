@@ -240,8 +240,9 @@ class KalshiClient:
                 is_sport_ticker = any(ticker.startswith(p) for p in live_series_prefixes)
                 is_sport_title  = any(kw in title for kw in _sport_title_kws)
                 is_live_event   = any(kw in title for kw in _live_event_kws)
-                # Sports: close within 6h; non-sport live events: close within 3h
-                if (is_sport_ticker or is_sport_title) and hours_left <= 6:
+                # Sports: close within 24h — catches today's games day-of
+                # Non-sport live events: close within 3h (time-bounded)
+                if (is_sport_ticker or is_sport_title) and hours_left <= 24:
                     m["_kalshi_live"] = True
                     m["hours_to_close"] = round(hours_left, 2)
                     live_markets.append(m)
