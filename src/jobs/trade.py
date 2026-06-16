@@ -667,20 +667,24 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             if m.get("ticker") not in arb_tickers
             and not _already_open(m)
             and 2 < _tradeable_price(m) < 98
-            and m.get("volume", 0) >= min_vol
+            and m.get("volume", 0) >= max(min_vol, 10)   # at least $10 volume = real market
             and (m.get("title") or "")
-            and _closes_within(m, 168)   # 7 days = 168 hours
+            and m.get("close_time")                       # must have a close time set
+            and _closes_within(m, 168)                    # 7 days = 168 hours
+            and not is_junk(m.get("title", ""))
         ]
 
-        # Short-duration pool: closes within 24h — any volume, for 1min/5min/1hr/daily markets
+        # Short-duration pool: closes within 24h — lower volume ok (new daily markets)
         short_term = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
             and not _already_open(m)
             and 2 < _tradeable_price(m) < 98
             and m.get("ticker") not in {x.get("ticker") for x in long_term}
+            and m.get("close_time")                       # must have a close time set
             and _closes_within(m, 24)
             and (m.get("title") or "")
+            and not is_junk(m.get("title", ""))
         ]
 
         # ── Category-wide sweep: scan ALL categories + sub-categories ─────────
@@ -701,14 +705,18 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 and m.get("ticker") not in arb_tickers
                 and not _already_open(m)
                 and 2 < _tradeable_price(m) < 98
+                and m.get("close_time")
                 and _closes_within(m, 168)   # 7 days
+                and not is_junk(m.get("title", ""))
             ]
             cat_poly = [
                 m for m in cat_markets
                 if m.get("platform") == "polymarket"
                 and not _already_open(m)
                 and m.get("yes_ask", 0) > 1
+                and m.get("close_time")
                 and _closes_within(m, 168)   # 7 days
+                and not is_junk(m.get("title", ""))
             ]
             # Merge category-scanned markets in, deduplicating by ticker
             existing_kalshi_tickers = {m.get("ticker") for m in long_term + short_term + live_kalshi}

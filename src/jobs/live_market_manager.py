@@ -32,7 +32,7 @@ logger = logging.getLogger("trading.live_manager")
 MAX_LIVE_POSITIONS   = 3     # keep exactly this many in-play trades at a time
 SCAN_INTERVAL        = 300   # seconds between manager cycles (5 minutes)
 LIVE_WINDOW_HOURS    = 6.0   # Kalshi: markets closing within this window qualify as "live"
-POLY_LIVE_WINDOW_HOURS = 72.0  # Polymarket: markets close far in the future — use wider window
+POLY_LIVE_WINDOW_HOURS = 24.0  # Polymarket: live events happening today only
 STOP_LOSS_PCT        = 40.0  # exit if current_price dropped this % from entry (YES side)
 AI_EVAL_N            = 12    # how many pre-scored markets to send to AI per fill cycle
 MIN_ROI_PCT          = 1.0   # minimum ROI% for live trades (relaxed — live markets resolve fast)
@@ -268,8 +268,20 @@ async def _fill_slots(
         if not (m.get("yes_ask") or 0) and (m.get("last_price") or 0):
             m["yes_ask"] = float(m["last_price"])
             m["no_ask"]  = round(100.0 - float(m["last_price"]), 1)
-    live_k = [m for m in live_k if m.get("ticker") not in open_tickers and 1 < _kalshi_price(m) < 99]
-    live_p = [m for m in live_p if m.get("ticker") not in open_tickers and m.get("yes_ask", 0) > 1]
+    live_k = [
+        m for m in live_k
+        if m.get("ticker") not in open_tickers
+        and 1 < _kalshi_price(m) < 99
+        and m.get("close_time")                      # must have a close time
+        and not is_junk(m.get("title", ""))          # no junk titles
+    ]
+    live_p = [
+        m for m in live_p
+        if m.get("ticker") not in open_tickers
+        and m.get("yes_ask", 0) > 1
+        and m.get("close_time")                      # must have a close time
+        and not is_junk(m.get("title", ""))          # no junk titles
+    ]
 
     if not live_k and raw_k:
         sample = live_k[:1] or []
