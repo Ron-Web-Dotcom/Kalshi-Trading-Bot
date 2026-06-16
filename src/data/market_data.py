@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
+from src.utils.junk_filter import is_junk
 from typing import Dict, List
 
 from src.clients.kalshi_client import KalshiClient
@@ -48,6 +49,9 @@ class MarketDataFetcher:
         for m in markets:
             ticker = m.get("ticker", "")
             if not ticker:
+                skipped += 1
+                continue
+            if is_junk(m.get("title", "")):
                 skipped += 1
                 continue
             rows.append((

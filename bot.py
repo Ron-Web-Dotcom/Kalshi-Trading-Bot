@@ -1193,8 +1193,9 @@ class TradingBot:
                             "ORDER BY RANDOM() LIMIT 3",
                             _kal_excl_params,
                         )
+                        from src.utils.junk_filter import is_junk as _ij_kal
                         _kal_reg = [dict(r, platform="kalshi") for r in (_kal_rows or [])
-                                    if not __import__('src.utils.junk_filter', fromlist=['is_junk']).is_junk(r['title'] or '')]
+                                    if not _ij_kal(r['title'] or '')]
                         # If exclusion left nothing, reset and start fresh
                         if not _kal_reg:
                             _shown_reg_kal.clear()

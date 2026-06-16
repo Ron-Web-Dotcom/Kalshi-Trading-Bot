@@ -5,6 +5,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+from src.utils.junk_filter import is_junk
+
 logger = logging.getLogger("trading.jobs.ingest")
 
 
@@ -41,6 +43,8 @@ async def run_ingestion(db_manager, market_queue: Optional[asyncio.Queue] = None
             rows = []
             for pm in raw_poly:
                 try:
+                    if is_junk(pm.get("title", "")):
+                        continue
                     rows.append((
                         pm["ticker"], pm.get("title", "")[:200],
                         pm.get("category", ""), "open",

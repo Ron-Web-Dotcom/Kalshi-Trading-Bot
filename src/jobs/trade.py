@@ -348,6 +348,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 # Persist Polymarket markets to DB so tracker can read live prices
                 for pm in raw_poly:
                     try:
+                        if is_junk(pm.get("title", "")):
+                            continue
                         await db.execute("""
                             INSERT OR REPLACE INTO markets
                             (ticker, title, category, status, yes_bid, yes_ask,
