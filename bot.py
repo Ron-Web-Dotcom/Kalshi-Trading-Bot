@@ -281,7 +281,7 @@ class TradingBot:
                         "  SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
                         "  SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
                         "  COALESCE(SUM(pnl), 0) as total_pnl "
-                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL "
+                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL AND pnl != 0 "
                         "AND (close_reason IS NULL OR close_reason NOT LIKE 'cleanup:%')"
                     )
                     wl = wl_row or {}
@@ -512,7 +512,8 @@ class TradingBot:
                         "SELECT COUNT(*) as total, "
                         "SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
                         "SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses "
-                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL"
+                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL AND pnl != 0 "
+                        "AND (close_reason IS NULL OR close_reason NOT LIKE 'cleanup:%')"
                     ) or {}
                     total_closed = wl.get("total", 0) or 0
                     total_wins   = wl.get("wins",  0) or 0
@@ -573,13 +574,14 @@ class TradingBot:
                     paper        = not settings.trading.live_trading_enabled
                     _paper_flag  = 0 if settings.trading.live_trading_enabled else 1
 
-                    # Win/loss record (all-time — no date filter)
+                    # Win/loss record (all-time — no date filter, exclude cleanup and zero-pnl ghosts)
                     wl = await self.db.fetchone(
                         "SELECT COUNT(*) as total, "
                         "SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
                         "SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
                         "COALESCE(SUM(pnl),0) as total_pnl "
-                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL"
+                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL AND pnl != 0 "
+                        "AND (close_reason IS NULL OR close_reason NOT LIKE 'cleanup:%')"
                     ) or {}
                     # Today's (yesterday's) realized PnL — query the day that just ended
                     today_pnl_row = await self.db.fetchone(

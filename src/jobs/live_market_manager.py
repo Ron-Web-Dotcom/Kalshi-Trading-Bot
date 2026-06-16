@@ -94,14 +94,25 @@ async def _load_live_positions(db) -> List[Dict]:
         return []
 
 
-async def _close_position(db, ticker: str, reason: str) -> None:
-    """Mark a position closed in the DB."""
+async def _close_position(db, ticker: str, reason: str, slot: Optional[Dict] = None, exit_price: Optional[float] = None) -> None:
+    """Mark a position closed in the DB, writing final pnl if we have price data."""
     try:
-        await db.execute("""
-            UPDATE positions
-               SET status='closed', closed_at=?, close_reason=?
-             WHERE ticker=? AND status='open'
-        """, (_now_utc().isoformat(), reason[:200], ticker))
+        now = _now_utc().isoformat()
+        if slot is not None and exit_price is not None:
+            pnl, _, _ = _calc_pnl(slot, exit_price)
+            await db.execute("""
+                UPDATE positions
+                   SET status='closed', closed_at=?, close_reason=?,
+                       current_price=?, exit_price=?, pnl=?
+                 WHERE ticker=? AND status='open'
+            """, (now, reason[:200], exit_price, exit_price, pnl, ticker))
+        else:
+            # Fallback: close without overwriting existing pnl
+            await db.execute("""
+                UPDATE positions
+                   SET status='closed', closed_at=?, close_reason=?
+                 WHERE ticker=? AND status='open'
+            """, (now, reason[:200], ticker))
     except Exception as e:
         logger.warning("_close_position error %s: %s", ticker, e)
 
@@ -185,12 +196,12 @@ async def _check_and_exit(
         hl = _hours_left(close_time)
         if hl is not None and hl <= 0:
             logger.info("LIVE EXIT %s — market resolved (close_time passed)", ticker)
-            await _close_position(db, ticker, reason_override or "market_resolved")
+            await _close_position(db, ticker, reason_override or "market_resolved", slot=slot, exit_price=current)
             await _send_resolution_alert(discord, slot, final_price=current)
             return True
 
     if reason_override:
-        await _close_position(db, ticker, reason_override)
+        await _close_position(db, ticker, reason_override, slot=slot, exit_price=current)
         return True
 
     # b) Stop-loss check
@@ -206,7 +217,7 @@ async def _check_and_exit(
             "LIVE STOP-LOSS %s | entry=%.0f¢ current=%.0f¢ loss=%.1f%% ≥ %.0f%%",
             ticker, entry, current, loss_pct, STOP_LOSS_PCT,
         )
-        await _close_position(db, ticker, f"stop_loss:{loss_pct:.1f}%")
+        await _close_position(db, ticker, f"stop_loss:{loss_pct:.1f}%", slot=slot, exit_price=current)
         await _send_stopout_alert(discord, slot, current_price=current, loss_pct=loss_pct)
         return True
 
