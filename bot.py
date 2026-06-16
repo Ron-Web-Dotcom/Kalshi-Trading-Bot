@@ -1177,7 +1177,8 @@ class TradingBot:
                             "ORDER BY RANDOM() LIMIT 3",
                             _kal_excl_params,
                         )
-                        _kal_reg = [dict(r, platform="kalshi") for r in (_kal_rows or [])]
+                        _kal_reg = [dict(r, platform="kalshi") for r in (_kal_rows or [])
+                                    if not __import__('src.utils.junk_filter', fromlist=['is_junk']).is_junk(r['title'] or '')]
                         # If exclusion left nothing, reset and start fresh
                         if not _kal_reg:
                             _shown_reg_kal.clear()
@@ -1191,9 +1192,11 @@ class TradingBot:
                                 "AND title NOT LIKE '0x%' "
                                 "AND close_time > datetime('now', '+24 hours') "
                                 "AND close_time < datetime('now', '+7 days') "
-                                "ORDER BY RANDOM() LIMIT 3"
+                                "ORDER BY RANDOM() LIMIT 10"
                             )
-                            _kal_reg = [dict(r, platform="kalshi") for r in (_kal_rows2 or [])]
+                            from src.utils.junk_filter import is_junk as _ij
+                            _kal_reg = [dict(r, platform="kalshi") for r in (_kal_rows2 or [])
+                                        if not _ij(r['title'] or '')][:3]
                         _shown_reg_kal.update(r["ticker"] for r in _kal_reg)
                     except Exception:
                         pass
@@ -1219,7 +1222,9 @@ class TradingBot:
                             "ORDER BY RANDOM() LIMIT 3",
                             _poly_excl_params,
                         )
-                        _poly_reg = [dict(r) for r in (_poly_rows or [])]
+                        from src.utils.junk_filter import is_junk as _ij
+                        _poly_reg = [dict(r) for r in (_poly_rows or [])
+                                     if not _ij(r['title'] or '')]
                         if not _poly_reg:
                             _shown_reg_poly.clear()
                             _poly_rows2 = await self.db.fetchall(
@@ -1232,9 +1237,10 @@ class TradingBot:
                                 "AND title NOT LIKE '0x%' "
                                 "AND close_time > datetime('now', '+24 hours') "
                                 "AND close_time < datetime('now', '+7 days') "
-                                "ORDER BY RANDOM() LIMIT 3"
+                                "ORDER BY RANDOM() LIMIT 10"
                             )
-                            _poly_reg = [dict(r) for r in (_poly_rows2 or [])]
+                            _poly_reg = [dict(r) for r in (_poly_rows2 or [])
+                                         if not _ij(r['title'] or '')][:3]
                         _shown_reg_poly.update(r["ticker"] for r in _poly_reg)
                     except Exception:
                         pass
