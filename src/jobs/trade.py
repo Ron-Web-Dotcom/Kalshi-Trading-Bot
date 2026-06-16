@@ -371,6 +371,9 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     if m.get("yes_ask", 0) > 1
                     and m.get("ticker") not in open_tickers
                     and (m.get("title") or "").strip().lower() not in open_titles
+                    and m.get("close_time")                # must have a close time
+                    and _closes_within(m, 168)             # 7 days max
+                    and not is_junk(m.get("title", ""))
                 ]
                 logger.info("Polymarket: %d markets stored, %d tradeable",
                             len(raw_poly), len(poly_markets))
