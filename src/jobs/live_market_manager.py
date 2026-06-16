@@ -649,8 +649,12 @@ async def run_live_manager_cycle(db, discord, settings, kalshi_trader, poly_trad
             "before gta", "gta vi", "playboi carti", "jesus christ",
             "hit $150k", "hit $1m", "airdrop by", "megaeth",
             "by december 31", "before 2027", "before 2028",
+            "world cup winner", "fifa world cup winner", "world cup champion", "lift the 2026",
             "france win the 2026", "spain win the 2026", "brazil win the 2026",
-            "ivan cepeda", "colombian presiden", "keir starmer", "kuala lumpur",
+            "germany win the 2026", "argentina win the 2026", "england win the 2026",
+            "portugal win the 2026", "usa win the 2026", "mexico win the 2026",
+            "morocco win the 2026",
+            "ivan cepeda", "abelardo de la", "colombian presiden", "keir starmer", "kuala lumpur",
         ]
         for p in db_positions:
             t = p["ticker"]

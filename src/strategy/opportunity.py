@@ -198,17 +198,20 @@ class OpportunityHunter:
             # World Cup/tournament WINNER markets — individual games are fine
             "win the 2026 fifa world cup", "win the 2026 world cup",
             "win the world cup", "fifa world cup winner", "world cup champion",
+            "world cup winner", "lift the 2026",
+            "spain win the 2026", "france win the 2026", "brazil win the 2026",
+            "germany win the 2026", "argentina win the 2026", "england win the 2026",
+            "portugal win the 2026", "usa win the 2026", "mexico win the 2026",
+            "morocco win the 2026",
             "nba finals winner", "nba champion", "stanley cup winner",
             "win the nba championship", "win the stanley cup",
             # Price targets far out
             "hit $150k", "hit $1m", "by december 31", "by end of 2026",
-            "airdrop by",
+            "airdrop by", "megaeth",
             # Political futures in other countries / long-term
-            "ivan cepeda", "colombian presiden", "colombian president",
+            "ivan cepeda", "abelardo de la", "colombian presiden", "colombian president",
             "keir starmer", "labour par",
             "democratic union of hungarians",
-            # Long-term crypto/tech novelty
-            "megaeth", "before agi",
             # Weather markets in distant cities (no edge)
             "kuala lumpur",
         ]
@@ -365,14 +368,22 @@ class OpportunityHunter:
             "before 2027", "before 2028", "before 2029", "before 2030",
             "oprah", "lebron", "taylor swift president", "elon musk president",
             "win the 2028", "win the 2032", "2028 us presidential",
+            # ALL World Cup tournament WINNER markets (any country)
             "win the 2026 fifa world cup", "win the 2026 world cup",
             "win the world cup", "fifa world cup winner", "world cup champion",
+            "world cup winner", "lift the 2026",
+            # Catch individual country WC winner markets: "Will Spain/France/Brazil... win"
+            "spain win the 2026", "france win the 2026", "brazil win the 2026",
+            "germany win the 2026", "argentina win the 2026", "england win the 2026",
+            "portugal win the 2026", "usa win the 2026", "mexico win the 2026",
+            "morocco win the 2026",
+            # Other tournament winners
             "nba finals winner", "nba champion", "stanley cup winner",
             "win the nba championship", "win the stanley cup",
             "hit $150k", "hit $1m", "by december 31", "by end of 2026",
             "airdrop by", "megaeth",
-            "ivan cepeda", "colombian presiden", "keir starmer", "kuala lumpur",
-            "uzbekistan win",
+            "ivan cepeda", "abelardo de la", "colombian presiden", "keir starmer",
+            "kuala lumpur", "uzbekistan win",
         ]
 
         # Pre-score — give live markets an extra boost for being time-sensitive

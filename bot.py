@@ -805,7 +805,11 @@ class TradingBot:
                         # World Cup WINNER (tournament outcome) — not individual games
                         "win the 2026 fifa world cup", "win the 2026 world cup",
                         "win the world cup", "fifa world cup winner",
-                        "world cup champion", "lift the world cup",
+                        "world cup champion", "world cup winner", "lift the 2026",
+                        "spain win the 2026", "france win the 2026", "brazil win the 2026",
+                        "germany win the 2026", "argentina win the 2026", "england win the 2026",
+                        "portugal win the 2026", "usa win the 2026", "mexico win the 2026",
+                        "morocco win the 2026",
                         # Other long-term tournament winners
                         "nba finals winner", "nba champion", "stanley cup winner",
                         "win the nba championship", "win the stanley cup",
