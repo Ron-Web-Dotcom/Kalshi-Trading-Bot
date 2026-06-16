@@ -366,15 +366,19 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     except Exception:
                         pass
 
-                poly_markets = [
+                _poly_base = [
                     m for m in raw_poly
                     if m.get("yes_ask", 0) > 1
                     and m.get("ticker") not in open_tickers
                     and (m.get("title") or "").strip().lower() not in open_titles
-                    and m.get("close_time")                # must have a close time
-                    and _closes_within(m, 168)             # 7 days max
+                    and m.get("close_time")
                     and not is_junk(m.get("title", ""))
                 ]
+                # Split into short-term (≤24h) and long-term (≤7 days) — mirrors Kalshi pools
+                poly_short = [m for m in _poly_base if _closes_within(m, 24)]
+                poly_long  = [m for m in _poly_base if _closes_within(m, 168)
+                              and m.get("ticker") not in {x.get("ticker") for x in poly_short}]
+                poly_markets = poly_short + poly_long   # short-term first (higher priority)
                 logger.info("Polymarket: %d markets stored, %d tradeable",
                             len(raw_poly), len(poly_markets))
             except Exception as pe:
