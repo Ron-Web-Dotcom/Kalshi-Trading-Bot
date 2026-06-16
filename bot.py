@@ -805,8 +805,14 @@ class TradingBot:
                         title = pick.get("title") or pick.get("ticker") or ""
                         if _is_junk(title):
                             return True
-                        price = float(pick.get("price_cents") or pick.get("yes_ask") or
-                                      pick.get("entry_price") or pick.get("current_price") or 0)
+                        # Use current market price first — catches resolved/collapsed markets
+                        # entry_price is what we paid, not what the market is worth now
+                        price = float(
+                            pick.get("yes_ask") or
+                            pick.get("price_cents") or
+                            pick.get("current_price") or
+                            pick.get("entry_price") or 0
+                        )
                         if price < 5 or price > 95:
                             return True
                         return False
