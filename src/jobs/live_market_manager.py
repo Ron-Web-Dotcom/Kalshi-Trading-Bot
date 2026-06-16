@@ -254,15 +254,19 @@ async def _fill_slots(
     except Exception as e:
         logger.warning("Kalshi live fetch FAILED: %s", e)
 
-    # Polymarket: markets closing within 24h
+    # Polymarket: use actual in-play game API first, fall back to time-window
     try:
-        live_p = await poly_client.get_live_markets(max_hours=POLY_LIVE_WINDOW_HOURS, max_markets=60)
+        live_p = await poly_client.get_live_now_markets(max_markets=100)
         if not live_p:
-            logger.warning("Polymarket live fetch: 0 markets in %.1fh window", POLY_LIVE_WINDOW_HOURS)
-        else:
-            logger.info("Polymarket live fetch: %d markets (window=%.1fh)", len(live_p), POLY_LIVE_WINDOW_HOURS)
+            logger.info("Polymarket live-now returned 0 — falling back to %dh window", POLY_LIVE_WINDOW_HOURS)
+            live_p = await poly_client.get_live_markets(max_hours=POLY_LIVE_WINDOW_HOURS, max_markets=60)
+        logger.info("Polymarket live: %d markets", len(live_p))
     except Exception as e:
         logger.warning("Polymarket live fetch FAILED: %s", e)
+        try:
+            live_p = await poly_client.get_live_markets(max_hours=POLY_LIVE_WINDOW_HOURS, max_markets=60)
+        except Exception:
+            pass
 
     # Exclude already-open tickers
     open_tickers = set(_live_slots.keys())
