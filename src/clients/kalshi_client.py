@@ -188,8 +188,9 @@ class KalshiClient:
         # Non-sports: debates, hearings, Fed decisions, weather, press conferences
         #             closing within 3h (these events are time-bounded and short)
         live_series_prefixes = [
-            "SOCCER", "NFL", "NBA", "MLB", "NHL", "UFC", "TENNIS",
-            "F1", "GOLF", "RUGBY", "CRICKET", "BOXING",
+            "SOCCER", "FIFA", "NFL", "NBA", "MLB", "NHL", "UFC", "TENNIS",
+            "F1", "GOLF", "RUGBY", "CRICKET", "BOXING", "WNBA", "MLS",
+            "NCAAF", "NCAAB", "PGA", "NASCAR", "ESPORTS",
             "DEBATE", "HEARING", "FED", "ELECTION", "VOTE",
         ]
         _sport_title_kws = [

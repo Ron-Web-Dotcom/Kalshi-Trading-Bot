@@ -233,16 +233,21 @@ async def _fill_slots(
 
     from src.strategy.opportunity import OpportunityHunter
 
-    # Fetch live markets from BOTH platforms — all categories, any close time ≤ LIVE_WINDOW_HOURS
+    # Fetch live markets from BOTH platforms
     live_k, live_p = [], []
-    # Kalshi bulk API and DB don't carry price data for short-duration live markets
-    # Skip Kalshi in live manager — handled by the regular trade loop instead
-    live_k = []
-    logger.info("Kalshi live: skipped in live manager (no orderbook prices in bulk API)")
+
+    # Kalshi: use confirmed live-now API (sports in progress, World Cup, debates, etc.)
+    try:
+        live_k = await kalshi.get_live_now_markets(max_markets=100)
+        logger.info("Kalshi live now: %d confirmed in-play markets", len(live_k))
+    except Exception as e:
+        logger.warning("Kalshi live fetch FAILED: %s", e)
+
+    # Polymarket: markets closing within 24h
     try:
         live_p = await poly_client.get_live_markets(max_hours=POLY_LIVE_WINDOW_HOURS, max_markets=60)
         if not live_p:
-            logger.warning("Polymarket live fetch: 0 markets in %.1fh window — check endDate fields in API response", POLY_LIVE_WINDOW_HOURS)
+            logger.warning("Polymarket live fetch: 0 markets in %.1fh window", POLY_LIVE_WINDOW_HOURS)
         else:
             logger.info("Polymarket live fetch: %d markets (window=%.1fh)", len(live_p), POLY_LIVE_WINDOW_HOURS)
     except Exception as e:
