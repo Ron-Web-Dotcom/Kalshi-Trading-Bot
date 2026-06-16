@@ -846,7 +846,9 @@ class TradingBot:
                                 "alerted_at": now_utc, "result_sent": False,
                             }
 
-                    # 2. BUY evaluations — must close within 24h AND be live right now
+                    # 2. BUY evaluations — alert on:
+                    #    a) Any high-confidence pick (≥75%) closing within 24h (today's events)
+                    #    b) Any pick closing within 24h that passes is_event_live_now (in-game)
                     for ev in list(_da.all_evaluations):
                         if ev.get("action") != "BUY":
                             continue
@@ -861,13 +863,16 @@ class TradingBot:
                             continue
                         if not _is_live_event(ev):
                             continue
-                        title = ev.get("title", "") or ""
-                        try:
-                            live_now = await is_event_live_now(title)
-                        except Exception:
-                            live_now = False
-                        if not live_now:
-                            continue
+                        # High-confidence picks (≥75%) alert immediately — no live API check needed
+                        # Lower confidence still requires external confirmation
+                        if conf < 75:
+                            title = ev.get("title", "") or ""
+                            try:
+                                live_now = await is_event_live_now(title)
+                            except Exception:
+                                live_now = False
+                            if not live_now:
+                                continue
                         band = int(conf / 10) * 10
                         if _alerted.get(ticker, {}).get("band") != band:
                             pick = {**ev, "is_live": True}
