@@ -226,8 +226,10 @@ class OpportunityHunter:
         )
 
         # ── Stage 2: AI evaluation on top N only ─────────────────────────────
-        best_score  = 0.0
-        best_result = None
+        best_kalshi_score  = 0.0
+        best_poly_score    = 0.0
+        best_kalshi_result = None
+        best_poly_result   = None
 
         for pre_score, market, poly_comp in top_candidates:
             ticker = market.get("ticker", "")
@@ -261,19 +263,48 @@ class OpportunityHunter:
                 decision.get("reasoning", "")[:60],
             )
 
-            if score > best_score:
-                best_score = score
-                side        = decision.get("side", "yes")
-                price_cents = yes_ask if side == "yes" else no_ask
-                best_result = {
-                    "market":      market,
-                    "decision":    decision,
-                    "poly_comp":   poly_comp,
-                    "score":       score,
-                    "side":        side,
-                    "price_cents": price_cents,
-                    "platform":    market.get("platform", "kalshi"),
-                }
+            platform = market.get("platform", "kalshi")
+            result = {
+                "market":      market,
+                "decision":    decision,
+                "poly_comp":   poly_comp,
+                "score":       score,
+                "side":        decision.get("side", "yes"),
+                "price_cents": yes_ask if decision.get("side", "yes") == "yes" else no_ask,
+                "platform":    platform,
+            }
+            if platform == "polymarket":
+                if score > best_poly_score:
+                    best_poly_score  = score
+                    best_poly_result = result
+            else:
+                if score > best_kalshi_score:
+                    best_kalshi_score  = score
+                    best_kalshi_result = result
+
+        # Return the best result — prefer Kalshi if both qualify (redress imbalance)
+        # so Kalshi gets its fair share of trades alongside Polymarket.
+        kalshi_ok = best_kalshi_result and best_kalshi_score >= min_score
+        poly_ok   = best_poly_result   and best_poly_score   >= min_score
+
+        if kalshi_ok and poly_ok:
+            # Both platforms have a valid signal — pick Kalshi to balance portfolio,
+            # unless Polymarket's score is significantly higher (>50% better)
+            if best_poly_score > best_kalshi_score * 1.5:
+                best_result = best_poly_result
+                best_score  = best_poly_score
+            else:
+                best_result = best_kalshi_result
+                best_score  = best_kalshi_score
+        elif kalshi_ok:
+            best_result = best_kalshi_result
+            best_score  = best_kalshi_score
+        elif poly_ok:
+            best_result = best_poly_result
+            best_score  = best_poly_score
+        else:
+            best_result = None
+            best_score  = 0.0
 
         if best_result and best_score >= min_score:
             m = best_result["market"]
