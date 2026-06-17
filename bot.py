@@ -945,8 +945,12 @@ class TradingBot:
                         if ticker not in seen_watch:
                             pick = {**slot, "is_live": True, "ticker": ticker}
                             if not _should_skip_alert(pick):
-                                seen_watch.add(ticker)
-                                all_watching.append(pick)
+                                conf = float(slot.get("confidence", 0) or 0)
+                                band = int(conf / 10) * 10
+                                # Only include if not already alerted at this confidence band
+                                if _alerted.get(ticker, {}).get("band") != band:
+                                    seen_watch.add(ticker)
+                                    all_watching.append(pick)
 
                     if all_watching:
                         all_watching.sort(
