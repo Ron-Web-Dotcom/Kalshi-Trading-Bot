@@ -1293,7 +1293,7 @@ class TradingBot:
                             "AND LOWER(title) NOT LIKE '%world cup winner%' "
                             "AND LOWER(title) NOT LIKE '%nba champion%' "
                             "AND LOWER(title) NOT LIKE '%stanley cup winner%' "
-                            "AND close_time > datetime('now') "
+                            "AND close_time > datetime('now', '+24 hours') "
                             "AND close_time < datetime('now', '+7 days') "
                             + _kal_excl +
                             "ORDER BY volume DESC, RANDOM() LIMIT 10",

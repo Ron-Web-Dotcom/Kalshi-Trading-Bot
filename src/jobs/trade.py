@@ -708,16 +708,19 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
                 # live_trades_alert is owned by live_market_manager — skip here to avoid duplicate alerts
 
-        # Long-term pool: markets closing within 7 days (upcoming events worth watching)
+        # Long-term pool: markets closing TOMORROW through 7 days (regular scan)
+        # Explicitly excludes today — today's markets belong to live scan only.
+        # When game day arrives, the market naturally moves to short_term/live.
         long_term = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
             and not _already_open(m)
             and 2 < _tradeable_price(m) < 98
-            and m.get("volume", 0) >= max(min_vol, 10)   # at least $10 volume = real market
+            and m.get("volume", 0) >= max(min_vol, 10)
             and (m.get("title") or "")
-            and m.get("close_time")                       # must have a close time set
-            and _closes_within_week(m)                    # 7 days = 168 hours
+            and m.get("close_time")
+            and _closes_within_week(m)
+            and not _closes_today(m)                      # exclude today → live scan owns today
             and not is_junk(m.get("title", ""))
         ]
 
