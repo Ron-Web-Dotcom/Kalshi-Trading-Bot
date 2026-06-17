@@ -1018,4 +1018,112 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         results.skipped,
         results.total_capital_used,
     )
+
+    # ── Real-time position resolution (runs every 45s) ────────────────────
+    # As soon as close_time passes → result recorded → Discord fires → deleted
+    try:
+        await _resolve_expired_positions(db, live_mode)
+    except Exception as _re:
+        logger.debug("Real-time resolve error: %s", _re)
+
     return results
+
+
+async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
+    """
+    Check all open positions whose market close_time has passed.
+    Record result in trade_logs, fire Discord W/L alert, hard-delete from positions.
+    Runs every 45s trade cycle — real-time resolution, no waiting for heartbeat.
+    """
+    expired = await db.fetchall(
+        "SELECT p.ticker, p.title, p.platform, p.side, p.contracts, "
+        "       p.avg_price, p.opened_at, "
+        "       m.yes_ask, m.close_time "
+        "FROM positions p "
+        "LEFT JOIN markets m ON m.ticker = p.ticker "
+        "WHERE p.status='open' "
+        "AND m.close_time IS NOT NULL AND m.close_time != '' "
+        "AND datetime(replace(m.close_time,'T',' ')) < datetime('now')"
+    )
+
+    if not expired:
+        return
+
+    try:
+        from src.alerts.discord import DiscordAlerter
+        discord = DiscordAlerter()
+        mode = "PAPER" if not live_mode else "LIVE"
+    except Exception:
+        discord = None
+        mode = "PAPER"
+
+    resolved_wins   = []
+    resolved_losses = []
+
+    for pos in expired:
+        ticker    = pos.get("ticker", "")
+        title     = pos.get("title") or ticker
+        platform  = pos.get("platform", "kalshi")
+        side      = pos.get("side", "yes")
+        contracts = int(pos.get("contracts") or 1)
+        entry     = float(pos.get("avg_price") or 0)
+        exit_p    = float(pos.get("yes_ask") or 0)
+
+        pnl_cents = (exit_p - entry) * contracts
+        pnl_usd   = pnl_cents / 100.0
+        result    = "WIN" if pnl_cents > 0 else "LOSS"
+
+        # Stamp into trade_logs (permanent W/L record)
+        try:
+            await db.execute(
+                "UPDATE trade_logs SET pnl=?, resolved_at=datetime('now'), "
+                "result=?, exit_price=? "
+                "WHERE ticker=? AND (pnl IS NULL OR pnl=0) "
+                "ORDER BY executed_at DESC LIMIT 1",
+                (pnl_usd, result, exit_p, ticker)
+            )
+        except Exception as _tl:
+            logger.debug("trade_logs update %s: %s", ticker, _tl)
+
+        # Hard delete — off the board
+        await db.execute(
+            "DELETE FROM positions WHERE ticker=? AND status='open'",
+            (ticker,)
+        )
+
+        logger.info(
+            "RESOLVED [%s] %s → %s | entry=%.0f¢ exit=%.0f¢ pnl=$%.2f",
+            platform.upper(), ticker, result, entry, exit_p, pnl_usd
+        )
+
+        item = {
+            "title":     title[:50],
+            "ticker":    ticker,
+            "side":      side.upper(),
+            "platform":  platform,
+            "entry":     entry,
+            "exit":      exit_p,
+            "pnl":       pnl_usd,
+            "contracts": contracts,
+        }
+        if result == "WIN":
+            resolved_wins.append(item)
+        else:
+            resolved_losses.append(item)
+
+    # Immediate Discord W/L notification
+    if discord and (resolved_wins or resolved_losses):
+        try:
+            await discord.live_results_summary(
+                wins=resolved_wins,
+                losses=resolved_losses,
+                exits=[],
+                mode=mode,
+            )
+        except Exception as _da:
+            logger.debug("Discord result alert: %s", _da)
+
+    logger.info(
+        "Real-time resolve: %dW / %dL — cleared from board, W/L updated",
+        len(resolved_wins), len(resolved_losses)
+    )

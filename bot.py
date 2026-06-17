@@ -269,48 +269,10 @@ class TradingBot:
                     poly_count    = (poly_row or {}).get("n", 0)
                     markets_total = kalshi_count + poly_count
 
-                    # Auto-resolve any open position whose market close_time has passed.
-                    # Record final result in trade_logs, then HARD DELETE from positions
-                    # (positions table = active bets only; resolved bets go off the board).
-                    try:
-                        expired_pos = await self.db.fetchall(
-                            "SELECT p.ticker, p.platform, p.avg_price, p.contracts, p.title, "
-                            "       m.yes_ask, m.close_time "
-                            "FROM positions p "
-                            "LEFT JOIN markets m ON m.ticker = p.ticker "
-                            "WHERE p.status='open' "
-                            "AND m.close_time IS NOT NULL AND m.close_time != '' "
-                            "AND m.close_time < datetime('now')"
-                        )
-                        for ep in (expired_pos or []):
-                            ep_ticker    = ep.get("ticker", "")
-                            ep_contracts = int(ep.get("contracts") or 1)
-                            ep_entry     = float(ep.get("avg_price") or 0)
-                            ep_exit      = float(ep.get("yes_ask") or 0)
-                            # cents PnL per contract × contracts = total cents PnL
-                            ep_pnl_cents = (ep_exit - ep_entry) * ep_contracts
-                            ep_result    = "WIN" if ep_pnl_cents > 0 else "LOSS"
-                            # Stamp final result into trade_logs (permanent record)
-                            await self.db.execute(
-                                "UPDATE trade_logs SET pnl=?, resolved_at=datetime('now'), "
-                                "result=?, exit_price=? "
-                                "WHERE ticker=? AND (pnl IS NULL OR pnl=0) "
-                                "ORDER BY executed_at DESC LIMIT 1",
-                                (ep_pnl_cents / 100.0, ep_result, ep_exit, ep_ticker)
-                            )
-                            # Hard delete — position is off the board
-                            await self.db.execute(
-                                "DELETE FROM positions WHERE ticker=? AND status='open'",
-                                (ep_ticker,)
-                            )
-                            logger.info(
-                                "RESOLVED %s → %s (entry=%.0f¢ exit=%.0f¢ pnl=%.1f¢)",
-                                ep_ticker, ep_result, ep_entry, ep_exit, ep_pnl_cents
-                            )
-                    except Exception as _ae:
-                        logger.debug("Auto-resolve error: %s", _ae)
+                    # Resolution is now handled in real-time by the trade loop (every 45s).
+                    # No duplicate logic needed here.
 
-                    # Open positions — only within 7 days (stale ones auto-closed above)
+                    # Open positions — only active (trade loop deletes resolved ones)
                     open_rows = await self.db.fetchall(
                         "SELECT platform, COUNT(*) as n FROM positions p "
                         "LEFT JOIN markets m ON m.ticker = p.ticker "
