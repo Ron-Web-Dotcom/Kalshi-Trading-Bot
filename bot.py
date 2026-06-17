@@ -109,6 +109,20 @@ class TradingBot:
         except Exception as e:
             logger.warning("Junk purge error (non-fatal): %s", e)
 
+        # Migrate trade_logs: add resolved_at + result columns if not present
+        try:
+            await self.db.execute("ALTER TABLE trade_logs ADD COLUMN resolved_at TEXT")
+        except Exception:
+            pass  # already exists
+        try:
+            await self.db.execute("ALTER TABLE trade_logs ADD COLUMN result TEXT")
+        except Exception:
+            pass  # already exists
+        try:
+            await self.db.execute("ALTER TABLE trade_logs ADD COLUMN exit_price REAL")
+        except Exception:
+            pass
+
         # Discord startup alert
         try:
             from src.alerts.discord import DiscordAlerter
@@ -248,11 +262,12 @@ class TradingBot:
                     poly_count    = (poly_row or {}).get("n", 0)
                     markets_total = kalshi_count + poly_count
 
-                    # Auto-close any open position whose market close_time has passed
-                    # (live manager handles live slots; this catches regular positions)
+                    # Auto-resolve any open position whose market close_time has passed.
+                    # Record final result in trade_logs, then HARD DELETE from positions
+                    # (positions table = active bets only; resolved bets go off the board).
                     try:
                         expired_pos = await self.db.fetchall(
-                            "SELECT p.ticker, p.platform, p.entry_price, "
+                            "SELECT p.ticker, p.platform, p.avg_price, p.contracts, p.title, "
                             "       m.yes_ask, m.close_time "
                             "FROM positions p "
                             "LEFT JOIN markets m ON m.ticker = p.ticker "
@@ -261,20 +276,32 @@ class TradingBot:
                             "AND m.close_time < datetime('now')"
                         )
                         for ep in (expired_pos or []):
-                            ep_ticker = ep.get("ticker", "")
-                            ep_price  = float(ep.get("yes_ask") or ep.get("entry_price") or 0)
-                            ep_entry  = float(ep.get("entry_price") or 0)
-                            ep_pnl    = ep_price - ep_entry  # cents PnL per contract
+                            ep_ticker    = ep.get("ticker", "")
+                            ep_contracts = int(ep.get("contracts") or 1)
+                            ep_entry     = float(ep.get("avg_price") or 0)
+                            ep_exit      = float(ep.get("yes_ask") or 0)
+                            # cents PnL per contract × contracts = total cents PnL
+                            ep_pnl_cents = (ep_exit - ep_entry) * ep_contracts
+                            ep_result    = "WIN" if ep_pnl_cents > 0 else "LOSS"
+                            # Stamp final result into trade_logs (permanent record)
                             await self.db.execute(
-                                "UPDATE positions SET status='closed', closed_at=datetime('now'), "
-                                "close_reason='market_resolved', exit_price=?, pnl=? "
-                                "WHERE ticker=? AND status='open'",
-                                (ep_price, ep_pnl, ep_ticker)
+                                "UPDATE trade_logs SET pnl=?, resolved_at=datetime('now'), "
+                                "result=?, exit_price=? "
+                                "WHERE ticker=? AND (pnl IS NULL OR pnl=0) "
+                                "ORDER BY executed_at DESC LIMIT 1",
+                                (ep_pnl_cents / 100.0, ep_result, ep_exit, ep_ticker)
                             )
-                            if ep_ticker:
-                                logger.info("Auto-closed expired position: %s (pnl=%.1f¢)", ep_ticker, ep_pnl)
+                            # Hard delete — position is off the board
+                            await self.db.execute(
+                                "DELETE FROM positions WHERE ticker=? AND status='open'",
+                                (ep_ticker,)
+                            )
+                            logger.info(
+                                "RESOLVED %s → %s (entry=%.0f¢ exit=%.0f¢ pnl=%.1f¢)",
+                                ep_ticker, ep_result, ep_entry, ep_exit, ep_pnl_cents
+                            )
                     except Exception as _ae:
-                        logger.debug("Auto-expire error: %s", _ae)
+                        logger.debug("Auto-resolve error: %s", _ae)
 
                     # Open positions — only within 7 days (stale ones auto-closed above)
                     open_rows = await self.db.fetchall(
@@ -321,8 +348,7 @@ class TradingBot:
                         "  SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
                         "  SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
                         "  COALESCE(SUM(pnl), 0) as total_pnl "
-                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL AND pnl != 0 "
-                        "AND (close_reason IS NULL OR close_reason NOT LIKE 'cleanup:%')"
+                        "FROM trade_logs WHERE resolved_at IS NOT NULL AND pnl IS NOT NULL AND pnl != 0"
                     )
                     wl = wl_row or {}
                     total_closed = wl.get("total", 0) or 0
@@ -564,8 +590,7 @@ class TradingBot:
                         "SELECT COUNT(*) as total, "
                         "SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
                         "SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses "
-                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL AND pnl != 0 "
-                        "AND (close_reason IS NULL OR close_reason NOT LIKE 'cleanup:%')"
+                        "FROM trade_logs WHERE resolved_at IS NOT NULL AND pnl IS NOT NULL AND pnl != 0"
                     ) or {}
                     total_closed = wl.get("total", 0) or 0
                     total_wins   = wl.get("wins",  0) or 0
@@ -626,14 +651,13 @@ class TradingBot:
                     paper        = not settings.trading.live_trading_enabled
                     _paper_flag  = 0 if settings.trading.live_trading_enabled else 1
 
-                    # Win/loss record (all-time — no date filter, exclude cleanup and zero-pnl ghosts)
+                    # Win/loss record (all-time — trade_logs is permanent; positions are deleted on resolve)
                     wl = await self.db.fetchone(
                         "SELECT COUNT(*) as total, "
                         "SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
                         "SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
                         "COALESCE(SUM(pnl),0) as total_pnl "
-                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL AND pnl != 0 "
-                        "AND (close_reason IS NULL OR close_reason NOT LIKE 'cleanup:%')"
+                        "FROM trade_logs WHERE resolved_at IS NOT NULL AND pnl IS NOT NULL AND pnl != 0"
                     ) or {}
                     # Today's (yesterday's) realized PnL — query the day that just ended
                     today_pnl_row = await self.db.fetchone(
@@ -1066,7 +1090,7 @@ class TradingBot:
                         unreal    = await self.db.fetchone("SELECT COALESCE(SUM(pnl),0) as p FROM positions WHERE status='open'") or {}
                         wl        = await self.db.fetchone(
                             "SELECT COUNT(*) as total, SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins, "
-                            "COALESCE(SUM(pnl),0) as pnl FROM positions WHERE status='closed' AND pnl IS NOT NULL"
+                            "COALESCE(SUM(pnl),0) as pnl FROM trade_logs WHERE resolved_at IS NOT NULL AND pnl IS NOT NULL"
                         ) or {}
                         total     = wl.get("total") or 0
                         wins      = wl.get("wins") or 0
