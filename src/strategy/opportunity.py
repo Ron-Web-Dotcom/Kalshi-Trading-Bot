@@ -194,7 +194,7 @@ class OpportunityHunter:
             yes_ask = float(market.get("yes_ask") or market.get("last_price") or 0)
             title   = market.get("title", "")
 
-            if yes_ask <= 1 or yes_ask >= 99:
+            if yes_ask < 8 or yes_ask > 92:   # 8¢ floor — blocks near-resolved markets
                 continue
             if not title or len(title) < 10 or title.startswith("0x"):
                 continue

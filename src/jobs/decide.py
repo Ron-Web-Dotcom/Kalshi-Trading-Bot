@@ -129,7 +129,12 @@ def _merge(ai_result: Optional[Dict], rule_result: Optional[Dict]) -> Optional[D
             )
         return winner
 
-    # Only one engine says BUY
+    # Only one engine says BUY — AI HOLD vetoes rule engine if AI is confident
+    if rule_buy and not ai_buy and ai_result is not None:
+        ai_conf = ai_result.get("confidence", 0)
+        # If AI explicitly evaluated and is ≥50% confident in HOLD, trust it
+        if ai_conf >= 50:
+            return None  # AI vetos rule engine
     return ai_result if ai_buy else rule_result
 
 
