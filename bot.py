@@ -354,7 +354,7 @@ class TradingBot:
                         "AND (status='open' OR status='') "
                         "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
                         "AND close_time > datetime('now') "
-                        "AND close_time < date('now', '+7 days', 'localtime') "
+                        "AND close_time < datetime('now', '+7 days') "
                         + _junk_sql + _exclude_sql +
                         "ORDER BY close_time ASC LIMIT 6",
                         _exclude_params,
@@ -367,7 +367,7 @@ class TradingBot:
                             "AND (status='open' OR status='') "
                             "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
                             "AND close_time > datetime('now') "
-                            "AND close_time < date('now', '+7 days', 'localtime') "
+                            "AND close_time < datetime('now', '+7 days') "
                             + _junk_sql +
                             "ORDER BY RANDOM() LIMIT 6"
                         )
@@ -378,7 +378,7 @@ class TradingBot:
                         "AND (status='open' OR status='') "
                         "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
                         "AND close_time > datetime('now') "
-                        "AND close_time < date('now', '+7 days', 'localtime') "
+                        "AND close_time < datetime('now', '+7 days') "
                         + _junk_sql + _exclude_sql +
                         "ORDER BY close_time ASC LIMIT 6",
                         _exclude_params,
@@ -391,7 +391,7 @@ class TradingBot:
                             "AND (status='open' OR status='') "
                             "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
                             "AND close_time > datetime('now') "
-                            "AND close_time < date('now', '+7 days', 'localtime') "
+                            "AND close_time < datetime('now', '+7 days') "
                             + _junk_sql +
                             "ORDER BY RANDOM() LIMIT 6"
                         )
@@ -1207,15 +1207,15 @@ class TradingBot:
                             "AND LOWER(title) NOT LIKE '%world cup winner%' "
                             "AND LOWER(title) NOT LIKE '%nba champion%' "
                             "AND LOWER(title) NOT LIKE '%stanley cup winner%' "
-                            "AND close_time > datetime('now', '+24 hours') "
-                            "AND close_time < date('now', '+7 days', 'localtime') "
+                            "AND close_time > datetime('now') "
+                            "AND close_time < datetime('now', '+7 days') "
                             + _kal_excl +
-                            "ORDER BY RANDOM() LIMIT 3",
+                            "ORDER BY volume DESC, RANDOM() LIMIT 10",
                             _kal_excl_params,
                         )
                         from src.utils.junk_filter import is_junk as _ij_kal
                         _kal_reg = [dict(r, platform="kalshi") for r in (_kal_rows or [])
-                                    if not _ij_kal(r['title'] or '')]
+                                    if not _ij_kal(r['title'] or '')][:3]
                         # If exclusion left nothing, reset and start fresh
                         if not _kal_reg:
                             _shown_reg_kal.clear()
@@ -1235,9 +1235,9 @@ class TradingBot:
                                 "AND LOWER(title) NOT LIKE '%world cup winner%' "
                                 "AND LOWER(title) NOT LIKE '%nba champion%' "
                                 "AND LOWER(title) NOT LIKE '%stanley cup winner%' "
-                                "AND close_time > datetime('now', '+24 hours') "
-                                "AND close_time < date('now', '+7 days', 'localtime') "
-                                "ORDER BY RANDOM() LIMIT 10"
+                                "AND close_time > datetime('now') "
+                                "AND close_time < datetime('now', '+7 days') "
+                                "ORDER BY volume DESC, RANDOM() LIMIT 10"
                             )
                             from src.utils.junk_filter import is_junk as _ij
                             _kal_reg = [dict(r, platform="kalshi") for r in (_kal_rows2 or [])
@@ -1272,15 +1272,15 @@ class TradingBot:
                             "AND title IS NOT NULL AND title != '' "
                             "AND title NOT LIKE '0x%' "
                             + _POLY_SQL_JUNK +
-                            "AND close_time > datetime('now', '+24 hours') "
-                            "AND close_time < date('now', '+7 days', 'localtime') "
+                            "AND close_time > datetime('now') "
+                            "AND close_time < datetime('now', '+7 days') "
                             + _poly_excl +
-                            "ORDER BY RANDOM() LIMIT 3",
+                            "ORDER BY volume DESC, RANDOM() LIMIT 10",
                             _poly_excl_params,
                         )
                         from src.utils.junk_filter import is_junk as _ij
                         _poly_reg = [dict(r) for r in (_poly_rows or [])
-                                     if not _ij(r['title'] or '')]
+                                     if not _ij(r['title'] or '')][:3]
                         if not _poly_reg:
                             _shown_reg_poly.clear()
                             _poly_rows2 = await self.db.fetchall(
@@ -1292,9 +1292,9 @@ class TradingBot:
                                 "AND title IS NOT NULL AND title != '' "
                                 "AND title NOT LIKE '0x%' "
                                 + _POLY_SQL_JUNK +
-                                "AND close_time > datetime('now', '+24 hours') "
-                                "AND close_time < date('now', '+7 days', 'localtime') "
-                                "ORDER BY RANDOM() LIMIT 10"
+                                "AND close_time > datetime('now') "
+                                "AND close_time < datetime('now', '+7 days') "
+                                "ORDER BY volume DESC, RANDOM() LIMIT 10"
                             )
                             _poly_reg = [dict(r) for r in (_poly_rows2 or [])
                                          if not _ij(r['title'] or '')][:3]
