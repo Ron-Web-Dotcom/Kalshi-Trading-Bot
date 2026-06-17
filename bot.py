@@ -1218,8 +1218,39 @@ class TradingBot:
                     except Exception:
                         pass
 
-                    # Run is_event_live_now() in parallel for all candidates
-                    # Skip check for markets already confirmed live by platform API
+                    # Build live candidates — three tiers of confirmation:
+                    #   1. _platform_live: Kalshi/Poly native API says it's live → trust it
+                    #   2. closes within 6h: Kalshi/Poly close_time IS the source of truth
+                    #      for event timing — no external API needed
+                    #   3. to_check: everything else → try is_event_live_now() as fallback
+                    from datetime import datetime as _dt2, timezone as _tz2, timedelta as _td2
+                    _now2 = _dt2.now(_tz2.utc)
+                    _6h   = _now2 + _td2(hours=6)
+
+                    _LIVE_KEYWORDS = {
+                        "vs", "v.", "match", "game", "score", "goals", "half",
+                        "quarter", "inning", "set", "round", "fight", "race",
+                        "temperature", "weather", "today", "tonight", "june",
+                        "july", "august", "o/u", "over", "under", "total",
+                        "corners", "shots", "points", "assists", "rebounds",
+                    }
+
+                    def _closes_within_6h(m) -> bool:
+                        ct = m.get("close_time", "") or ""
+                        if not ct:
+                            return False
+                        try:
+                            cd = _dt2.fromisoformat(ct.replace("Z", "+00:00"))
+                            if cd.tzinfo is None:
+                                cd = cd.replace(tzinfo=_tz2.utc)
+                            return _now2 < cd <= _6h
+                        except Exception:
+                            return False
+
+                    def _looks_like_live_event(title: str) -> bool:
+                        t = title.lower()
+                        return any(kw in t for kw in _LIVE_KEYWORDS)
+
                     live_candidates = []
                     to_check = []
                     for m in candidates:
@@ -1230,12 +1261,17 @@ class TradingBot:
                         if ticker in already_position:
                             continue
                         if m.get("_platform_live"):
-                            # Already confirmed live by Kalshi/Poly native API
+                            # Tier 1: Kalshi/Poly native live API confirmed
                             live_candidates.append(dict(m))
+                        elif _closes_within_6h(m) and _looks_like_live_event(title):
+                            # Tier 2: closes within 6h — platform close_time IS truth
+                            m2 = dict(m)
+                            m2["_platform_live"] = True
+                            live_candidates.append(m2)
                         else:
                             to_check.append(dict(m))
 
-                    # Parallel live check — cap at 20 candidates, batch of 10 to limit RAM
+                    # Tier 3: external API fallback for remaining candidates
                     if to_check:
                         try:
                             for _batch_start in range(0, min(len(to_check), 20), 10):
