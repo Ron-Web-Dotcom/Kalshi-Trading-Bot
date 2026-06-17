@@ -7,6 +7,39 @@ from typing import Dict, List, Optional, Tuple
 logger = logging.getLogger("trading.daily_stats")
 
 
+def _build_eval_entry(
+    ticker: str,
+    action: str,
+    side: str,
+    confidence: float,
+    net_ev,
+    true_prob,
+    reasoning: str,
+    title: str = "",
+    platform: str = "kalshi",
+    close_time: str = "",
+    yes_ask: float = 0.0,
+    evaluated_at: str = "",
+) -> dict:
+    """Single source of truth for evaluation entry shape. All fields always present."""
+    from datetime import datetime, timezone
+    return {
+        "ticker":      ticker,
+        "title":       title,
+        "action":      action,
+        "side":        side,
+        "confidence":  float(confidence or 0),
+        "net_ev":      net_ev,
+        "true_prob":   true_prob,
+        "reasoning":   reasoning or "",
+        "platform":    platform or "kalshi",
+        "close_time":  close_time or "",
+        "yes_ask":     float(yes_ask or 0),
+        "price_cents": float(yes_ask or 0),   # alias used by bot_alert_loop
+        "evaluated_at": evaluated_at or datetime.now(timezone.utc).isoformat(),
+    }
+
+
 class DailyStats:
     """
     Singleton in-memory tracker for daily trading metrics.
@@ -60,21 +93,11 @@ class DailyStats:
         yes_ask: float = 0.0,
     ) -> None:
         """Record every AI evaluation — BUY or HOLD — to find best pick of the day."""
-        entry = {
-            "ticker":     ticker,
-            "title":      title,
-            "action":     action,
-            "side":       side,
-            "confidence": confidence,
-            "net_ev":     net_ev,
-            "true_prob":  true_prob,
-            "reasoning":  reasoning,
-            "platform":   platform,
-            "close_time": close_time,
-            "yes_ask":    yes_ask,
-            "price_cents": yes_ask,   # alias used by bot_alert_loop
-            "evaluated_at": datetime.now(timezone.utc).isoformat(),
-        }
+        entry = _build_eval_entry(
+            ticker=ticker, action=action, side=side, confidence=confidence,
+            net_ev=net_ev, true_prob=true_prob, reasoning=reasoning,
+            title=title, platform=platform, close_time=close_time, yes_ask=yes_ask,
+        )
         self.all_evaluations.append(entry)
         # Keep top 20 by confidence
         self.all_evaluations.sort(key=lambda x: x["confidence"], reverse=True)

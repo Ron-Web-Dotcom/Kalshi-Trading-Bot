@@ -109,6 +109,13 @@ class TradingBot:
         except Exception as e:
             logger.warning("Junk purge error (non-fatal): %s", e)
 
+        # Run startup health check — validates all critical systems
+        try:
+            from src.utils.health_check import run_health_check
+            await run_health_check(self.db)
+        except Exception as e:
+            logger.warning("Health check error (non-fatal): %s", e)
+
         # Migrate trade_logs: add resolved_at + result columns if not present
         try:
             await self.db.execute("ALTER TABLE trade_logs ADD COLUMN resolved_at TEXT")
