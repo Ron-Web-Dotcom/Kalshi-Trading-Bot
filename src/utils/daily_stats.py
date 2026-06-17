@@ -57,6 +57,7 @@ class DailyStats:
         title: str = "",
         platform: str = "kalshi",
         close_time: str = "",
+        yes_ask: float = 0.0,
     ) -> None:
         """Record every AI evaluation — BUY or HOLD — to find best pick of the day."""
         entry = {
@@ -70,6 +71,8 @@ class DailyStats:
             "reasoning":  reasoning,
             "platform":   platform,
             "close_time": close_time,
+            "yes_ask":    yes_ask,
+            "price_cents": yes_ask,   # alias used by bot_alert_loop
             "evaluated_at": datetime.now(timezone.utc).isoformat(),
         }
         self.all_evaluations.append(entry)

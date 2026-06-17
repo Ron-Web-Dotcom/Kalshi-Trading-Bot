@@ -863,15 +863,21 @@ class TradingBot:
                         conf   = float(ev.get("confidence", 0) or 0)
                         price  = float(ev.get("price_cents") or ev.get("yes_ask") or 0)
                         ticker = ev.get("ticker", "")
-                        if not ticker or not (5 <= price <= 95):
+                        if not ticker:
+                            continue
+                        # Only filter on price if we actually have one
+                        if price > 0 and not (5 <= price <= 95):
                             continue
                         if _should_skip_alert(ev):
                             continue
                         if ticker in _ls:
                             continue
                         hl = _hours_left(ev)
-                        if hl <= 0:
+                        # hl == -1 means close_time unknown — don't skip, treat as ≤24h
+                        if hl != -1 and hl <= 0:
                             continue
+                        if hl == -1:
+                            hl = 12  # assume same-day if close_time missing
                         # Confidence threshold scales with how far out the event is
                         if hl <= 6:
                             min_c = MIN_CONF          # 65% — closing soon, any edge

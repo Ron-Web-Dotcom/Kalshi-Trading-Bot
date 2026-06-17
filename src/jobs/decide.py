@@ -281,6 +281,7 @@ async def make_decision_for_market(
             net_ev=net_ev, true_prob=true_p, reasoning=final.get("reasoning", ""),
             title=market.get("title", ""), platform=market.get("platform", "kalshi"),
             close_time=market.get("close_time", "") or market.get("expiration_time", ""),
+            yes_ask=float(market.get("yes_ask") or market.get("last_price") or 0),
         )
         daily_stats.record_signal(ticker, conf, net_ev, action)
     except Exception:
