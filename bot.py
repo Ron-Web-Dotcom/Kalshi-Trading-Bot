@@ -1220,22 +1220,31 @@ class TradingBot:
 
                     # Build live candidates — three tiers of confirmation:
                     #   1. _platform_live: Kalshi/Poly native API says it's live → trust it
-                    #   2. closes within 6h: Kalshi/Poly close_time IS the source of truth
-                    #      for event timing — no external API needed
-                    #   3. to_check: everything else → try is_event_live_now() as fallback
+                    #   2. closes TODAY (midnight-to-midnight ET): event starts + closes today
+                    #      Kalshi/Poly close_time IS the source of truth — no ESPN needed
+                    #   3. to_check: closes in 1-7 days → try is_event_live_now() fallback
                     from datetime import datetime as _dt2, timezone as _tz2, timedelta as _td2
                     _now2 = _dt2.now(_tz2.utc)
-                    _6h   = _now2 + _td2(hours=6)
+                    # Tonight's midnight ET in UTC
+                    try:
+                        from src.utils.eastern_time import now_et as _net2
+                        _et2 = _net2()
+                    except Exception:
+                        import pytz as _pyz2
+                        _et2 = _dt2.now(_pyz2.timezone("America/New_York"))
+                    _tonight_et  = _et2.replace(hour=23, minute=59, second=59, microsecond=0)
+                    _tonight_utc = _tonight_et.astimezone(_tz2.utc)
 
                     _LIVE_KEYWORDS = {
                         "vs", "v.", "match", "game", "score", "goals", "half",
                         "quarter", "inning", "set", "round", "fight", "race",
-                        "temperature", "weather", "today", "tonight", "june",
-                        "july", "august", "o/u", "over", "under", "total",
-                        "corners", "shots", "points", "assists", "rebounds",
+                        "temperature", "weather", "today", "tonight",
+                        "o/u", "over", "under", "total", "corners", "shots",
+                        "points", "assists", "rebounds", "winner", "result",
                     }
 
-                    def _closes_within_6h(m) -> bool:
+                    def _closes_today_live(m) -> bool:
+                        """True if market closes before tonight midnight ET = today's event."""
                         ct = m.get("close_time", "") or ""
                         if not ct:
                             return False
@@ -1243,7 +1252,7 @@ class TradingBot:
                             cd = _dt2.fromisoformat(ct.replace("Z", "+00:00"))
                             if cd.tzinfo is None:
                                 cd = cd.replace(tzinfo=_tz2.utc)
-                            return _now2 < cd <= _6h
+                            return _now2 < cd <= _tonight_utc
                         except Exception:
                             return False
 
@@ -1263,15 +1272,15 @@ class TradingBot:
                         if m.get("_platform_live"):
                             # Tier 1: Kalshi/Poly native live API confirmed
                             live_candidates.append(dict(m))
-                        elif _closes_within_6h(m) and _looks_like_live_event(title):
-                            # Tier 2: closes within 6h — platform close_time IS truth
+                        elif _closes_today_live(m) and _looks_like_live_event(title):
+                            # Tier 2: starts + closes today — platform is source of truth
                             m2 = dict(m)
                             m2["_platform_live"] = True
                             live_candidates.append(m2)
                         else:
                             to_check.append(dict(m))
 
-                    # Tier 3: external API fallback for remaining candidates
+                    # Tier 3: external API fallback for 1-7 day markets
                     if to_check:
                         try:
                             for _batch_start in range(0, min(len(to_check), 20), 10):
