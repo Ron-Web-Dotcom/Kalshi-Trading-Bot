@@ -248,10 +248,41 @@ class TradingBot:
                     poly_count    = (poly_row or {}).get("n", 0)
                     markets_total = kalshi_count + poly_count
 
-                    # Open positions — ALL platforms (Kalshi + Polymarket), live + regular
+                    # Auto-close any open position whose market close_time has passed
+                    # (live manager handles live slots; this catches regular positions)
+                    try:
+                        expired_pos = await self.db.fetchall(
+                            "SELECT p.ticker, p.platform, p.entry_price, "
+                            "       m.yes_ask, m.close_time "
+                            "FROM positions p "
+                            "LEFT JOIN markets m ON m.ticker = p.ticker "
+                            "WHERE p.status='open' "
+                            "AND m.close_time IS NOT NULL AND m.close_time != '' "
+                            "AND m.close_time < datetime('now')"
+                        )
+                        for ep in (expired_pos or []):
+                            ep_ticker = ep.get("ticker", "")
+                            ep_price  = float(ep.get("yes_ask") or ep.get("entry_price") or 0)
+                            ep_entry  = float(ep.get("entry_price") or 0)
+                            ep_pnl    = ep_price - ep_entry  # cents PnL per contract
+                            await self.db.execute(
+                                "UPDATE positions SET status='closed', closed_at=datetime('now'), "
+                                "close_reason='market_resolved', exit_price=?, pnl=? "
+                                "WHERE ticker=? AND status='open'",
+                                (ep_price, ep_pnl, ep_ticker)
+                            )
+                            if ep_ticker:
+                                logger.info("Auto-closed expired position: %s (pnl=%.1f¢)", ep_ticker, ep_pnl)
+                    except Exception as _ae:
+                        logger.debug("Auto-expire error: %s", _ae)
+
+                    # Open positions — only within 7 days (stale ones auto-closed above)
                     open_rows = await self.db.fetchall(
-                        "SELECT platform, COUNT(*) as n FROM positions "
-                        "WHERE status='open' GROUP BY platform"
+                        "SELECT platform, COUNT(*) as n FROM positions p "
+                        "LEFT JOIN markets m ON m.ticker = p.ticker "
+                        "WHERE p.status='open' "
+                        "AND (m.close_time IS NULL OR m.close_time > datetime('now')) "
+                        "GROUP BY p.platform"
                     )
                     open_n = sum((r.get("n") or 0) for r in (open_rows or []))
                     open_by_platform = {r.get("platform", "kalshi"): r.get("n", 0) for r in (open_rows or [])}
@@ -487,7 +518,11 @@ class TradingBot:
                         pnl_date = _et_sum.date().isoformat()
 
                     open_pos = await self.db.fetchall(
-                        "SELECT * FROM positions WHERE status='open' ORDER BY opened_at DESC"
+                        "SELECT p.* FROM positions p "
+                        "LEFT JOIN markets m ON m.ticker = p.ticker "
+                        "WHERE p.status='open' "
+                        "AND (m.close_time IS NULL OR m.close_time > datetime('now')) "
+                        "ORDER BY p.opened_at DESC"
                     )
                     open_pos = [dict(r) for r in (open_pos or [])]
 
@@ -497,10 +532,15 @@ class TradingBot:
                     )
                     new_pos = [dict(r) for r in (new_pos or [])]
 
-                    # Positions that SETTLED (closed) since last check-in
+                    # Positions that SETTLED (closed) since last check-in — TODAY only
+                    # Never carry yesterday's results into today's check-ins
                     closed_since = await self.db.fetchall(
-                        "SELECT * FROM positions WHERE status='closed' AND closed_at >= ? ORDER BY closed_at DESC",
-                        (last_summary_at,)
+                        "SELECT * FROM positions WHERE status='closed' "
+                        "AND closed_at >= ? AND closed_at >= ? "
+                        "AND pnl IS NOT NULL AND pnl != 0 "
+                        "AND (close_reason IS NULL OR close_reason NOT LIKE 'cleanup:%') "
+                        "ORDER BY closed_at DESC",
+                        (last_summary_at, pnl_date + "T00:00:00")
                     )
                     closed_since = [dict(r) for r in (closed_since or [])]
 
@@ -794,6 +834,8 @@ class TradingBot:
                     today = datetime.now(timezone.utc).date()
                     if today != _alerted_date:
                         _alerted.clear()
+                        _result_sent.clear()   # allow same-ticker alerts on a new day
+                        _last_sent_keys = frozenset()
                         _alerted_date = today
 
                     discord   = DiscordAlerter()
