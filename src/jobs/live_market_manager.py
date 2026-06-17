@@ -367,10 +367,14 @@ async def _fill_slots(
                 0.5 if confidence >= 70 else 0.25)
         size = round(max(min_size, min(scaler.current_size * mult, max_size)), 2)
 
-        # Profit gate
-        contracts_est  = size / (price / 100) if price > 0 else 0
-        exp_profit     = contracts_est * (net_ev / 100)
-        roi_pct        = (exp_profit / size * 100) if size else 0
+        # Profit gate — use EV if available, else estimate from confidence edge
+        contracts_est = size / (price / 100) if price > 0 else 0
+        if net_ev > 0:
+            exp_profit = contracts_est * (net_ev / 100)
+        else:
+            edge = max(0.0, confidence - 65) * 0.002
+            exp_profit = size * edge if edge > 0 else MIN_ABS_USD
+        roi_pct = (exp_profit / size * 100) if size else 0
         if exp_profit < MIN_ABS_USD or roi_pct < MIN_ROI_PCT:
             logger.info(
                 "LIVE FILL SKIP %s — profit gate: $%.2f (%.1f%% ROI)", ticker, exp_profit, roi_pct

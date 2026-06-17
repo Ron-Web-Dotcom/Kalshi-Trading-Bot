@@ -409,9 +409,9 @@ class OpportunityHunter:
                     mom["direction"].upper(), conf,
                 )
 
-            if action != "BUY" or conf < min_confidence or net_ev <= 0:
+            if action != "BUY" or conf < min_confidence:
                 logger.info(
-                    "  [LIVE-SKIP] %-36s action=%s conf=%d%% ev=%.1f¢ (need BUY+conf≥%d%%+ev>0)",
+                    "  [LIVE-SKIP] %-36s action=%s conf=%d%% ev=%.1f¢ (need BUY+conf≥%d%%)",
                     (market.get("title") or ticker)[:36], action, conf, net_ev, min_confidence,
                 )
                 self._mark_rejected(ticker, decision.get("reasoning", "")[:60])
