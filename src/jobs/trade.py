@@ -490,12 +490,26 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             "basketball", "baseball", "hockey", "tennis", "golf", "f1",
             "formula", "nascar", "super bowl", "world series", "stanley cup",
             "playoffs", "finals", "championship", "tournament", "match",
-            "game", "fight", "bout", "race", "open", "wimbledon",
-            # Live events
+            "game", "fight", "bout", "race", "open", "wimbledon", "vs",
+            "score", "goals", "o/u", "over", "under", "points", "assists",
+            "rebounds", "corners", "shots", "winner", "result",
+            # Politics / geopolitics
             "debate", "speech", "conference", "summit", "hearing", "trial",
-            "vote", "election", "inauguration", "press",
-            # Weather events that evolve in real-time
-            "hurricane", "tornado", "storm",
+            "vote", "election", "inauguration", "press", "ruling", "verdict",
+            "senate", "congress", "president", "trump", "iran", "russia",
+            "ukraine", "china", "taiwan", "ceasefire", "sanctions",
+            "announce", "decision", "report",
+            # Crypto / finance (same-day price/rate events)
+            "bitcoin", "btc", "ethereum", "eth", "solana", "sol", "crypto",
+            "price", "cpi", "inflation", "fed", "fomc", "interest rate",
+            "gdp", "jobs report", "nonfarm", "earnings", "revenue",
+            "s&p", "nasdaq", "dow", "launch",
+            # Entertainment (award shows, release-day events)
+            "oscar", "emmy", "grammy", "golden globe", "bafta",
+            "box office", "chart", "billboard", "album", "release",
+            # Weather / science
+            "hurricane", "tornado", "storm", "earthquake", "wildfire",
+            "temperature", "weather",
         }
 
         def _could_be_live(title: str) -> bool:

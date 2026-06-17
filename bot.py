@@ -1198,11 +1198,33 @@ class TradingBot:
                     _tonight_utc = _tonight_et.astimezone(_tz2.utc)
 
                     _LIVE_KEYWORDS = {
+                        # Sports
                         "vs", "v.", "match", "game", "score", "goals", "half",
                         "quarter", "inning", "set", "round", "fight", "race",
-                        "temperature", "weather", "today", "tonight",
                         "o/u", "over", "under", "total", "corners", "shots",
                         "points", "assists", "rebounds", "winner", "result",
+                        "nfl", "nba", "mlb", "nhl", "ufc", "mma", "soccer",
+                        "football", "basketball", "baseball", "hockey", "tennis",
+                        "golf", "f1", "formula", "nascar", "playoffs", "finals",
+                        "championship", "tournament", "bout",
+                        # Crypto / finance (resolve same day)
+                        "bitcoin", "btc", "ethereum", "eth", "solana", "sol",
+                        "crypto", "price", "cpi", "inflation", "fed", "fomc",
+                        "interest rate", "gdp", "jobs report", "nonfarm",
+                        "earnings", "revenue", "s&p", "nasdaq", "dow",
+                        # Politics / geopolitics (debates, votes, rulings)
+                        "elect", "vote", "ballot", "debate", "hearing", "ruling",
+                        "verdict", "inaugur", "senate", "congress", "president",
+                        "trump", "iran", "russia", "ukraine", "china", "taiwan",
+                        "ceasefire", "sanctions", "summit", "speech", "press",
+                        # Entertainment (awards, releases)
+                        "oscar", "emmy", "grammy", "golden globe", "bafta",
+                        "box office", "chart", "billboard", "album", "release",
+                        # Weather / science (real-time events)
+                        "hurricane", "tornado", "storm", "earthquake", "wildfire",
+                        "temperature", "weather", "today", "tonight",
+                        # Generic same-day
+                        "launch", "decision", "announce", "report", "open",
                     }
 
                     def _closes_today_live(m) -> bool:
