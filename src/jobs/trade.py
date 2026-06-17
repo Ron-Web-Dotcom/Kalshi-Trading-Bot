@@ -337,6 +337,71 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                             market_title=market.get("title", "") or market.get("question", ""),
                         )
 
+        # ── Date/time helpers — defined early, used by both poly fetch and pool filters ──
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        arb_tickers = {s["ticker"] for s in all_signals}
+        now_utc = _dt.now(_tz.utc)
+
+        try:
+            from src.utils.eastern_time import _now_et as _get_et
+            _et_now = _get_et()
+        except Exception:
+            import pytz as _pytz
+            _et_now = _dt.now(_pytz.timezone("America/New_York"))
+        _today_midnight_et   = _et_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        _tonight_midnight_et = _today_midnight_et + _td(days=1)
+        _week_end_et         = _today_midnight_et + _td(days=7)
+        _tonight_utc = _tonight_midnight_et.astimezone(_tz.utc)
+        _week_end_utc = _week_end_et.astimezone(_tz.utc)
+
+        def _closes_today(m):
+            """True if market closes before tonight's midnight ET (today only)."""
+            ct = m.get("close_time", "")
+            if not ct:
+                return False
+            try:
+                close_dt = _dt.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if close_dt.tzinfo is None:
+                    close_dt = close_dt.replace(tzinfo=_tz.utc)
+                return now_utc < close_dt <= _tonight_utc
+            except Exception:
+                return False
+
+        def _closes_within_week(m):
+            """True if market closes within 7 days from today's midnight."""
+            ct = m.get("close_time", "")
+            if not ct:
+                return False
+            try:
+                close_dt = _dt.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if close_dt.tzinfo is None:
+                    close_dt = close_dt.replace(tzinfo=_tz.utc)
+                return now_utc < close_dt <= _week_end_utc
+            except Exception:
+                return False
+
+        def _closes_within(m, hours):
+            ct = m.get("close_time", "")
+            if not ct:
+                return False
+            try:
+                close_dt = _dt.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if close_dt.tzinfo is None:
+                    close_dt = close_dt.replace(tzinfo=_tz.utc)
+                return 0 < (close_dt - now_utc).total_seconds() / 3600 <= hours
+            except Exception:
+                return False
+
+        def _tradeable_price(m):
+            ask = m.get("yes_ask", 0) or 0
+            return ask if ask > 0 else (m.get("last_price", 0) or 0)
+
+        def _already_open(m):
+            if m.get("ticker") in open_tickers:
+                return True
+            t = (m.get("title") or "").strip().lower()
+            return bool(t and t in open_titles)
+
         # ── 5. Fetch Polymarket candidates + store in DB (always — needed for position tracking) ──
         poly_markets = []
         if poly_enabled:
@@ -407,75 +472,6 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
         # ── 7. Best-opportunity hunt across BOTH platforms ────────────────────
         from src.strategy.opportunity import OpportunityHunter
-        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-
-        arb_tickers = {s["ticker"] for s in all_signals}
-        now_utc = _dt.now(_tz.utc)
-
-        # Today's midnight ET converted to UTC (ET = UTC-4 in EDT)
-        # Live scan: closes between NOW and tonight 11:59 PM ET (today only)
-        # Regular scan: closes between NOW and 7 days from today's midnight
-        try:
-            from src.utils.eastern_time import _now_et as _get_et
-            _et_now = _get_et()
-        except Exception:
-            import pytz as _pytz
-            _et_now = _dt.now(_pytz.timezone("America/New_York"))
-        _today_midnight_et   = _et_now.replace(hour=0, minute=0, second=0, microsecond=0)
-        _tonight_midnight_et = _today_midnight_et + _td(days=1)   # end of today
-        _week_end_et         = _today_midnight_et + _td(days=7)   # end of 7-day window
-        _tonight_utc = _tonight_midnight_et.astimezone(_tz.utc)
-        _week_end_utc = _week_end_et.astimezone(_tz.utc)
-
-        def _closes_today(m):
-            """True if market closes before tonight's midnight ET (today only)."""
-            ct = m.get("close_time", "")
-            if not ct:
-                return False
-            try:
-                close_dt = _dt.fromisoformat(str(ct).replace("Z", "+00:00"))
-                if close_dt.tzinfo is None:
-                    close_dt = close_dt.replace(tzinfo=_tz.utc)
-                return now_utc < close_dt <= _tonight_utc
-            except Exception:
-                return False
-
-        def _closes_within_week(m):
-            """True if market closes within 7 days from today's midnight."""
-            ct = m.get("close_time", "")
-            if not ct:
-                return False
-            try:
-                close_dt = _dt.fromisoformat(str(ct).replace("Z", "+00:00"))
-                if close_dt.tzinfo is None:
-                    close_dt = close_dt.replace(tzinfo=_tz.utc)
-                return now_utc < close_dt <= _week_end_utc
-            except Exception:
-                return False
-
-        def _closes_within(m, hours):
-            """Legacy helper — used by category scanner."""
-            ct = m.get("close_time", "")
-            if not ct:
-                return False
-            try:
-                close_dt = _dt.fromisoformat(str(ct).replace("Z", "+00:00"))
-                if close_dt.tzinfo is None:
-                    close_dt = close_dt.replace(tzinfo=_tz.utc)
-                return 0 < (close_dt - now_utc).total_seconds() / 3600 <= hours
-            except Exception:
-                return False
-
-        def _tradeable_price(m):
-            """Return the best available price for a market — ask first, last_price fallback."""
-            ask = m.get("yes_ask", 0) or 0
-            return ask if ask > 0 else (m.get("last_price", 0) or 0)
-
-        def _already_open(m):
-            if m.get("ticker") in open_tickers:
-                return True
-            t = (m.get("title") or "").strip().lower()
-            return bool(t and t in open_titles)
 
         # ── Live / in-play market pool (highest priority) ─────────────────────
         # A market is only LIVE if is_event_live_now() confirms an actual
