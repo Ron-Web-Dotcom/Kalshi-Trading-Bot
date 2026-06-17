@@ -1055,7 +1055,7 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
     expired = await db.fetchall(
         "SELECT p.ticker, p.title, p.platform, p.side, p.contracts, "
         "       p.avg_price, p.opened_at, "
-        "       m.yes_ask, m.close_time "
+        "       m.yes_ask, m.no_ask, m.close_time "
         "FROM positions p "
         "LEFT JOIN markets m ON m.ticker = p.ticker "
         "WHERE p.status='open' "
@@ -1084,7 +1084,8 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
         side      = pos.get("side", "yes")
         contracts = int(pos.get("contracts") or 1)
         entry     = float(pos.get("avg_price") or 0)
-        exit_p    = float(pos.get("yes_ask") or 0)
+        # Use the correct side's ask price — NO positions exit at no_ask, not yes_ask
+        exit_p    = float(pos.get("no_ask" if side == "no" else "yes_ask") or 0)
 
         pnl_cents = (exit_p - entry) * contracts
         pnl_usd   = pnl_cents / 100.0

@@ -1059,7 +1059,7 @@ class TradingBot:
                         unreal    = await self.db.fetchone("SELECT COALESCE(SUM(pnl),0) as p FROM positions WHERE status='open'") or {}
                         wl        = await self.db.fetchone(
                             "SELECT COUNT(*) as total, SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins, "
-                            "COALESCE(SUM(pnl),0) as pnl FROM trade_logs WHERE resolved_at IS NOT NULL AND pnl IS NOT NULL"
+                            "COALESCE(SUM(pnl),0) as pnl FROM trade_logs WHERE resolved_at IS NOT NULL AND pnl IS NOT NULL AND pnl != 0"
                         ) or {}
                         total     = wl.get("total") or 0
                         wins      = wl.get("wins") or 0
