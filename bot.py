@@ -100,6 +100,15 @@ class TradingBot:
         except Exception as e:
             logger.warning("Initial ingestion failed (will retry): %s", e)
 
+        # Purge any junk markets that slipped into DB before write-time filter was added
+        try:
+            from src.utils.junk_filter import purge_junk_from_db
+            purged = await purge_junk_from_db(self.db)
+            if purged:
+                logger.info("Startup cleanup: removed %d junk markets from DB", purged)
+        except Exception as e:
+            logger.warning("Junk purge error (non-fatal): %s", e)
+
         # Discord startup alert
         try:
             from src.alerts.discord import DiscordAlerter

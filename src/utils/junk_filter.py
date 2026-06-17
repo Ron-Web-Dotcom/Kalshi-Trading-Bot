@@ -49,3 +49,30 @@ def is_junk(title: str) -> bool:
     """Return True if the market title matches any known junk phrase."""
     t = (title or "").lower()
     return any(phrase in t for phrase in JUNK_PHRASES)
+
+
+async def purge_junk_from_db(db) -> int:
+    """
+    Delete all junk markets from the DB markets table.
+    Call once on startup to clear stale rows that pre-date the write-time filter.
+    Returns number of rows deleted.
+    """
+    try:
+        rows = await db.fetchall("SELECT ticker, title FROM markets WHERE title IS NOT NULL")
+        junk_tickers = [r["ticker"] for r in (rows or []) if is_junk(r["title"] or "")]
+        if not junk_tickers:
+            return 0
+        placeholders = ",".join("?" * len(junk_tickers))
+        await db.execute(
+            f"DELETE FROM markets WHERE ticker IN ({placeholders})",
+            tuple(junk_tickers),
+        )
+        import logging
+        logging.getLogger("trading.junk_filter").info(
+            "Purged %d junk markets from DB on startup", len(junk_tickers)
+        )
+        return len(junk_tickers)
+    except Exception as e:
+        import logging
+        logging.getLogger("trading.junk_filter").warning("purge_junk_from_db error: %s", e)
+        return 0
