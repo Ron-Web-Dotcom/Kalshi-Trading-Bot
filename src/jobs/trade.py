@@ -830,6 +830,28 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 "(open_positions=%d)",
                 len(kalshi_candidates), len(poly_markets), open_count,
             )
+        elif best:
+            # Enforce tiered confidence by time-to-close:
+            #   today (≤24h)  → 60% min  (rule engine trades ok, time-sensitive)
+            #   2–7 days      → 75% min  (need higher conviction for further-out markets)
+            _best_market = best.get("market", {})
+            _best_conf   = float(best.get("decision", {}).get("confidence", 0))
+            _best_ct     = _best_market.get("close_time", "")
+            _hours_out   = 999.0
+            try:
+                _close_dt = _dt.fromisoformat(str(_best_ct).replace("Z", "+00:00"))
+                if _close_dt.tzinfo is None:
+                    _close_dt = _close_dt.replace(tzinfo=_tz.utc)
+                _hours_out = (_close_dt - now_utc).total_seconds() / 3600
+            except Exception:
+                pass
+            _week_min_conf = 75.0
+            if _hours_out > 24 and _best_conf < _week_min_conf:
+                logger.info(
+                    "Best opportunity SKIPPED — %s closes in %.0fh but conf=%.0f%% < %.0f%% required for 7-day markets",
+                    _best_market.get("ticker", "?"), _hours_out, _best_conf, _week_min_conf,
+                )
+                best = None
 
         # Live markets get one extra trade slot per cycle — they're time-sensitive
         live_bonus = 1 if (best and best.get("market", {}).get("is_live")) else 0
