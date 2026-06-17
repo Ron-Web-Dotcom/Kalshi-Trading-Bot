@@ -377,8 +377,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     and not is_junk(m.get("title", ""))
                 ]
                 # Split into short-term (≤24h) and long-term (≤7 days) — mirrors Kalshi pools
-                poly_short = [m for m in _poly_base if _closes_within(m, 24)]
-                poly_long  = [m for m in _poly_base if _closes_within(m, 168)
+                poly_short = [m for m in _poly_base if _closes_today(m)]
+                poly_long  = [m for m in _poly_base if _closes_within_week(m)
                               and m.get("ticker") not in {x.get("ticker") for x in poly_short}]
                 poly_markets = poly_short + poly_long   # short-term first (higher priority)
                 logger.info("Polymarket: %d markets stored, %d tradeable",
@@ -412,7 +412,49 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         arb_tickers = {s["ticker"] for s in all_signals}
         now_utc = _dt.now(_tz.utc)
 
+        # Today's midnight ET converted to UTC (ET = UTC-4 in EDT)
+        # Live scan: closes between NOW and tonight 11:59 PM ET (today only)
+        # Regular scan: closes between NOW and 7 days from today's midnight
+        try:
+            from src.utils.eastern_time import _now_et as _get_et
+            _et_now = _get_et()
+        except Exception:
+            import pytz as _pytz
+            _et_now = _dt.now(_pytz.timezone("America/New_York"))
+        _today_midnight_et   = _et_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        _tonight_midnight_et = _today_midnight_et + _td(days=1)   # end of today
+        _week_end_et         = _today_midnight_et + _td(days=7)   # end of 7-day window
+        _tonight_utc = _tonight_midnight_et.astimezone(_tz.utc)
+        _week_end_utc = _week_end_et.astimezone(_tz.utc)
+
+        def _closes_today(m):
+            """True if market closes before tonight's midnight ET (today only)."""
+            ct = m.get("close_time", "")
+            if not ct:
+                return False
+            try:
+                close_dt = _dt.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if close_dt.tzinfo is None:
+                    close_dt = close_dt.replace(tzinfo=_tz.utc)
+                return now_utc < close_dt <= _tonight_utc
+            except Exception:
+                return False
+
+        def _closes_within_week(m):
+            """True if market closes within 7 days from today's midnight."""
+            ct = m.get("close_time", "")
+            if not ct:
+                return False
+            try:
+                close_dt = _dt.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if close_dt.tzinfo is None:
+                    close_dt = close_dt.replace(tzinfo=_tz.utc)
+                return now_utc < close_dt <= _week_end_utc
+            except Exception:
+                return False
+
         def _closes_within(m, hours):
+            """Legacy helper — used by category scanner."""
             ct = m.get("close_time", "")
             if not ct:
                 return False
@@ -679,7 +721,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             and m.get("volume", 0) >= max(min_vol, 10)   # at least $10 volume = real market
             and (m.get("title") or "")
             and m.get("close_time")                       # must have a close time set
-            and _closes_within(m, 168)                    # 7 days = 168 hours
+            and _closes_within_week(m)                    # 7 days = 168 hours
             and not is_junk(m.get("title", ""))
         ]
 
@@ -691,7 +733,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             and 2 < _tradeable_price(m) < 98
             and m.get("ticker") not in {x.get("ticker") for x in long_term}
             and m.get("close_time")                       # must have a close time set
-            and _closes_within(m, 24)
+            and _closes_today(m)
             and (m.get("title") or "")
             and not is_junk(m.get("title", ""))
         ]
@@ -715,7 +757,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 and not _already_open(m)
                 and 2 < _tradeable_price(m) < 98
                 and m.get("close_time")
-                and _closes_within(m, 168)   # 7 days
+                and _closes_within_week(m)   # 7 days
                 and not is_junk(m.get("title", ""))
             ]
             cat_poly = [
@@ -724,7 +766,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 and not _already_open(m)
                 and m.get("yes_ask", 0) > 1
                 and m.get("close_time")
-                and _closes_within(m, 168)   # 7 days
+                and _closes_within_week(m)   # 7 days
                 and not is_junk(m.get("title", ""))
             ]
             # Merge category-scanned markets in, deduplicating by ticker

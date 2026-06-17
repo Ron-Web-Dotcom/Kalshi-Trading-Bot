@@ -345,7 +345,7 @@ class TradingBot:
                         "AND (status='open' OR status='') "
                         "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
                         "AND close_time > datetime('now') "
-                        "AND close_time < datetime('now', '+7 days') "
+                        "AND close_time < date('now', '+7 days', 'localtime') "
                         + _junk_sql + _exclude_sql +
                         "ORDER BY close_time ASC LIMIT 6",
                         _exclude_params,
@@ -358,7 +358,7 @@ class TradingBot:
                             "AND (status='open' OR status='') "
                             "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
                             "AND close_time > datetime('now') "
-                            "AND close_time < datetime('now', '+7 days') "
+                            "AND close_time < date('now', '+7 days', 'localtime') "
                             + _junk_sql +
                             "ORDER BY RANDOM() LIMIT 6"
                         )
@@ -369,7 +369,7 @@ class TradingBot:
                         "AND (status='open' OR status='') "
                         "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
                         "AND close_time > datetime('now') "
-                        "AND close_time < datetime('now', '+7 days') "
+                        "AND close_time < date('now', '+7 days', 'localtime') "
                         + _junk_sql + _exclude_sql +
                         "ORDER BY close_time ASC LIMIT 6",
                         _exclude_params,
@@ -382,7 +382,7 @@ class TradingBot:
                             "AND (status='open' OR status='') "
                             "AND title IS NOT NULL AND title != '' AND title NOT LIKE '0x%' "
                             "AND close_time > datetime('now') "
-                            "AND close_time < datetime('now', '+7 days') "
+                            "AND close_time < date('now', '+7 days', 'localtime') "
                             + _junk_sql +
                             "ORDER BY RANDOM() LIMIT 6"
                         )
@@ -1199,7 +1199,7 @@ class TradingBot:
                             "AND LOWER(title) NOT LIKE '%nba champion%' "
                             "AND LOWER(title) NOT LIKE '%stanley cup winner%' "
                             "AND close_time > datetime('now', '+24 hours') "
-                            "AND close_time < datetime('now', '+7 days') "
+                            "AND close_time < date('now', '+7 days', 'localtime') "
                             + _kal_excl +
                             "ORDER BY RANDOM() LIMIT 3",
                             _kal_excl_params,
@@ -1227,7 +1227,7 @@ class TradingBot:
                                 "AND LOWER(title) NOT LIKE '%nba champion%' "
                                 "AND LOWER(title) NOT LIKE '%stanley cup winner%' "
                                 "AND close_time > datetime('now', '+24 hours') "
-                                "AND close_time < datetime('now', '+7 days') "
+                                "AND close_time < date('now', '+7 days', 'localtime') "
                                 "ORDER BY RANDOM() LIMIT 10"
                             )
                             from src.utils.junk_filter import is_junk as _ij
@@ -1264,7 +1264,7 @@ class TradingBot:
                             "AND title NOT LIKE '0x%' "
                             + _POLY_SQL_JUNK +
                             "AND close_time > datetime('now', '+24 hours') "
-                            "AND close_time < datetime('now', '+7 days') "
+                            "AND close_time < date('now', '+7 days', 'localtime') "
                             + _poly_excl +
                             "ORDER BY RANDOM() LIMIT 3",
                             _poly_excl_params,
@@ -1284,7 +1284,7 @@ class TradingBot:
                                 "AND title NOT LIKE '0x%' "
                                 + _POLY_SQL_JUNK +
                                 "AND close_time > datetime('now', '+24 hours') "
-                                "AND close_time < datetime('now', '+7 days') "
+                                "AND close_time < date('now', '+7 days', 'localtime') "
                                 "ORDER BY RANDOM() LIMIT 10"
                             )
                             _poly_reg = [dict(r) for r in (_poly_rows2 or [])

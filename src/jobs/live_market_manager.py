@@ -276,7 +276,28 @@ async def _fill_slots(
     except Exception:
         pass
 
-    def _kalshi_price(m: Dict) -> float:
+    # Live scan = TODAY only (midnight to midnight ET)
+    try:
+        import pytz as _pytz
+        _et = _pytz.timezone("America/New_York")
+        _et_now = datetime.now(_et)
+        _tonight_et = _et_now.replace(hour=23, minute=59, second=59, microsecond=0)
+        _tonight_utc = _tonight_et.astimezone(timezone.utc)
+    except Exception:
+        _tonight_utc = datetime.now(timezone.utc).replace(hour=23, minute=59, second=59)
+
+    def _closes_today(m: Dict) -> bool:
+        ct = m.get("close_time") or ""
+        if not ct:
+            return False
+        try:
+            cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+            if cd.tzinfo is None:
+                cd = cd.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            return now < cd <= _tonight_utc
+        except Exception:
+            return False
         """Best available price for a Kalshi market — yes_ask with last_price fallback."""
         p = float(m.get("yes_ask") or 0)
         if not p:
@@ -292,14 +313,14 @@ async def _fill_slots(
         m for m in live_k
         if m.get("ticker") not in open_tickers
         and 8 < _kalshi_price(m) < 92               # min 8¢ — no near-resolved markets
-        and m.get("close_time")                      # must have a close time
+        and _closes_today(m)                         # TODAY only (midnight to midnight ET)
         and not is_junk(m.get("title", ""))
     ]
     live_p = [
         m for m in live_p
         if m.get("ticker") not in open_tickers
         and m.get("yes_ask", 0) > 8                 # min 8¢ — no near-resolved markets
-        and m.get("close_time")                      # must have a close time
+        and _closes_today(m)                         # TODAY only (midnight to midnight ET)
         and not is_junk(m.get("title", ""))
     ]
 
