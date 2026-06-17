@@ -877,11 +877,14 @@ class TradingBot:
                         pick = {**slot, "is_live": True, "ticker": ticker}
                         if _should_skip_alert(pick):
                             continue
-                        band = int(conf / 10) * 10
-                        if _alerted.get(ticker, {}).get("band") != band:
+                        prev = _alerted.get(ticker, {})
+                        prev_price = float(prev.get("pick", {}).get("price_cents") or prev.get("pick", {}).get("yes_ask") or 0)
+                        # Re-alert only if price moved ≥5¢ since last alert
+                        price_moved = abs(price - prev_price) >= 5
+                        if ticker not in _alerted or price_moved:
                             new_picks.append(pick)
                             _alerted[ticker] = {
-                                "band": band, "pick": pick,
+                                "band": int(conf / 10) * 10, "pick": pick,
                                 "alerted_at": now_utc, "result_sent": False,
                             }
 
@@ -924,12 +927,16 @@ class TradingBot:
                             min_c = 85                # 85% — further out
                         if conf < min_c:
                             continue
-                        band = int(conf / 10) * 10
-                        if _alerted.get(ticker, {}).get("band") != band:
+                        # Re-alert only if not seen today OR price moved ≥5¢
+                        prev = _alerted.get(ticker, {})
+                        prev_price = float(prev.get("pick", {}).get("price_cents") or prev.get("pick", {}).get("yes_ask") or 0)
+                        cur_price  = float(ev.get("price_cents") or ev.get("yes_ask") or 0)
+                        price_moved = cur_price > 0 and prev_price > 0 and abs(cur_price - prev_price) >= 5
+                        if ticker not in _alerted or price_moved:
                             pick = {**ev, "is_live": hl <= 24}
                             new_picks.append(pick)
                             _alerted[ticker] = {
-                                "band": band, "pick": pick,
+                                "band": int(conf / 10) * 10, "pick": pick,
                                 "alerted_at": now_utc, "result_sent": False,
                             }
 
