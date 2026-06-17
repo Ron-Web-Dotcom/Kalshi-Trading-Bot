@@ -13,6 +13,12 @@ from urllib.parse import urlencode
 
 import httpx
 
+# Global rate limiter shared across ALL KalshiClient instances
+# Kalshi allows ~3 req/s sustained — use a semaphore to serialize across tasks
+_KALSHI_GLOBAL_LOCK = asyncio.Lock()
+_KALSHI_MIN_INTERVAL = 0.4   # 2.5 req/s — safely under Kalshi's limit
+_kalshi_last_request = 0.0
+
 logger = logging.getLogger("trading.kalshi_client")
 
 
@@ -85,10 +91,12 @@ class KalshiClient:
         return headers
 
     async def _rate_limit(self):
-        elapsed = time.monotonic() - self._last_request_time
-        if elapsed < self._min_interval:
-            await asyncio.sleep(self._min_interval - elapsed)
-        self._last_request_time = time.monotonic()
+        global _kalshi_last_request
+        async with _KALSHI_GLOBAL_LOCK:
+            elapsed = time.monotonic() - _kalshi_last_request
+            if elapsed < _KALSHI_MIN_INTERVAL:
+                await asyncio.sleep(_KALSHI_MIN_INTERVAL - elapsed)
+            _kalshi_last_request = time.monotonic()
 
     async def _request(self, method: str, path: str, params: Optional[Dict] = None,
                        body: Optional[Dict] = None, retries: int = 3) -> Any:
@@ -106,7 +114,7 @@ class KalshiClient:
                     headers=headers
                 )
                 if resp.status_code == 429:
-                    wait = 2 ** attempt
+                    wait = 5 * (2 ** attempt)  # 5s, 10s, 20s
                     logger.warning(f"Rate limited, waiting {wait}s")
                     await asyncio.sleep(wait)
                     continue
