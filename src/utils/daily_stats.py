@@ -98,6 +98,8 @@ class DailyStats:
             net_ev=net_ev, true_prob=true_prob, reasoning=reasoning,
             title=title, platform=platform, close_time=close_time, yes_ask=yes_ask,
         )
+        # Replace existing entry for same ticker (keep freshest evaluation)
+        self.all_evaluations = [e for e in self.all_evaluations if e["ticker"] != ticker]
         self.all_evaluations.append(entry)
         # Keep top 20 by confidence
         self.all_evaluations.sort(key=lambda x: x["confidence"], reverse=True)

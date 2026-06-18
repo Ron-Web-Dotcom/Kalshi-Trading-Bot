@@ -246,12 +246,18 @@ class TradingBot:
             # Fire at 3, 9, 15, 21 ET — halfway between the daytime_summary slots (0, 6, 12, 18)
             _HB_HOURS = {3, 9, 15, 21}
             _et_now = _now_et()
-            _upcoming = [
-                _et_now.replace(hour=h, minute=0, second=0, microsecond=0)
+            # If we just missed a slot by ≤10 min (e.g. restart at 9:03 PM), fire immediately
+            _just_missed = any(
+                0 < (_et_now - _et_now.replace(hour=h, minute=0, second=0, microsecond=0)).total_seconds() <= 600
                 for h in _HB_HOURS
-            ]
-            _upcoming = [t if t > _et_now else t + _hb_td(days=1) for t in _upcoming]
-            await asyncio.sleep((min(_upcoming) - _et_now).total_seconds())
+            )
+            if not _just_missed:
+                _upcoming = [
+                    _et_now.replace(hour=h, minute=0, second=0, microsecond=0)
+                    for h in _HB_HOURS
+                ]
+                _upcoming = [t if t > _et_now else t + _hb_td(days=1) for t in _upcoming]
+                await asyncio.sleep((min(_upcoming) - _et_now).total_seconds())
             while not self._shutdown.is_set():
                 try:
                     discord = DiscordAlerter()
