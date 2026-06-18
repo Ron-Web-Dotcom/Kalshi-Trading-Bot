@@ -1060,7 +1060,7 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
         "LEFT JOIN markets m ON m.ticker = p.ticker "
         "WHERE p.status='open' "
         "AND m.close_time IS NOT NULL AND m.close_time != '' "
-        "AND datetime(replace(m.close_time,'T',' ')) < datetime('now')"
+        "AND datetime(substr(replace(m.close_time,'T',' '),1,19)) < datetime('now')"
     )
 
     if not expired:
