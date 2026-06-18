@@ -488,20 +488,33 @@ class TradingBot:
 
             last_summary_at = datetime.now(timezone.utc).isoformat()
 
+            _SUMMARY_HOURS = {0: "Midnight", 6: "Morning", 12: "Afternoon", 18: "Evening"}
+            _first_run = True
             while not self._shutdown.is_set():
                 et_now = now_et()
-                # Target hours in Eastern time
-                targets_et = [
-                    et_now.replace(hour=0,  minute=0, second=0, microsecond=0),
-                    et_now.replace(hour=6,  minute=0, second=0, microsecond=0),
-                    et_now.replace(hour=12, minute=0, second=0, microsecond=0),
-                    et_now.replace(hour=18, minute=0, second=0, microsecond=0),
-                ]
-                upcoming_et = [t if t > et_now else t + timedelta(days=1) for t in targets_et]
-                next_et     = min(upcoming_et)
-                period      = {0: "Midnight", 6: "Morning", 12: "Afternoon", 18: "Evening"}[next_et.hour]
-                secs_until  = (next_et - et_now).total_seconds()
-                await asyncio.sleep(secs_until)
+                # If first run and we're within 10 min past a scheduled slot, fire immediately
+                if _first_run:
+                    _first_run = False
+                    _just_missed_h = next(
+                        (h for h in _SUMMARY_HOURS
+                         if 0 < (et_now - et_now.replace(hour=h, minute=0, second=0, microsecond=0)).total_seconds() <= 600),
+                        None
+                    )
+                    if _just_missed_h is not None:
+                        period = _SUMMARY_HOURS[_just_missed_h]
+                        # fall through immediately to send
+                    else:
+                        targets_et  = [et_now.replace(hour=h, minute=0, second=0, microsecond=0) for h in _SUMMARY_HOURS]
+                        upcoming_et = [t if t > et_now else t + timedelta(days=1) for t in targets_et]
+                        next_et     = min(upcoming_et)
+                        period      = _SUMMARY_HOURS[next_et.hour]
+                        await asyncio.sleep((next_et - et_now).total_seconds())
+                else:
+                    targets_et  = [et_now.replace(hour=h, minute=0, second=0, microsecond=0) for h in _SUMMARY_HOURS]
+                    upcoming_et = [t if t > et_now else t + timedelta(days=1) for t in targets_et]
+                    next_et     = min(upcoming_et)
+                    period      = _SUMMARY_HOURS[next_et.hour]
+                    await asyncio.sleep((next_et - et_now).total_seconds())
                 if self._shutdown.is_set():
                     break
 
