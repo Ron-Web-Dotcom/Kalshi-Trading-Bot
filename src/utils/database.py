@@ -153,6 +153,7 @@ class DatabaseManager:
                     "ALTER TABLE positions  ADD COLUMN title TEXT DEFAULT ''",
                     "ALTER TABLE positions  ADD COLUMN size_usd REAL DEFAULT 0",
                     "ALTER TABLE positions  ADD COLUMN last_alerted_price REAL",
+                    "ALTER TABLE positions  ADD COLUMN close_time TEXT DEFAULT ''",
                     "ALTER TABLE markets    ADD COLUMN platform TEXT DEFAULT 'kalshi'",
                 ]:
                     try:
