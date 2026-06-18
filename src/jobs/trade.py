@@ -1092,8 +1092,9 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
             try:
                 from src.clients.kalshi_client import KalshiClient
                 _kc = KalshiClient()
-                _mkt = await _kc.get_market(ticker)
+                _resp = await _kc.get_market(ticker)
                 await _kc.close()
+                _mkt = _resp.get("market", _resp) if isinstance(_resp, dict) else {}
                 if _mkt:
                     _yes = float(_mkt.get("yes_ask") or _mkt.get("last_price") or 0)
                     _no  = float(_mkt.get("no_ask") or 0)
