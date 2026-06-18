@@ -690,6 +690,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         signal_source="live_scan",
                         net_ev=live_net_ev,
                         market_title=m.get("title", ""),
+                        close_time=m.get("close_time", "") or m.get("expiration_time", ""),
                         **({"poly_token_id": m.get("_yes_token") if live_side == "yes" else m.get("_no_token")}
                            if live_platform == "polymarket" else {}),
                     )
@@ -982,6 +983,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         net_ev=net_ev,
                         true_prob=decision.get("true_prob"),
                         market_title=market.get("title", ""),
+                        close_time=market.get("close_time", "") or market.get("expiration_time", ""),
                         **({"poly_token_id": market.get("_yes_token") if side == "yes" else market.get("_no_token")}
                            if platform == "polymarket" else {}),
                     )
@@ -1052,15 +1054,22 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
     Record result in trade_logs, fire Discord W/L alert, hard-delete from positions.
     Runs every 45s trade cycle — real-time resolution, no waiting for heartbeat.
     """
+    # Add close_time column to positions if missing (migration)
+    try:
+        await db.execute("ALTER TABLE positions ADD COLUMN close_time TEXT DEFAULT ''")
+    except Exception:
+        pass
+
     expired = await db.fetchall(
         "SELECT p.ticker, p.title, p.platform, p.side, p.contracts, "
         "       p.avg_price, p.opened_at, "
-        "       m.yes_ask, m.no_ask, m.close_time "
+        "       m.yes_ask, m.no_ask, "
+        "       COALESCE(NULLIF(m.close_time,''), NULLIF(p.close_time,'')) AS close_time "
         "FROM positions p "
         "LEFT JOIN markets m ON m.ticker = p.ticker "
         "WHERE p.status='open' "
-        "AND m.close_time IS NOT NULL AND m.close_time != '' "
-        "AND datetime(substr(replace(m.close_time,'T',' '),1,19)) < datetime('now')"
+        "AND COALESCE(NULLIF(m.close_time,''), NULLIF(p.close_time,'')) IS NOT NULL "
+        "AND datetime(substr(replace(COALESCE(NULLIF(m.close_time,''), NULLIF(p.close_time,'')),'T',' '),1,19)) < datetime('now')"
     )
 
     if not expired:

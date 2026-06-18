@@ -33,6 +33,7 @@ class PaperTrader:
                       net_ev: Optional[float] = None,
                       true_prob: Optional[float] = None,
                       market_title: str = "",
+                      close_time: str = "",
                       ) -> Optional[Dict]:
         """Simulate a trade. Returns trade record dict or None if rejected."""
 
@@ -104,12 +105,13 @@ class PaperTrader:
 
             await self.db.execute("""
                 INSERT INTO positions (ticker, side, contracts, avg_price, current_price,
-                                       pnl, status, opened_at, platform, title, size_usd)
-                VALUES (?,?,?,?,?,0,'open',?,?,?,?)
+                                       pnl, status, opened_at, platform, title, size_usd, close_time)
+                VALUES (?,?,?,?,?,0,'open',?,?,?,?,?)
             """, (ticker, side, contracts, price_cents, price_cents, now,
                   "kalshi",
                   (market_title or "")[:200],
-                  round(total_cost, 2)))
+                  round(total_cost, 2),
+                  close_time or ""))
 
             await self.db.insert("paper_signals", {
                 "ticker":        ticker,

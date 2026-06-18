@@ -48,6 +48,7 @@ class PolyPaperTrader:
         true_prob:    Optional[float] = None,
         market_title: str = "",
         poly_token_id: Optional[str] = None,
+        close_time: str = "",
     ) -> Optional[Dict]:
         """
         Simulate a Polymarket trade. Returns trade record or None if rejected.
@@ -151,10 +152,10 @@ class PolyPaperTrader:
             await self.db.execute("""
                 INSERT INTO positions
                   (ticker, side, contracts, avg_price, current_price, pnl,
-                   status, platform, poly_token_id, opened_at, title, size_usd)
-                VALUES (?,?,?,?,?,0,'open','polymarket',?,?,?,?)
+                   status, platform, poly_token_id, opened_at, title, size_usd, close_time)
+                VALUES (?,?,?,?,?,0,'open','polymarket',?,?,?,?,?)
             """, (ticker, side, contracts, price_cents, price_cents, poly_token_id, now,
-                  (market_title or "")[:200], round(total_cost, 2)))
+                  (market_title or "")[:200], round(total_cost, 2), close_time or ""))
 
         logger.info(
             "◆ POLY PAPER  %s %s %s | %d contracts @ %.0f¢ | "
