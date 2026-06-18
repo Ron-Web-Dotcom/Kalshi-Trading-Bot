@@ -1087,6 +1087,29 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
         # Use the correct side's ask price — NO positions exit at no_ask, not yes_ask
         exit_p    = float(pos.get("no_ask" if side == "no" else "yes_ask") or 0)
 
+        # If DB price is stale (0), fetch live resolution from Kalshi/Poly API
+        if exit_p == 0 and entry > 0:
+            try:
+                from src.clients.kalshi_client import KalshiClient
+                _kc = KalshiClient()
+                _mkt = await _kc.get_market(ticker)
+                await _kc.close()
+                if _mkt:
+                    _yes = float(_mkt.get("yes_ask") or _mkt.get("last_price") or 0)
+                    _no  = float(_mkt.get("no_ask") or 0)
+                    # Resolved markets: winning side = 100, losing side = 0
+                    if _yes == 100 or _no == 100:
+                        exit_p = _no if side == "no" else _yes
+                    elif _yes > 0:
+                        exit_p = _no if side == "no" else _yes
+            except Exception as _fe:
+                logger.debug("Live price fetch for %s: %s", ticker, _fe)
+
+        # If still 0 and entry > 0, skip — can't resolve with stale data
+        if exit_p == 0 and entry > 0:
+            logger.debug("SKIP resolve %s — exit price still 0, will retry next cycle", ticker)
+            continue
+
         pnl_cents = (exit_p - entry) * contracts
         pnl_usd   = pnl_cents / 100.0
         result    = "WIN" if pnl_cents > 0 else "LOSS"
