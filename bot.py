@@ -669,6 +669,13 @@ class TradingBot:
                     ) or {}
                     unrealised_pnl = float(unrealised_row.get("pnl", 0.0) or 0.0)
 
+                    # Read trades_executed from DB — in-memory counter resets on restart
+                    trades_db_row = await self.db.fetchone(
+                        "SELECT COUNT(*) as n FROM trade_logs WHERE paper_trade=? AND executed_at >= ? AND executed_at < ?",
+                        (_paper_flag, report_date + "T00:00:00", report_date + "T23:59:59")
+                    ) or {}
+                    snap["trades_executed"] = trades_db_row.get("n", 0) or snap.get("trades_executed", 0)
+
                     await discord.midnight_daily_summary(
                         date=report_date,
                         snap=snap,
