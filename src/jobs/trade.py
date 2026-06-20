@@ -1126,13 +1126,18 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
 
         # Stamp into trade_logs (permanent W/L record)
         try:
-            await db.execute(
-                "UPDATE trade_logs SET pnl=?, resolved_at=datetime('now'), "
-                "result=?, exit_price=? "
-                "WHERE ticker=? AND (pnl IS NULL OR pnl=0) "
+            # SQLite doesn't support ORDER BY/LIMIT in UPDATE — select rowid first
+            _tl_row = await db.fetchone(
+                "SELECT id FROM trade_logs WHERE ticker=? AND (pnl IS NULL OR pnl=0) "
                 "ORDER BY executed_at DESC LIMIT 1",
-                (pnl_usd, result, exit_p, ticker)
+                (ticker,)
             )
+            if _tl_row and _tl_row.get("id"):
+                await db.execute(
+                    "UPDATE trade_logs SET pnl=?, resolved_at=datetime('now'), "
+                    "result=?, exit_price=? WHERE id=?",
+                    (pnl_usd, result, exit_p, _tl_row["id"])
+                )
         except Exception as _tl:
             logger.debug("trade_logs update %s: %s", ticker, _tl)
 
