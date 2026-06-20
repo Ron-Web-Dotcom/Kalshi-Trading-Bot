@@ -130,6 +130,18 @@ class TradingBot:
         except Exception:
             pass
 
+        # Orphan cleanup: mark old unresolved trade_logs as VOID if their position is gone
+        # These are pre-fix records where pnl was never written due to the SQLite UPDATE bug.
+        try:
+            await self.db.execute(
+                "UPDATE trade_logs SET result='VOID', resolved_at=datetime('now'), pnl=0 "
+                "WHERE pnl IS NULL AND resolved_at IS NULL "
+                "AND ticker NOT IN (SELECT ticker FROM positions WHERE status='open')"
+            )
+            logger.info("Orphan trade_logs cleaned up (marked VOID)")
+        except Exception as _oc:
+            logger.debug("Orphan cleanup: %s", _oc)
+
         # Discord startup alert
         try:
             from src.alerts.discord import DiscordAlerter
@@ -301,18 +313,22 @@ class TradingBot:
                     )
                     live_open_n = (live_open_rows[0].get("n") or 0) if live_open_rows else 0
 
-                    # Today's PnL (paper or live depending on mode)
+                    # Today's PnL — resolved trades where resolve happened today
                     _paper_flag = 0 if settings.trading.live_trading_enabled else 1
                     pnl_row = await self.db.fetchone(
                         "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
-                        "WHERE executed_at >= ? AND pnl IS NOT NULL AND paper_trade=?",
+                        "WHERE resolved_at >= ? AND pnl IS NOT NULL AND pnl != 0 AND paper_trade=?",
                         (today + "T00:00:00", _paper_flag)
                     )
                     paper_pnl = (pnl_row or {}).get("pnl", 0.0)
 
-                    # Unrealised PnL from open positions (so $0 isn't shown when trades are open)
+                    # Unrealised PnL: dynamic from market prices (positions.pnl is always 0 on insert)
                     unrealised_row = await self.db.fetchone(
-                        "SELECT COALESCE(SUM(pnl),0) as pnl FROM positions WHERE status='open'"
+                        "SELECT COALESCE(SUM("
+                        "  CASE WHEN p.side='yes' THEN (COALESCE(m.yes_ask, p.avg_price) - p.avg_price) * p.contracts / 100.0 "
+                        "       WHEN p.side='no'  THEN (COALESCE(m.no_ask,  p.avg_price) - p.avg_price) * p.contracts / 100.0 "
+                        "       ELSE 0 END"
+                        "), 0) as pnl FROM positions p LEFT JOIN markets m ON m.ticker = p.ticker WHERE p.status='open'"
                     )
                     unrealised_pnl = (unrealised_row or {}).get("pnl", 0.0) or 0.0
 
@@ -560,7 +576,7 @@ class TradingBot:
 
                     pnl_row = await self.db.fetchone(
                         "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
-                        "WHERE executed_at >= ? AND pnl IS NOT NULL AND paper_trade=?",
+                        "WHERE resolved_at >= ? AND pnl IS NOT NULL AND pnl != 0 AND paper_trade=?",
                         (pnl_date + "T00:00:00", _paper_flag)
                     )
                     today_pnl = (pnl_row or {}).get("pnl", 0.0)
@@ -647,10 +663,10 @@ class TradingBot:
                         "COALESCE(SUM(pnl),0) as total_pnl "
                         "FROM trade_logs WHERE resolved_at IS NOT NULL AND pnl IS NOT NULL AND pnl != 0"
                     ) or {}
-                    # Today's (yesterday's) realized PnL — query the day that just ended
+                    # Today's (yesterday's) realized PnL — resolved during that day
                     today_pnl_row = await self.db.fetchone(
                         "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
-                        "WHERE executed_at >= ? AND executed_at < ? AND pnl IS NOT NULL AND paper_trade=?",
+                        "WHERE resolved_at >= ? AND resolved_at < ? AND pnl IS NOT NULL AND paper_trade=?",
                         (report_date + "T00:00:00", report_date + "T23:59:59", _paper_flag)
                     ) or {}
                     closed_today = await self.db.fetchall(
@@ -665,7 +681,11 @@ class TradingBot:
                         "SELECT COUNT(*) as n FROM positions WHERE status='open'"
                     ) or {}
                     unrealised_row = await self.db.fetchone(
-                        "SELECT COALESCE(SUM(pnl),0) as pnl FROM positions WHERE status='open'"
+                        "SELECT COALESCE(SUM("
+                        "  CASE WHEN p.side='yes' THEN (COALESCE(m.yes_ask, p.avg_price) - p.avg_price) * p.contracts / 100.0 "
+                        "       WHEN p.side='no'  THEN (COALESCE(m.no_ask,  p.avg_price) - p.avg_price) * p.contracts / 100.0 "
+                        "       ELSE 0 END"
+                        "), 0) as pnl FROM positions p LEFT JOIN markets m ON m.ticker = p.ticker WHERE p.status='open'"
                     ) or {}
                     unrealised_pnl = float(unrealised_row.get("pnl", 0.0) or 0.0)
 
