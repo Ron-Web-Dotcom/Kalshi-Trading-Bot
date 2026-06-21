@@ -125,7 +125,7 @@ class MarketDataFetcher:
 
     async def get_cached_markets(self, min_volume: float = 0,
                                   max_age_minutes: int = 15,
-                                  limit: int = 600) -> List[Dict]:
+                                  limit: int = 200) -> List[Dict]:
         """Return markets from DB. Prices in cents. Hard-capped to avoid OOM."""
         query  = "SELECT * FROM markets WHERE status='open' OR status=''"
         params: tuple = ()

@@ -406,7 +406,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         poly_markets = []
         if poly_enabled:
             try:
-                raw_poly = await poly_client.get_markets(limit=100)
+                raw_poly = await poly_client.get_markets(limit=50)
                 now_ts   = __import__("datetime").datetime.now(
                     __import__("datetime").timezone.utc).isoformat()
 
@@ -526,7 +526,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         # Kalshi shows "LIVE 38" in their nav — these are real in-progress events
         # like "Czechia vs Guatemala 74'" — not just markets closing soon.
         try:
-            kalshi_live_now = await kalshi.get_live_now_markets(max_markets=100)
+            kalshi_live_now = await kalshi.get_live_now_markets(max_markets=50)
             live_kalshi_raw = kalshi_live_now
             logger.info("Kalshi live now: %d confirmed in-play markets", len(live_kalshi_raw))
         except Exception as _le:
@@ -538,12 +538,12 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         poly_time_raw = []
         if poly_enabled:
             try:
-                live_poly_raw = await poly_client.get_live_now_markets(max_markets=100)
+                live_poly_raw = await poly_client.get_live_now_markets(max_markets=50)
                 logger.info("Polymarket live now: %d confirmed in-play markets", len(live_poly_raw))
             except Exception as _le:
                 logger.debug("Polymarket live now fetch skipped: %s", _le)
             try:
-                poly_time_raw = await poly_client.get_live_markets(max_hours=24.0, max_markets=100)
+                poly_time_raw = await poly_client.get_live_markets(max_hours=24.0, max_markets=50)
             except Exception as _le:
                 logger.debug("Live Polymarket fetch skipped: %s", _le)
 
@@ -555,7 +555,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
         # All Kalshi time-window markets that aren't in the live set → expiring
         try:
-            kalshi_24h_raw = await kalshi.get_live_markets(max_hours=24.0, max_markets=100)
+            kalshi_24h_raw = await kalshi.get_live_markets(max_hours=24.0, max_markets=50)
         except Exception:
             kalshi_24h_raw = []
         live_k_tickers = {m.get("ticker") for m in live_kalshi_raw}
