@@ -1062,7 +1062,7 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
 
     expired = await db.fetchall(
         "SELECT p.ticker, p.title, p.platform, p.side, p.contracts, "
-        "       p.avg_price, p.opened_at, "
+        "       p.avg_price, p.opened_at, p.poly_token_id, "
         "       m.yes_ask, m.no_ask, "
         "       COALESCE(NULLIF(m.close_time,''), NULLIF(p.close_time,'')) AS close_time "
         "FROM positions p "
@@ -1087,17 +1087,18 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
     resolved_losses = []
 
     for pos in expired:
-        ticker    = pos.get("ticker", "")
-        title     = pos.get("title") or ticker
-        platform  = pos.get("platform", "kalshi")
-        side      = pos.get("side", "yes")
-        contracts = int(pos.get("contracts") or 1)
-        entry     = float(pos.get("avg_price") or 0)
+        ticker        = pos.get("ticker", "")
+        title         = pos.get("title") or ticker
+        platform      = pos.get("platform", "kalshi")
+        side          = pos.get("side", "yes")
+        contracts     = int(pos.get("contracts") or 1)
+        entry         = float(pos.get("avg_price") or 0)
+        poly_token_id = pos.get("poly_token_id") or ""
         # Use the correct side's ask price — NO positions exit at no_ask, not yes_ask
         exit_p    = float(pos.get("no_ask" if side == "no" else "yes_ask") or 0)
 
-        # If DB price is stale (0), fetch live resolution from Kalshi/Poly API
-        if exit_p == 0 and entry > 0:
+        # If DB price is stale (0), fetch live resolution from Kalshi API
+        if exit_p == 0 and entry > 0 and platform != "polymarket":
             try:
                 from src.clients.kalshi_client import KalshiClient
                 _kc = KalshiClient()
@@ -1107,17 +1108,46 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
                 if _mkt:
                     _yes = float(_mkt.get("yes_ask") or _mkt.get("last_price") or 0)
                     _no  = float(_mkt.get("no_ask") or 0)
-                    # Resolved markets: winning side = 100, losing side = 0
                     if _yes == 100 or _no == 100:
                         exit_p = _no if side == "no" else _yes
                     elif _yes > 0:
                         exit_p = _no if side == "no" else _yes
             except Exception as _fe:
-                logger.debug("Live price fetch for %s: %s", ticker, _fe)
+                logger.debug("Live Kalshi price fetch for %s: %s", ticker, _fe)
 
-        # If still 0 and entry > 0, skip — can't resolve with stale data
+        # Polymarket: fetch live price via token_id (ticker is a hex token ID)
+        if exit_p == 0 and entry > 0 and platform == "polymarket":
+            _token = poly_token_id or ticker
+            try:
+                from src.clients.polymarket_client import PolymarketTradingClient
+                _pc = PolymarketTradingClient()
+                _pmkt = await _pc.get_market_by_token(_token)
+                await _pc.close()
+                if _pmkt:
+                    _yes = float(_pmkt.get("yes_ask") or _pmkt.get("last_price") or 0)
+                    _no  = float(_pmkt.get("no_ask") or 0)
+                    if _yes == 100 or _no == 100:
+                        exit_p = _no if side == "no" else _yes
+                    elif _yes > 0:
+                        exit_p = _no if side == "no" else _yes
+            except Exception as _pfe:
+                logger.debug("Live Poly price fetch for %s: %s", _token, _pfe)
+
+        # If still 0 after all fetches — force-close as EXPIRED so it leaves the board
         if exit_p == 0 and entry > 0:
-            logger.debug("SKIP resolve %s — exit price still 0, will retry next cycle", ticker)
+            logger.info("FORCE-CLOSE %s — no exit price after live fetch, marking EXPIRED", ticker)
+            await db.execute(
+                "DELETE FROM positions WHERE ticker=? AND status='open'", (ticker,)
+            )
+            _tl_row = await db.fetchone(
+                "SELECT id FROM trade_logs WHERE ticker=? AND (pnl IS NULL OR pnl=0) "
+                "ORDER BY executed_at DESC LIMIT 1", (ticker,)
+            )
+            if _tl_row and _tl_row.get("id"):
+                await db.execute(
+                    "UPDATE trade_logs SET result='EXPIRED', resolved_at=datetime('now'), pnl=0 WHERE id=?",
+                    (_tl_row["id"],)
+                )
             continue
 
         pnl_cents = (exit_p - entry) * contracts

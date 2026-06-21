@@ -356,6 +356,23 @@ class PolymarketTradingClient:
             logger.debug("Polymarket balance check failed: %s", e)
             return None
 
+    async def get_market_by_token(self, token_id: str) -> Optional[Dict]:
+        """Fetch a single Polymarket market by token/condition ID for resolution pricing."""
+        try:
+            r = await self._client().get(
+                f"{GAMMA_BASE}/markets",
+                params={"clob_token_ids": token_id, "limit": 1},
+            )
+            if r.status_code != 200:
+                return None
+            raw = r.json()
+            items = raw if isinstance(raw, list) else (raw.get("data") or raw.get("markets") or [])
+            if items:
+                return self._parse_market(items[0])
+        except Exception as e:
+            logger.debug("get_market_by_token %s: %s", token_id[:16], e)
+        return None
+
     # ── Order placement (LIVE only) ────────────────────────────────────────────
 
     async def place_order(
