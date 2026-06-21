@@ -182,6 +182,8 @@ class TradingBot:
             results.skipped,
             results.total_capital_used,
         )
+        # Free unreferenced objects every cycle to keep RAM flat
+        gc.collect()
 
     async def run_loop(self):
         await self.startup()
