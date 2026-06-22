@@ -1181,14 +1181,6 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
             (ticker,)
         )
 
-        # Update daily loss circuit breaker with real resolved pnl
-        try:
-            from src.risk.manager import RiskManager
-            _rm = RiskManager(db=db)
-            _rm.record_result(ticker, pnl_usd, platform)
-        except Exception:
-            pass
-
         logger.info(
             "RESOLVED [%s] %s → %s | entry=%.0f¢ exit=%.0f¢ pnl=$%.2f",
             platform.upper(), ticker, result, entry, exit_p, pnl_usd
