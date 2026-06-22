@@ -130,12 +130,13 @@ class TradingBot:
         except Exception:
             pass
 
-        # Orphan cleanup: mark old unresolved trade_logs as VOID if their position is gone
-        # These are pre-fix records where pnl was never written due to the SQLite UPDATE bug.
+        # Orphan cleanup: mark old unresolved trade_logs as VOID if position is gone AND
+        # trade is older than 2 days (clearly stale, not a same-day open position).
         try:
             await self.db.execute(
                 "UPDATE trade_logs SET result='VOID', resolved_at=datetime('now'), pnl=0 "
                 "WHERE pnl IS NULL AND resolved_at IS NULL "
+                "AND executed_at < datetime('now', '-2 days') "
                 "AND ticker NOT IN (SELECT ticker FROM positions WHERE status='open')"
             )
             logger.info("Orphan trade_logs cleaned up (marked VOID)")
@@ -168,7 +169,7 @@ class TradingBot:
                                     _entry = float(_tl.get("price") or 0)
                                     _exit  = _no if _side == "no" else _yes
                                     _pnl   = (_exit - _entry) * int(_tl.get("contracts") or 1) / 100.0
-                                    _res   = "WIN" if _pnl > 0 else "LOSS"
+                                    _res   = "WIN" if _pnl > 0 else ("LOSS" if _pnl < 0 else "BREAK_EVEN")
                                     await self.db.execute(
                                         "UPDATE trade_logs SET pnl=?, result=?, exit_price=? WHERE id=?",
                                         (_pnl, _res, _exit, _row["id"])
@@ -379,7 +380,7 @@ class TradingBot:
                         "  SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
                         "  SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
                         "  COALESCE(SUM(pnl), 0) as total_pnl "
-                        "FROM trade_logs WHERE resolved_at IS NOT NULL AND pnl IS NOT NULL AND pnl != 0"
+                        "FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN')"
                     )
                     wl = wl_row or {}
                     total_closed = wl.get("total", 0) or 0
@@ -634,7 +635,7 @@ class TradingBot:
                         "SELECT COUNT(*) as total, "
                         "SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
                         "SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses "
-                        "FROM trade_logs WHERE resolved_at IS NOT NULL AND pnl IS NOT NULL AND pnl != 0"
+                        "FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN')"
                     ) or {}
                     total_closed = wl.get("total", 0) or 0
                     total_wins   = wl.get("wins",  0) or 0
@@ -701,7 +702,7 @@ class TradingBot:
                         "SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
                         "SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
                         "COALESCE(SUM(pnl),0) as total_pnl "
-                        "FROM trade_logs WHERE resolved_at IS NOT NULL AND pnl IS NOT NULL AND pnl != 0"
+                        "FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN')"
                     ) or {}
                     # Today's (yesterday's) realized PnL — resolved during that day
                     today_pnl_row = await self.db.fetchone(
@@ -1156,7 +1157,7 @@ class TradingBot:
                         unreal    = await self.db.fetchone("SELECT COALESCE(SUM(pnl),0) as p FROM positions WHERE status='open'") or {}
                         wl        = await self.db.fetchone(
                             "SELECT COUNT(*) as total, SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins, "
-                            "COALESCE(SUM(pnl),0) as pnl FROM trade_logs WHERE resolved_at IS NOT NULL AND pnl IS NOT NULL AND pnl != 0"
+                            "COALESCE(SUM(pnl),0) as pnl FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN')"
                         ) or {}
                         total     = wl.get("total") or 0
                         wins      = wl.get("wins") or 0
@@ -1196,8 +1197,8 @@ class TradingBot:
                             status   = row.get("status", "")
                             yes_ask  = float(row.get("yes_ask") or row.get("last_price") or 0)
                             # A market is resolved when yes_ask hits near 0 or near 100
-                            if status == "closed" or yes_ask <= 3 or yes_ask >= 97:
-                                actual = "yes" if yes_ask >= 97 else "no" if yes_ask <= 3 else None
+                            if status == "closed" or yes_ask <= 5 or yes_ask >= 95:
+                                actual = "yes" if yes_ask >= 95 else "no" if yes_ask <= 5 else None
                                 if actual:
                                     live_miss_tracker.mark_resolved(ticker, actual)
                         except Exception:
@@ -1227,7 +1228,7 @@ class TradingBot:
                                 except Exception:
                                     return 0.0
                             ya = _n(m.get("yes_ask") or m.get("last_price"))
-                            if 0.03 <= ya <= 0.97:   # 3¢–97¢ tradeable range
+                            if 0.05 <= ya <= 0.95:   # 5¢–95¢ tradeable range
                                 m["yes_ask"] = round(ya * 100, 2)
                                 m["no_ask"]  = round((1 - ya) * 100, 2)
                                 normed.append(m)

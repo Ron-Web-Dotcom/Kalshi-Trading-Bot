@@ -193,12 +193,16 @@ async def run_tracking(db_manager) -> None:
                         WHERE id=?
                     """, (final_price, pnl, now, close_reason, pos_id))
 
-                    await db_manager.execute(
-                        "UPDATE trade_logs SET pnl=? WHERE ticker=? AND side=? AND pnl IS NULL "
-                        "AND executed_at = (SELECT MAX(executed_at) FROM trade_logs "
-                        "WHERE ticker=? AND side=? AND pnl IS NULL)",
-                        (pnl, ticker, side, ticker, side)
+                    _tl_track = await db_manager.fetchone(
+                        "SELECT id FROM trade_logs WHERE ticker=? AND side=? AND pnl IS NULL "
+                        "AND (platform=? OR platform IS NULL) ORDER BY executed_at DESC LIMIT 1",
+                        (ticker, side, platform)
                     )
+                    if _tl_track and _tl_track.get("id"):
+                        await db_manager.execute(
+                            "UPDATE trade_logs SET pnl=?, resolved_at=datetime('now'), result=? WHERE id=?",
+                            (pnl, "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN"), _tl_track["id"])
+                        )
                     risk.record_trade(ticker, pnl)
                     try:
                         from src.utils.daily_stats import stats as daily_stats

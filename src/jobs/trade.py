@@ -1152,7 +1152,7 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
 
         pnl_cents = (exit_p - entry) * contracts
         pnl_usd   = pnl_cents / 100.0
-        result    = "WIN" if pnl_cents > 0 else "LOSS"
+        result    = "WIN" if pnl_cents > 0 else ("LOSS" if pnl_cents < 0 else "BREAK_EVEN")
 
         # Stamp into trade_logs (permanent W/L record)
         try:
