@@ -665,6 +665,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         daily_stats.record_skip("live_profit_gate")
                         continue
 
+                    live_platform = r["platform"]
                     live_allowed, live_reason = risk.check_trade(
                         live_tick, scaler.current_size,
                         current_positions=[], portfolio_value=portfolio_val,
@@ -675,8 +676,6 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         results.skipped += 1
                         daily_stats.record_skip(f"live_risk_gate:{live_reason}")
                         continue
-
-                    live_platform = r["platform"]
                     active_trader = kalshi_trader if live_platform == "kalshi" else poly_trader
                     logger.info(
                         "LIVE TRADE: [%s] %s BUY %s @ %.0f¢ | conf=%d%% EV=%.1f¢ size=$%.2f",

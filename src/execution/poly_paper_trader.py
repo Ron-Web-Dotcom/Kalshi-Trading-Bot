@@ -190,8 +190,8 @@ class PolyPaperTrader:
                     exp_profit=exp_profit,
                     market_title=market_title,
                 )
-            except Exception:
-                pass
+            except Exception as _de:
+                logger.debug("Discord alert failed: %s", _de)
 
         if self.risk:
             self.risk.record_trade(ticker)

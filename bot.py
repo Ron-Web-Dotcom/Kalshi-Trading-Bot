@@ -1224,7 +1224,7 @@ class TradingBot:
                             def _n(v):
                                 try:
                                     f = float(v or 0)
-                                    return f if f <= 1.0 else f / 100.0
+                                    return f * 100 if f < 1.0 else f
                                 except Exception:
                                     return 0.0
                             ya = _n(m.get("yes_ask") or m.get("last_price"))
