@@ -12,7 +12,7 @@ class RiskManager:
         from src.config.settings import settings
         self.cfg = settings.trading
         self.db = db
-        self._last_trade_time: Dict[str, datetime] = {}
+        self._last_trade_time: Dict[tuple, datetime] = {}
         self._daily_loss: float = 0.0
         self._daily_loss_date: Optional[date] = None
 
@@ -42,7 +42,8 @@ class RiskManager:
     def check_trade(self, ticker: str, size_dollars: float,
                     current_positions: List[Dict],
                     portfolio_value: float = 1000.0,
-                    daily_loss_override: float = 0.0) -> Tuple[bool, str]:
+                    daily_loss_override: float = 0.0,
+                    platform: str = "kalshi") -> Tuple[bool, str]:
         """
         Returns (allowed, reason). Reason is empty string if allowed.
         Pass daily_loss_override from DB query to make the circuit breaker
@@ -50,8 +51,8 @@ class RiskManager:
         """
         self._reset_daily_if_needed()
 
-        # 1. Cooldown
-        last = self._last_trade_time.get(ticker)
+        # 1. Cooldown — keyed by (ticker, platform) so Kalshi/Poly don't block each other
+        last = self._last_trade_time.get((ticker, platform))
         if last:
             elapsed = (datetime.now(timezone.utc) - last).total_seconds()
             if elapsed < self.cfg.cooldown_between_trades_seconds:
@@ -100,9 +101,12 @@ class RiskManager:
         """Extract category prefix from ticker (e.g. 'KXETHD' → 'KXETH')."""
         return ticker.split("-")[0] if "-" in ticker else ticker[:4]
 
-    def record_trade(self, ticker: str, pnl: float = 0.0):
-        """Record a completed trade for cooldown and daily loss tracking."""
-        self._last_trade_time[ticker] = datetime.now(timezone.utc)
+    def record_trade(self, ticker: str, pnl: float = 0.0, platform: str = "kalshi"):
+        """Record a completed trade for cooldown tracking."""
+        self._last_trade_time[(ticker, platform)] = datetime.now(timezone.utc)
+
+    def record_result(self, ticker: str, pnl: float, platform: str = "kalshi"):
+        """Record a resolved trade result for daily loss circuit breaker."""
         if pnl < 0:
             self._reset_daily_if_needed()
             self._daily_loss += abs(pnl)

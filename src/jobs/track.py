@@ -103,7 +103,7 @@ async def run_tracking(db_manager) -> None:
                             UPDATE positions SET status='closed', current_price=?,
                             pnl=?, closed_at=?, close_reason=? WHERE id=?
                         """, (final_price, pnl, now, close_reason, pos_id))
-                        risk.record_trade(ticker, pnl)
+                        risk.record_trade(ticker, pnl, platform)
                         closed += 1
                     elif stop_loss_pct > 0 and pct_change <= -stop_loss_pct:
                         close_reason = f"stop_loss:{pct_change:.1f}%"
@@ -111,7 +111,7 @@ async def run_tracking(db_manager) -> None:
                             UPDATE positions SET status='closed', current_price=?,
                             pnl=?, closed_at=?, close_reason=? WHERE id=?
                         """, (cur_price, pnl, now, close_reason, pos_id))
-                        risk.record_trade(ticker, pnl)
+                        risk.record_trade(ticker, pnl, platform)
                         closed += 1
                     elif take_profit_pct > 0 and pct_change >= take_profit_pct:
                         close_reason = f"take_profit:{pct_change:.1f}%"
@@ -119,7 +119,7 @@ async def run_tracking(db_manager) -> None:
                             UPDATE positions SET status='closed', current_price=?,
                             pnl=?, closed_at=?, close_reason=? WHERE id=?
                         """, (cur_price, pnl, now, close_reason, pos_id))
-                        risk.record_trade(ticker, pnl)
+                        risk.record_trade(ticker, pnl, platform)
                         closed += 1
                     else:
                         await db_manager.execute(
@@ -203,7 +203,7 @@ async def run_tracking(db_manager) -> None:
                             "UPDATE trade_logs SET pnl=?, resolved_at=datetime('now'), result=? WHERE id=?",
                             (pnl, "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN"), _tl_track["id"])
                         )
-                    risk.record_trade(ticker, pnl)
+                    risk.record_trade(ticker, pnl, platform)
                     try:
                         from src.utils.daily_stats import stats as daily_stats
                         if pnl >= 0:

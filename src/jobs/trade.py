@@ -221,6 +221,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     allowed, reason = risk.check_trade(
                         ticker + f"_{side}", scaler.current_size,
                         current_positions=[], portfolio_value=portfolio_val,
+                        platform="kalshi",
                     )
                     if not allowed:
                         logger.info(
@@ -290,6 +291,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 allowed, reason = risk.check_trade(
                     ticker, scaler.current_size,
                     current_positions=[], portfolio_value=portfolio_val,
+                    platform="kalshi",
                 )
                 if not allowed:
                     logger.info("SKIP cross-arb %s | Reason: %s", ticker, reason)
@@ -666,6 +668,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     live_allowed, live_reason = risk.check_trade(
                         live_tick, scaler.current_size,
                         current_positions=[], portfolio_value=portfolio_val,
+                        platform=live_platform,
                     )
                     if not live_allowed:
                         logger.info("LIVE SKIP %s — risk gate: %s", live_tick, live_reason)
@@ -938,10 +941,12 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 )
             else:
                 daily_loss_db = await risk.get_daily_loss_from_db()
+                _best_platform = best.get("platform", "kalshi")
                 allowed, reason = risk.check_trade(
                     ticker, scaler.current_size,
                     current_positions=[], portfolio_value=portfolio_val,
                     daily_loss_override=daily_loss_db,
+                    platform=_best_platform,
                 )
                 if not allowed:
                     logger.info("Best opportunity BLOCKED by risk gate: %s", reason)
@@ -1140,8 +1145,8 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
                 "DELETE FROM positions WHERE ticker=? AND status='open'", (ticker,)
             )
             _tl_row = await db.fetchone(
-                "SELECT id FROM trade_logs WHERE ticker=? AND (pnl IS NULL OR pnl=0) "
-                "ORDER BY executed_at DESC LIMIT 1", (ticker,)
+                "SELECT id FROM trade_logs WHERE ticker=? AND (platform=? OR platform IS NULL) "
+                "AND (pnl IS NULL OR pnl=0) ORDER BY executed_at DESC LIMIT 1", (ticker, platform)
             )
             if _tl_row and _tl_row.get("id"):
                 await db.execute(
@@ -1158,9 +1163,9 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
         try:
             # SQLite doesn't support ORDER BY/LIMIT in UPDATE — select rowid first
             _tl_row = await db.fetchone(
-                "SELECT id FROM trade_logs WHERE ticker=? AND (pnl IS NULL OR pnl=0) "
-                "ORDER BY executed_at DESC LIMIT 1",
-                (ticker,)
+                "SELECT id FROM trade_logs WHERE ticker=? AND (platform=? OR platform IS NULL) "
+                "AND (pnl IS NULL OR pnl=0) ORDER BY executed_at DESC LIMIT 1",
+                (ticker, platform)
             )
             if _tl_row and _tl_row.get("id"):
                 await db.execute(
@@ -1176,6 +1181,14 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
             "DELETE FROM positions WHERE ticker=? AND status='open'",
             (ticker,)
         )
+
+        # Update daily loss circuit breaker with real resolved pnl
+        try:
+            from src.risk.manager import RiskManager
+            _rm = RiskManager(db=db)
+            _rm.record_result(ticker, pnl_usd, platform)
+        except Exception:
+            pass
 
         logger.info(
             "RESOLVED [%s] %s → %s | entry=%.0f¢ exit=%.0f¢ pnl=$%.2f",
