@@ -1124,17 +1124,32 @@ class TradingBot:
                         _d = _DA()
                         # Run health checks same as startup
                         _checks = {}
-                        for _name, _coro in [
-                            ("Kalshi",     self.kalshi.get_markets(limit=1)),
-                            ("Polymarket", __import__("src.clients.polymarket_client",
-                                           fromlist=["PolymarketTradingClient"]).PolymarketTradingClient().get_markets(limit=1)),
-                        ]:
+                        try:
+                            from src.clients.kalshi_client import KalshiClient as _KC
+                            _kc = _KC()
                             _t0 = _time.monotonic()
                             try:
-                                await _coro
-                                _checks[_name] = f"✅ {int((_time.monotonic()-_t0)*1000)}ms"
+                                await _kc.get_markets(limit=1)
+                                _checks["Kalshi"] = f"✅ {int((_time.monotonic()-_t0)*1000)}ms"
                             except Exception:
-                                _checks[_name] = "❌ error"
+                                _checks["Kalshi"] = "❌ error"
+                            finally:
+                                await _kc.close()
+                        except Exception:
+                            _checks["Kalshi"] = "❌ error"
+                        try:
+                            from src.clients.polymarket_client import PolymarketTradingClient as _PTC
+                            _pc = _PTC()
+                            _t0 = _time.monotonic()
+                            try:
+                                await _pc.get_markets(limit=1)
+                                _checks["Polymarket"] = f"✅ {int((_time.monotonic()-_t0)*1000)}ms"
+                            except Exception:
+                                _checks["Polymarket"] = "❌ error"
+                            finally:
+                                await _pc.close()
+                        except Exception:
+                            _checks["Polymarket"] = "❌ error"
                         _check_str = "\n".join(f"{k} — {v}" for k, v in _checks.items())
                         open_pos = await self.db.fetchone("SELECT COUNT(*) as n FROM positions WHERE status='open'") or {}
                         await _d.send_message(
