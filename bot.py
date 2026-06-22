@@ -142,6 +142,44 @@ class TradingBot:
         except Exception as _oc:
             logger.debug("Orphan cleanup: %s", _oc)
 
+        # Re-resolve EXPIRED Polymarket trade_logs with real prices from the API
+        try:
+            expired_rows = await self.db.fetchall(
+                "SELECT id, ticker, signal_source FROM trade_logs "
+                "WHERE result='EXPIRED' AND pnl=0 AND platform='polymarket'"
+            )
+            if expired_rows:
+                from src.clients.polymarket_client import PolymarketTradingClient
+                _pc = PolymarketTradingClient()
+                for _row in expired_rows:
+                    try:
+                        _mkt = await _pc.get_market_by_token(_row["ticker"])
+                        if _mkt:
+                            _yes = float(_mkt.get("yes_ask") or _mkt.get("last_price") or 0)
+                            _no  = float(_mkt.get("no_ask") or 0)
+                            if _yes > 0 or _no > 0:
+                                # Get the side from trade_logs to compute real pnl
+                                _tl = await self.db.fetchone(
+                                    "SELECT side, contracts, price FROM trade_logs WHERE id=?",
+                                    (_row["id"],)
+                                )
+                                if _tl:
+                                    _side  = _tl.get("side", "yes")
+                                    _entry = float(_tl.get("price") or 0)
+                                    _exit  = _no if _side == "no" else _yes
+                                    _pnl   = (_exit - _entry) * int(_tl.get("contracts") or 1) / 100.0
+                                    _res   = "WIN" if _pnl > 0 else "LOSS"
+                                    await self.db.execute(
+                                        "UPDATE trade_logs SET pnl=?, result=?, exit_price=? WHERE id=?",
+                                        (_pnl, _res, _exit, _row["id"])
+                                    )
+                                    logger.info("Re-resolved EXPIRED trade %s → %s pnl=$%.2f", _row["ticker"][:16], _res, _pnl)
+                    except Exception as _re:
+                        logger.debug("Re-resolve %s: %s", _row["ticker"][:16], _re)
+                await _pc.close()
+        except Exception as _rpe:
+            logger.debug("EXPIRED re-resolve pass: %s", _rpe)
+
         # Discord startup alert
         try:
             from src.alerts.discord import DiscordAlerter
