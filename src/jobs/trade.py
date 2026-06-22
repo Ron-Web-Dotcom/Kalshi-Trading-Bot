@@ -649,7 +649,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                                  1.0 if live_conf >= 80 else
                                  0.5 if live_conf >= 70 else 0.25)
                     live_size = round(max(min_size, min(live_base * live_mult, max_size)), 2)
-                    live_contracts = (live_size / (live_price / 100)) if live_price > 0 else 0
+                    live_contracts = max(1, int(live_size / (live_price / 100))) if live_price > 0 else 0
                     live_exp_profit = live_contracts * (live_net_ev / 100) if live_net_ev else None
                     live_roi = (live_exp_profit / live_size * 100) if (live_exp_profit and live_size) else None
                     live_min_roi = settings.trading.min_profit_roi_pct * 0.4

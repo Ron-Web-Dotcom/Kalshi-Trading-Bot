@@ -17,7 +17,7 @@ class RiskManager:
         self._daily_loss_date: Optional[date] = None
 
     def _reset_daily_if_needed(self):
-        today = date.today()
+        today = datetime.now(timezone.utc).date()
         if self._daily_loss_date != today:
             self._daily_loss = 0.0
             self._daily_loss_date = today
@@ -29,7 +29,7 @@ class RiskManager:
         try:
             from src.config.settings import settings
             paper_flag = 0 if settings.trading.live_trading_enabled else 1
-            today = date.today().isoformat()
+            today = datetime.now(timezone.utc).date().isoformat()
             row = await self.db.fetchone(
                 "SELECT COALESCE(SUM(ABS(pnl)),0) AS loss FROM trade_logs "
                 "WHERE pnl < 0 AND paper_trade=? AND executed_at >= ?",
@@ -160,7 +160,7 @@ class RiskManager:
         # Check 1: daily loss total — join trade_logs to filter by paper/live flag
         try:
             paper_flag = 0 if settings.trading.live_trading_enabled else 1
-            today = __import__("datetime").date.today().isoformat()
+            today = datetime.now(timezone.utc).date().isoformat()
             row = await db.fetchone(
                 "SELECT COALESCE(SUM(p.pnl), 0) AS total_pnl "
                 "FROM positions p "
