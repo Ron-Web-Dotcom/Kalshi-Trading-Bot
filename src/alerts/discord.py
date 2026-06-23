@@ -193,12 +193,6 @@ class DiscordAlerter:
         mode_tag = "📝 PAPER" if mode == "PAPER" else "💰 LIVE"
         now_utc  = datetime.now(timezone.utc)
 
-        # Split into already-in and watching
-        in_bet   = [p for p in picks if p.get("_in_bet") or p.get("is_live") and p.get("contracts")]
-        watching = [p for p in picks if p not in in_bet]
-
-        sections = []
-
         def _hrs_left(p: Dict):
             ct = p.get("close_time", "")
             if not ct:
@@ -212,17 +206,13 @@ class DiscordAlerter:
                 return None
 
         def _timing_tag(hrs) -> str:
-            if hrs is None:
-                return " 📅 this week"
-            if hrs < 0:
+            if hrs is None or hrs < 0:
                 return " ⏰ resolving now"
             if hrs <= 3:
                 return f" 🔴 LIVE — {hrs:.0f}h left"
             if hrs <= 24:
                 return " 🟡 TODAY"
-            if hrs <= 72:
-                return " 📅 this week"
-            return " 🗓 long-term"
+            return " 📅 this week"
 
         def _pick_line(p: Dict) -> str:
             plat   = "🟣" if p.get("platform") == "polymarket" else "🟦"
@@ -240,34 +230,40 @@ class DiscordAlerter:
                 f"_{reason}_"
             )
 
+        # Only show picks resolving within the week — drop anything beyond 7 days
+        in_bet   = [p for p in picks if p.get("_in_bet") or p.get("is_live") and p.get("contracts")]
+        watching_all = [p for p in picks if p not in in_bet]
+        watching = [p for p in watching_all if (lambda h: h is None or h <= 168)(_hrs_left(p))]
+
+        sections = []
+
         if in_bet:
             section = "**⚡ BIDS ACTIVE RIGHT NOW**\n" + "\n\n".join(_pick_line(p) for p in in_bet[:5])
             sections.append(section)
 
         if watching:
-            # Split watching picks: live/today (≤24h) vs this week (>24h)
             today_picks = [p for p in watching if (lambda h: h is not None and h <= 24)(_hrs_left(p))]
             week_picks  = [p for p in watching if p not in today_picks]
 
             if today_picks:
                 sections.append(
-                    "**🟡 WATCHING — TODAY'S EVENTS (happening today)**\n"
+                    "**🟡 WATCHING — TODAY**\n"
                     + "\n\n".join(_pick_line(p) for p in today_picks[:4])
                 )
             if week_picks:
                 sections.append(
-                    "**📅 WATCHING — THIS WEEK (not today)**\n"
+                    "**📅 WATCHING — THIS WEEK**\n"
                     + "\n\n".join(_pick_line(p) for p in week_picks[:3])
                 )
-            if not today_picks and not week_picks:
-                sections.append("**👀 WATCHING — evaluating, not placed yet**\n" + "\n\n".join(_pick_line(p) for p in watching[:5]))
 
-        n_total = len(picks)
-        has_live = any(p.get("is_live") for p in picks)
-        color    = 0xFF4400 if in_bet else 0xFFAA00
+        if not sections:
+            return  # nothing worth alerting on
+
+        n_shown = len(in_bet) + len(watching)
+        color   = 0xFF4400 if in_bet else 0xFFAA00
 
         payload = self._embed(
-            title=f"🚨 BOT ALERT — {n_total} Live Pick{'s' if n_total > 1 else ''}  [{mode_tag}]",
+            title=f"🚨 BOT ALERT — {n_shown} Pick{'s' if n_shown > 1 else ''}  [{mode_tag}]",
             description="\n\n".join(sections),
             color=color,
         )
