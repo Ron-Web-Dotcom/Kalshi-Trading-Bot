@@ -212,7 +212,7 @@ class DiscordAlerter:
                 return f" 🔴 LIVE — {hrs:.0f}h left"
             if hrs <= 24:
                 return " 🟡 TODAY"
-            return " 📅 this week"
+            return " 🌅 TOMORROW"
 
         def _pick_line(p: Dict) -> str:
             plat   = "🟣" if p.get("platform") == "polymarket" else "🟦"
@@ -230,10 +230,10 @@ class DiscordAlerter:
                 f"_{reason}_"
             )
 
-        # Only show picks resolving within the week — drop anything beyond 7 days
+        # Only show picks resolving today or tomorrow — drop anything beyond 48h
         in_bet   = [p for p in picks if p.get("_in_bet") or p.get("is_live") and p.get("contracts")]
         watching_all = [p for p in picks if p not in in_bet]
-        watching = [p for p in watching_all if (lambda h: h is None or h <= 168)(_hrs_left(p))]
+        watching = [p for p in watching_all if (lambda h: h is None or h <= 48)(_hrs_left(p))]
 
         sections = []
 
@@ -252,7 +252,7 @@ class DiscordAlerter:
                 )
             if week_picks:
                 sections.append(
-                    "**📅 WATCHING — THIS WEEK**\n"
+                    "**🌅 WATCHING — TOMORROW**\n"
                     + "\n\n".join(_pick_line(p) for p in week_picks[:3])
                 )
 
