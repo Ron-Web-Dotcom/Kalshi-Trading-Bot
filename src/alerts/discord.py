@@ -199,6 +199,31 @@ class DiscordAlerter:
 
         sections = []
 
+        def _hrs_left(p: Dict):
+            ct = p.get("close_time", "")
+            if not ct:
+                return None
+            try:
+                cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if cd.tzinfo is None:
+                    cd = cd.replace(tzinfo=timezone.utc)
+                return (cd - now_utc).total_seconds() / 3600
+            except Exception:
+                return None
+
+        def _timing_tag(hrs) -> str:
+            if hrs is None:
+                return " 📅 this week"
+            if hrs < 0:
+                return " ⏰ resolving now"
+            if hrs <= 3:
+                return f" 🔴 LIVE — {hrs:.0f}h left"
+            if hrs <= 24:
+                return " 🟡 TODAY"
+            if hrs <= 72:
+                return " 📅 this week"
+            return " 🗓 long-term"
+
         def _pick_line(p: Dict) -> str:
             plat   = "🟣" if p.get("platform") == "polymarket" else "🟦"
             title  = self._display_ticker(p.get("ticker", ""), p.get("title", "") or "")[:52]
@@ -208,17 +233,7 @@ class DiscordAlerter:
             ev     = p.get("net_ev")
             ev_s   = f" EV {ev:+.1f}¢" if ev is not None else ""
             reason = (p.get("reasoning") or "")[:100]
-            ct     = p.get("close_time", "")
-            timing = ""
-            if ct:
-                try:
-                    cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
-                    if cd.tzinfo is None:
-                        cd = cd.replace(tzinfo=timezone.utc)
-                    hrs = (cd - now_utc).total_seconds() / 3600
-                    timing = f" 🔥 {hrs:.0f}h left" if 0 < hrs <= 3 else " ⏳ today" if hrs <= 24 else ""
-                except Exception:
-                    pass
+            timing = _timing_tag(_hrs_left(p))
             return (
                 f"{plat} **{title}**{timing}\n"
                 f"→ **{side}** @ **{price:.0f}¢** | **{conf:.0f}%**{ev_s}\n"
@@ -230,8 +245,22 @@ class DiscordAlerter:
             sections.append(section)
 
         if watching:
-            section = "**👀 WATCHING — evaluating, not placed yet**\n" + "\n\n".join(_pick_line(p) for p in watching[:5])
-            sections.append(section)
+            # Split watching picks: live/today (≤24h) vs this week (>24h)
+            today_picks = [p for p in watching if (lambda h: h is not None and h <= 24)(_hrs_left(p))]
+            week_picks  = [p for p in watching if p not in today_picks]
+
+            if today_picks:
+                sections.append(
+                    "**🟡 WATCHING — TODAY'S EVENTS (happening today)**\n"
+                    + "\n\n".join(_pick_line(p) for p in today_picks[:4])
+                )
+            if week_picks:
+                sections.append(
+                    "**📅 WATCHING — THIS WEEK (not today)**\n"
+                    + "\n\n".join(_pick_line(p) for p in week_picks[:3])
+                )
+            if not today_picks and not week_picks:
+                sections.append("**👀 WATCHING — evaluating, not placed yet**\n" + "\n\n".join(_pick_line(p) for p in watching[:5]))
 
         n_total = len(picks)
         has_live = any(p.get("is_live") for p in picks)
