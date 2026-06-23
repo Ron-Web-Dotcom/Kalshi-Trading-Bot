@@ -490,7 +490,7 @@ class TradingBot:
 
                     # Today's closed trades with outcomes — skip $0.00 ghost closes and cleanup
                     closed_rows = await self.db.fetchall(
-                        "SELECT ticker, side, pnl, close_reason FROM positions "
+                        "SELECT ticker, title, side, pnl, close_reason, platform FROM positions "
                         "WHERE status='closed' AND closed_at >= ? "
                         "AND pnl IS NOT NULL AND pnl != 0 "
                         "AND (close_reason IS NULL OR close_reason NOT LIKE 'cleanup:%') "
@@ -708,7 +708,7 @@ class TradingBot:
                     today_pnl_row = await self.db.fetchone(
                         "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
                         "WHERE resolved_at >= ? AND resolved_at < ? AND pnl IS NOT NULL AND paper_trade=?",
-                        (report_date + "T00:00:00", report_date + "T23:59:59", _paper_flag)
+                        (report_date + "T00:00:00", report_date + "T23:59:60", _paper_flag)
                     ) or {}
                     closed_today = await self.db.fetchall(
                         "SELECT ticker, side, pnl, close_reason, title FROM positions "
@@ -716,7 +716,7 @@ class TradingBot:
                         "AND pnl IS NOT NULL AND pnl != 0 "
                         "AND (close_reason IS NULL OR close_reason NOT LIKE 'cleanup:%') "
                         "ORDER BY closed_at DESC",
-                        (report_date + "T00:00:00", report_date + "T23:59:59")
+                        (report_date + "T00:00:00", report_date + "T23:59:60")
                     ) or []
                     open_row = await self.db.fetchone(
                         "SELECT COUNT(*) as n FROM positions WHERE status='open'"

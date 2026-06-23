@@ -59,6 +59,11 @@ class DiscordAlerter:
         # Polymarket hex conditionId — strip entirely, use title or generic label
         return title[:80] if title else "Polymarket Market"
 
+    async def send_message(self, text: str) -> bool:
+        """Post a plain-text message as a minimal Discord embed."""
+        payload = {"embeds": [{"description": text[:4000], "color": 0x5865F2}]}
+        return await self._post(payload)
+
     async def test_alert(self, mode: str = "PAPER") -> bool:
         """Send a connectivity test message. Returns True if delivered."""
         from src.utils.eastern_time import format_et, et_label
