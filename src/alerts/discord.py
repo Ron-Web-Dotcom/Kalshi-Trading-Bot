@@ -1403,6 +1403,7 @@ class DiscordAlerter:
         if deduped_open:
             olines = []
             total_unreal = 0.0
+            total_capital = 0.0
             for p in deduped_open[:8]:
                 plat      = "🟣" if p.get("platform") == "polymarket" else "🟦"
                 side      = (p.get("side") or "yes").upper()
@@ -1410,28 +1411,32 @@ class DiscordAlerter:
                 cur_price = float(p.get("current_price") or avg_price)
                 contracts = int(p.get("contracts") or 0)
                 size_usd  = float(p.get("size_usd") or 0) or round(avg_price * contracts / 100, 2)
+                total_capital += size_usd
                 pnl       = (cur_price - avg_price) * contracts / 100
                 total_unreal += pnl
-                pnl_s = "+" if pnl >= 0 else ""
-                pct   = ((cur_price - avg_price) / avg_price * 100) if avg_price else 0
-                mv    = "📈" if pnl >= 0 else "📉"
                 label = self._display_ticker(p.get("ticker","?"), p.get("title","") or "")[:48]
                 olines.append(
-                    f"{mv} {plat} **{label}** | {side}\n"
-                    f"   {avg_price:.0f}¢ → {cur_price:.0f}¢ ({pct:+.1f}%) | "
-                    f"${size_usd:.2f} in | Paper: **${pnl_s}{pnl:.2f}**"
+                    f"{plat} **{label}** | {side} | {contracts} contracts @ {avg_price:.0f}¢ | **${size_usd:.2f} in**"
                 )
-            tu_s = "+" if total_unreal >= 0 else ""
-            olines.append(f"\n💼 **Total on paper right now: ${tu_s}{total_unreal:.2f}**")
+            all_s  = "+" if alltime_pnl >= 0 else ""
+            tu_s   = "+" if total_unreal >= 0 else ""
+            # Leading summary line — banked first, then what's at stake
+            summary = (
+                f"💰 **All-time banked: ${all_s}{alltime_pnl:.2f}**\n"
+                f"💼 **${total_capital:.2f} currently at stake** across {len(deduped_open)} open bet(s)\n"
+                + (f"📊 Unrealised move: **${tu_s}{total_unreal:.2f}**\n" if total_unreal != 0 else "")
+                + "\n"
+            )
             fields.append({
-                "name":   f"💼 Holding ({len(deduped_open)} open bets)",
-                "value":  "\n\n".join(olines),
+                "name":   f"💼 Open Bets ({len(deduped_open)})",
+                "value":  summary + "\n".join(olines),
                 "inline": False,
             })
         else:
+            all_s = "+" if alltime_pnl >= 0 else ""
             fields.append({
                 "name":   "💼 Holding",
-                "value":  "_No open bets — fully in cash, ready to pounce_",
+                "value":  f"💰 **All-time banked: ${all_s}{alltime_pnl:.2f}**\n_No open bets right now — fully in cash_",
                 "inline": False,
             })
 
@@ -1490,20 +1495,18 @@ class DiscordAlerter:
 
         # ── Track record ──────────────────────────────────────────────────────
         pnl_s    = "+" if today_pnl >= 0 else ""
-        all_s    = "+" if alltime_pnl >= 0 else ""
-        today_note = f"**${pnl_s}{today_pnl:.2f}**" if today_pnl != 0 else "_$0.00 — nothing settled yet today_"
         if total_closed == 0:
             wr_emoji = "🆕"
             wr_str   = "No settled bets yet — track record in progress"
         else:
             wr_emoji = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
             wr_str   = f"**{win_rate:.0f}% win rate** — {total_wins}W / {total_losses}L / {total_closed} settled"
+        today_line = f"Today's settled PnL: **${pnl_s}{today_pnl:.2f}**\n" if today_pnl != 0 else ""
         fields.append({
             "name":   f"{wr_emoji} Track Record",
             "value":  (
                 f"{wr_str}\n"
-                f"All-time banked: **${all_s}{alltime_pnl:.2f}**\n"
-                f"Today's locked-in: {today_note}\n"
+                f"{today_line}"
                 f"Scanning: 🟦 **{kalshi_count}** Kalshi + 🟣 **{poly_count}** Polymarket"
             ),
             "inline": False,
