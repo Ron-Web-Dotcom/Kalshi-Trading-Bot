@@ -345,7 +345,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         now_utc = _dt.now(_tz.utc)
 
         try:
-            from src.utils.eastern_time import _now_et as _get_et
+            from src.utils.eastern_time import now_et as _get_et
             _et_now = _get_et()
         except Exception:
             import pytz as _pytz

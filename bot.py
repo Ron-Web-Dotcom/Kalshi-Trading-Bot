@@ -714,10 +714,11 @@ class TradingBot:
                         "FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN')"
                     ) or {}
                     # Today's (yesterday's) realized PnL — resolved during that day
+                    _next_day = (_et_now - _td(days=0)).date().isoformat()  # midnight = start of current day
                     today_pnl_row = await self.db.fetchone(
                         "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
                         "WHERE resolved_at >= ? AND resolved_at < ? AND pnl IS NOT NULL AND paper_trade=?",
-                        (report_date + "T00:00:00", report_date + "T23:59:60", _paper_flag)
+                        (report_date + "T00:00:00", _next_day + "T00:00:00", _paper_flag)
                     ) or {}
                     closed_today = await self.db.fetchall(
                         "SELECT ticker, side, pnl, close_reason, title FROM positions "
@@ -725,7 +726,7 @@ class TradingBot:
                         "AND pnl IS NOT NULL AND pnl != 0 "
                         "AND (close_reason IS NULL OR close_reason NOT LIKE 'cleanup:%') "
                         "ORDER BY closed_at DESC",
-                        (report_date + "T00:00:00", report_date + "T23:59:60")
+                        (report_date + "T00:00:00", _next_day + "T00:00:00")
                     ) or []
                     open_row = await self.db.fetchone(
                         "SELECT COUNT(*) as n FROM positions WHERE status='open'"
@@ -1252,9 +1253,9 @@ class TradingBot:
                                 except Exception:
                                     return 0.0
                             ya = _n(m.get("yes_ask") or m.get("last_price"))
-                            if 0.05 <= ya <= 0.95:   # 5¢–95¢ tradeable range
-                                m["yes_ask"] = round(ya * 100, 2)
-                                m["no_ask"]  = round((1 - ya) * 100, 2)
+                            if 5 <= ya <= 95:   # 5¢–95¢ tradeable range (ya is already in cents)
+                                m["yes_ask"] = round(ya, 2)
+                                m["no_ask"]  = round(100 - ya, 2)
                                 normed.append(m)
                         candidates = normed
                     except Exception as _ce:
