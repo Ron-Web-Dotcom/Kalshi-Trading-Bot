@@ -521,21 +521,27 @@ class TradingBot:
                         best_pick=daily_stats.best_pick(),
                         live_slots=len(_live_slots),
                         live_slots_max=MAX_LIVE_POSITIONS,
-                        all_evaluations=list(daily_stats.all_evaluations),
-                        live_scan_markets=list(daily_stats.last_live_scan_markets),
-                        regular_scan_top=list(daily_stats.last_regular_scan_top),
+                        all_evaluations=list(getattr(daily_stats, "all_evaluations", [])),
+                        live_scan_markets=list(getattr(daily_stats, "last_live_scan_markets", [])),
+                        regular_scan_top=list(getattr(daily_stats, "last_regular_scan_top", [])),
                     )
                 except Exception as e:
-                    logger.error("Hourly heartbeat error: %s", e)
+                    logger.error("Hourly heartbeat error: %s", e, exc_info=True)
 
                 # Sleep until the next 3/9/15/21 ET slot
-                _et_now   = _now_et()
-                _upcoming = [
-                    _et_now.replace(hour=h, minute=0, second=0, microsecond=0)
-                    for h in _HB_HOURS
-                ]
-                _upcoming = [t if t > _et_now else t + _hb_td(days=1) for t in _upcoming]
-                await asyncio.sleep((min(_upcoming) - _et_now).total_seconds())
+                try:
+                    _et_now   = _now_et()
+                    _upcoming = [
+                        _et_now.replace(hour=h, minute=0, second=0, microsecond=0)
+                        for h in _HB_HOURS
+                    ]
+                    _upcoming = [t if t > _et_now else t + _hb_td(days=1) for t in _upcoming]
+                    await asyncio.sleep((min(_upcoming) - _et_now).total_seconds())
+                except asyncio.CancelledError:
+                    break
+                except Exception as _se:
+                    logger.warning("Heartbeat sleep error: %s — retrying in 60s", _se)
+                    await asyncio.sleep(60)
 
         async def daytime_summary_loop():
             """Post position digests at 12 AM, 6 AM, 12 PM, 6 PM Eastern time."""
