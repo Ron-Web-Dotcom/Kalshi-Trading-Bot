@@ -640,12 +640,14 @@ class TradingBot:
                     wl = await self.db.fetchone(
                         "SELECT COUNT(*) as total, "
                         "SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
-                        "SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses "
+                        "SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
+                        "COALESCE(SUM(pnl),0) as total_pnl "
                         "FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN')"
                     ) or {}
                     total_closed = wl.get("total", 0) or 0
                     total_wins   = wl.get("wins",  0) or 0
                     total_losses = wl.get("losses",0) or 0
+                    alltime_pnl  = float(wl.get("total_pnl", 0.0) or 0.0)
                     win_rate     = (total_wins / total_closed * 100) if total_closed > 0 else 0.0
 
                     from src.utils.daily_stats import stats as _ds_sum
@@ -670,6 +672,7 @@ class TradingBot:
                         closed_since_last=closed_since,
                         best_buys=list(_ds_sum.all_evaluations),
                         live_positions=live_pos_list,
+                        alltime_pnl=alltime_pnl,
                     )
                     # near_miss and position data are embedded in the daytime_summary message above
                 except Exception as e:

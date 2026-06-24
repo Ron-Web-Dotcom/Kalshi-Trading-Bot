@@ -1268,6 +1268,7 @@ class DiscordAlerter:
         paper: bool = True,
         closed_since_last: Optional[List[Dict]] = None,   # settled since last check-in
         best_buys: Optional[List[Dict]] = None,           # top AI BUY picks this cycle
+        alltime_pnl: float = 0.0,
         live_positions: Optional[List[Dict]] = None,      # in-play live slots
     ) -> None:
         """Scheduled digest at 12am/6am/12pm/6pm ET — narrative of what the bot did."""
@@ -1488,7 +1489,9 @@ class DiscordAlerter:
             pass
 
         # ── Track record ──────────────────────────────────────────────────────
-        pnl_s = "+" if today_pnl >= 0 else ""
+        pnl_s    = "+" if today_pnl >= 0 else ""
+        all_s    = "+" if alltime_pnl >= 0 else ""
+        today_note = f"**${pnl_s}{today_pnl:.2f}**" if today_pnl != 0 else "_$0.00 — nothing settled yet today_"
         if total_closed == 0:
             wr_emoji = "🆕"
             wr_str   = "No settled bets yet — track record in progress"
@@ -1499,7 +1502,8 @@ class DiscordAlerter:
             "name":   f"{wr_emoji} Track Record",
             "value":  (
                 f"{wr_str}\n"
-                f"Today's locked-in PnL: **${pnl_s}{today_pnl:.2f}**\n"
+                f"All-time banked: **${all_s}{alltime_pnl:.2f}**\n"
+                f"Today's locked-in: {today_note}\n"
                 f"Scanning: 🟦 **{kalshi_count}** Kalshi + 🟣 **{poly_count}** Polymarket"
             ),
             "inline": False,
