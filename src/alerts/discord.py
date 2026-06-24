@@ -1412,25 +1412,24 @@ class DiscordAlerter:
                 cur_price = float(p.get("current_price") or avg_price)
                 contracts = int(p.get("contracts") or 0)
                 size_usd  = float(p.get("size_usd") or 0) or round(avg_price * contracts / 100, 2)
-                # Max payout if this bet wins (what we get back)
-                win_price = (100 - avg_price) if side == "YES" else avg_price
-                payout    = contracts * win_price / 100
+                # Profit if this bet wins = contracts × (100 − entry_price) / 100
+                # regardless of side (you always paid avg_price and win (100-avg_price))
+                profit_if_win = contracts * (100 - avg_price) / 100
                 total_capital += size_usd
-                total_payout  += payout
+                total_payout  += profit_if_win
                 pnl       = (cur_price - avg_price) * contracts / 100
                 total_unreal  += pnl
                 label = self._display_ticker(p.get("ticker","?"), p.get("title","") or "")[:46]
                 olines.append(
                     f"{plat} **{label}**\n"
-                    f"   {side} | {contracts}x @ {avg_price:.0f}¢ | in **${size_usd:.2f}** → wins **${payout:.2f}**"
+                    f"   {side} | {contracts}x @ {avg_price:.0f}¢ | in **${size_usd:.2f}** → profit **+${profit_if_win:.2f}**"
                 )
             all_s = "+" if alltime_pnl >= 0 else ""
             tu_s  = "+" if total_unreal >= 0 else ""
-            net_return = total_payout - total_capital  # profit if ALL win
             summary = (
                 f"💰 **All-time banked: ${all_s}{alltime_pnl:.2f}**\n"
                 f"📤 Paper money in: **${total_capital:.2f}**\n"
-                f"📥 If all win, we get back: **${total_payout:.2f}** (profit **+${net_return:.2f}**)\n"
+                f"📥 If all win, profit: **+${total_payout:.2f}**\n"
                 + (f"📊 Current move: **${tu_s}{total_unreal:.2f}**\n" if total_unreal != 0 else "")
                 + "\n"
             )
