@@ -90,15 +90,20 @@ class PaperTrader:
         if self.db:
             # Duplicate-position guard: skip if open position on same side already exists
             existing = await self.db.fetchone(
-                "SELECT id FROM positions WHERE ticker=? AND side=? AND status='open'",
+                "SELECT id FROM positions WHERE ticker=? AND side=? AND status='open' AND platform='kalshi'",
                 (ticker, side)
             )
             if existing:
-                logger.info(
-                    "SKIP %s: open position already exists (id=%s)",
-                    ticker, existing["id"],
-                )
+                logger.info("SKIP %s %s: open kalshi position exists (id=%s)", ticker, side, existing["id"])
                 return None
+            if market_title:
+                title_existing = await self.db.fetchone(
+                    "SELECT id FROM positions WHERE title=? AND side=? AND status='open' AND platform='kalshi'",
+                    ((market_title or "")[:200], side)
+                )
+                if title_existing:
+                    logger.info("SKIP %s %s: open kalshi position with same title exists (id=%s)", ticker, side, title_existing["id"])
+                    return None
 
             record_id = await self.db.insert("trade_logs", record)
             record["id"] = record_id

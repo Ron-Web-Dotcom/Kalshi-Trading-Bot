@@ -1045,14 +1045,14 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
     # ── Real-time position resolution (runs every 45s) ────────────────────
     # As soon as close_time passes → result recorded → Discord fires → deleted
     try:
-        await _resolve_expired_positions(db, live_mode)
+        await _resolve_expired_positions(db, live_mode, risk=risk)
     except Exception as _re:
         logger.debug("Real-time resolve error: %s", _re)
 
     return results
 
 
-async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
+async def _resolve_expired_positions(db, live_mode: bool = False, risk=None) -> None:
     """
     Check all open positions whose market close_time has passed.
     Record result in trade_logs, fire Discord W/L alert, hard-delete from positions.
@@ -1174,6 +1174,10 @@ async def _resolve_expired_positions(db, live_mode: bool = False) -> None:
                 )
         except Exception as _tl:
             logger.debug("trade_logs update %s: %s", ticker, _tl)
+
+        # Update in-memory circuit breaker
+        if risk:
+            risk.record_result(ticker, pnl_usd, platform)
 
         # Hard delete — off the board
         await db.execute(
