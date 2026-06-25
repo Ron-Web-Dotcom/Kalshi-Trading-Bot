@@ -248,7 +248,7 @@ class DiscordAlerter:
         # Only show picks resolving today or tomorrow — drop anything beyond 48h
         in_bet   = [p for p in picks if p.get("_in_bet") or p.get("is_live") and p.get("contracts")]
         watching_all = [p for p in picks if p not in in_bet]
-        watching = [p for p in watching_all if (lambda h: h is None or h <= 48)(_hrs_left(p))]
+        watching = [p for p in watching_all if (lambda h: h is None or 0 < h <= 48)(_hrs_left(p))]
 
         sections = []
 
@@ -257,7 +257,7 @@ class DiscordAlerter:
             sections.append(section)
 
         if watching:
-            today_picks = [p for p in watching if (lambda h: h is not None and h <= 24)(_hrs_left(p))]
+            today_picks = [p for p in watching if (lambda h: h is not None and 0 < h <= 24)(_hrs_left(p))]
             week_picks  = [p for p in watching if p not in today_picks]
 
             if today_picks:
@@ -1491,7 +1491,7 @@ class DiscordAlerter:
             except Exception:
                 return 999
 
-        today_buys   = [b for b in buy_signals if _hrs_to_close(b) <= 24][:3]
+        today_buys   = [b for b in buy_signals if 0 < _hrs_to_close(b) <= 24][:3]
         watch_buys   = [b for b in buy_signals if _hrs_to_close(b) > 24][:3]
 
         if today_buys or watch_buys:
