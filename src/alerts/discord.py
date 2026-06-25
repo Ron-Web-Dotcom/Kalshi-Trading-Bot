@@ -985,7 +985,7 @@ class DiscordAlerter:
                 ai_str = f"\n🤖 {a_icon} {conf:.0f}% conf{ev_s}"
             elif ev and not is_today:
                 conf   = ev.get("confidence", 0)
-                ai_str = f"\n👀 WATCHING — {conf:.0f}% conf (bid placed on game day)"
+                ai_str = f"\n👀 WATCHING — {conf:.0f}% conf (bid placed on event day)"
             else:
                 ai_str = "\n👀 WATCHING — not yet evaluated"
             return f"{icon}{badge} **{title}** — {timing}\nYES {yes:.0f}¢ | NO {no:.0f}¢{ai_str}"
@@ -1507,7 +1507,7 @@ class DiscordAlerter:
                 days   = int(hrs / 24)
                 rlines.append(
                     f"👀 {plat} **{label}**\n"
-                    f"   WATCHING — {conf:.0f}% conf — bid placed on game day (~{days}d away)"
+                    f"   WATCHING — {conf:.0f}% conf — bid placed on event day (~{days}d away)"
                 )
             fields.append({
                 "name":   "🧠 Bot's Best Picks Right Now",

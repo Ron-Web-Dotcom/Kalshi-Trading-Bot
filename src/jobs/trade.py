@@ -727,7 +727,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
         # Long-term pool: markets closing TOMORROW through 7 days (regular scan)
         # Explicitly excludes today — today's markets belong to live scan only.
-        # When game day arrives, the market naturally moves to short_term/live.
+        # When event day arrives, the market naturally moves to short_term/live.
         long_term = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
@@ -867,10 +867,10 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 pass
             _week_min_conf = 75.0
             if _hours_out > 24:
-                # Don't place bids on future events — WATCH until game day
+                # Don't place bids on future events — WATCH until event day
                 # When the event day arrives it moves to short_term/live and gets bid then
                 logger.info(
-                    "Best opportunity WATCHING — %s closes in %.0fh (not today) — will bid on game day",
+                    "Best opportunity WATCHING — %s closes in %.0fh (not today) — will bid on event day",
                     _best_market.get("ticker", "?"), _hours_out,
                 )
                 best = None
