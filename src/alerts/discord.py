@@ -210,25 +210,35 @@ class DiscordAlerter:
             except Exception:
                 return None
 
-        def _timing_tag(hrs) -> str:
+        def _timing_tag(hrs, close_time="") -> str:
             if hrs is None or hrs < 0:
                 return " ⏰ resolving now"
             if hrs <= 3:
                 return f" 🔴 LIVE — {hrs:.0f}h left"
             if hrs <= 24:
-                return " 🟡 TODAY"
+                # Show actual ET resolve time e.g. "🟡 TODAY 3:30 PM ET"
+                try:
+                    from src.utils.eastern_time import format_et
+                    cd = datetime.fromisoformat(str(close_time).replace("Z", "+00:00"))
+                    if cd.tzinfo is None:
+                        cd = cd.replace(tzinfo=timezone.utc)
+                    et_time = format_et(cd, "%I:%M %p")
+                    return f" 🟡 TODAY {et_time} ET"
+                except Exception:
+                    return " 🟡 TODAY"
             return " 🌅 TOMORROW"
 
         def _pick_line(p: Dict) -> str:
             plat   = "🟣" if p.get("platform") == "polymarket" else "🟦"
-            title  = self._display_ticker(p.get("ticker", ""), p.get("title", "") or "")[:52]
+            title  = self._display_ticker(p.get("ticker", ""), p.get("title", "") or "")[:80]
             side   = (p.get("side") or "YES").upper()
             price  = float(p.get("price_cents") or p.get("yes_ask") or 0)
             conf   = float(p.get("confidence") or 0)
             ev     = p.get("net_ev")
             ev_s   = f" EV {ev:+.1f}¢" if ev is not None else ""
-            reason = (p.get("reasoning") or "")[:100]
-            timing = _timing_tag(_hrs_left(p))
+            reason = (p.get("reasoning") or "")[:120]
+            hrs    = _hrs_left(p)
+            timing = _timing_tag(hrs, p.get("close_time", ""))
             return (
                 f"{plat} **{title}**{timing}\n"
                 f"→ **{side}** @ **{price:.0f}¢** | **{conf:.0f}%**{ev_s}\n"
