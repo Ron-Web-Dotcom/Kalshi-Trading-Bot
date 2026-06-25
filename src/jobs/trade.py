@@ -866,7 +866,15 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             except Exception:
                 pass
             _week_min_conf = 75.0
-            if _hours_out > 24 and _best_conf < _week_min_conf:
+            if _hours_out > 24:
+                # Don't place bids on future events — WATCH until game day
+                # When the event day arrives it moves to short_term/live and gets bid then
+                logger.info(
+                    "Best opportunity WATCHING — %s closes in %.0fh (not today) — will bid on game day",
+                    _best_market.get("ticker", "?"), _hours_out,
+                )
+                best = None
+            elif _hours_out > 24 and _best_conf < _week_min_conf:
                 logger.info(
                     "Best opportunity SKIPPED — %s closes in %.0fh but conf=%.0f%% < %.0f%% required for 7-day markets",
                     _best_market.get("ticker", "?"), _hours_out, _best_conf, _week_min_conf,
