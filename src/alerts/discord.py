@@ -965,16 +965,29 @@ class DiscordAlerter:
             yes    = float(m.get("yes_ask", 0) or 0)
             no     = float(m.get("no_ask", 0) or (100 - yes if yes else 0))
             timing = _timing(m.get("close_time", ""))
+            # Only show BUY intent for today's events — future events are WATCHING
+            try:
+                ct = m.get("close_time", "")
+                _cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00")) if ct else None
+                if _cd and _cd.tzinfo is None:
+                    _cd = _cd.replace(tzinfo=timezone.utc)
+                _hrs = (_cd - now_utc).total_seconds() / 3600 if _cd else 999
+            except Exception:
+                _hrs = 999
+            is_today = _hrs <= 24
             ev     = eval_by_ticker.get(m.get("ticker", ""))
-            if ev:
+            if ev and is_today:
                 action = ev.get("action", "HOLD")
                 conf   = ev.get("confidence", 0)
                 ev_val = ev.get("net_ev")
                 ev_s   = f" EV {ev_val:+.1f}¢" if ev_val is not None else ""
-                a_icon = "🟢 BUY" if action == "BUY" else "⏸ HOLD"
+                a_icon = "🟢 BUY TODAY" if action == "BUY" else "⏸ HOLD"
                 ai_str = f"\n🤖 {a_icon} {conf:.0f}% conf{ev_s}"
+            elif ev and not is_today:
+                conf   = ev.get("confidence", 0)
+                ai_str = f"\n👀 WATCHING — {conf:.0f}% conf (bid placed on game day)"
             else:
-                ai_str = "\n🤖 Not yet evaluated"
+                ai_str = "\n👀 WATCHING — not yet evaluated"
             return f"{icon}{badge} **{title}** — {timing}\nYES {yes:.0f}¢ | NO {no:.0f}¢{ai_str}"
 
         # Live scan section
@@ -1446,9 +1459,8 @@ class DiscordAlerter:
                 "inline": False,
             })
 
-        # ── Bot's radar — top picks it's watching ────────────────────────────
+        # ── Bot's radar — today's BUYs + upcoming watches ───────────────────
         buy_signals_raw = [b for b in buys if b.get("action") == "BUY"]
-        # Deduplicate by ticker — keep highest-confidence entry
         seen_tickers: set = set()
         buy_signals = []
         for b in sorted(buy_signals_raw, key=lambda x: x.get("confidence", 0), reverse=True):
@@ -1456,10 +1468,25 @@ class DiscordAlerter:
             if t not in seen_tickers:
                 seen_tickers.add(t)
                 buy_signals.append(b)
-        buy_signals = buy_signals[:3]
-        if buy_signals:
+
+        def _hrs_to_close(b):
+            ct = b.get("close_time", "")
+            if not ct:
+                return 999
+            try:
+                cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if cd.tzinfo is None:
+                    cd = cd.replace(tzinfo=timezone.utc)
+                return (cd - datetime.now(timezone.utc)).total_seconds() / 3600
+            except Exception:
+                return 999
+
+        today_buys   = [b for b in buy_signals if _hrs_to_close(b) <= 24][:3]
+        watch_buys   = [b for b in buy_signals if _hrs_to_close(b) > 24][:3]
+
+        if today_buys or watch_buys:
             rlines = []
-            for b in buy_signals:
+            for b in today_buys:
                 plat   = "🟣" if b.get("platform") == "polymarket" else "🟦"
                 label  = self._display_ticker(b.get("ticker",""), b.get("title","") or "")[:48]
                 conf   = b.get("confidence", 0)
@@ -1469,8 +1496,18 @@ class DiscordAlerter:
                 reason = (b.get("reasoning") or "")[:90]
                 rlines.append(
                     f"🟢 {plat} **{label}**\n"
-                    f"   BUY **{side}** — {conf:.0f}% conf{ev_s}\n"
+                    f"   BUY **{side}** TODAY — {conf:.0f}% conf{ev_s}\n"
                     f"   _{reason}_"
+                )
+            for b in watch_buys:
+                plat   = "🟣" if b.get("platform") == "polymarket" else "🟦"
+                label  = self._display_ticker(b.get("ticker",""), b.get("title","") or "")[:48]
+                conf   = b.get("confidence", 0)
+                hrs    = _hrs_to_close(b)
+                days   = int(hrs / 24)
+                rlines.append(
+                    f"👀 {plat} **{label}**\n"
+                    f"   WATCHING — {conf:.0f}% conf — bid placed on game day (~{days}d away)"
                 )
             fields.append({
                 "name":   "🧠 Bot's Best Picks Right Now",
