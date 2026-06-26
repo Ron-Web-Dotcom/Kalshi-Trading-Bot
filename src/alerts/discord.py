@@ -304,11 +304,6 @@ class DiscordAlerter:
                     "**🌅 WATCHING — TOMORROW**\n"
                     + "\n\n".join(_pick_line(p) for p in tomorrow_picks[:3])
                 )
-            if week_picks:
-                sections.append(
-                    "**📅 WATCHING — THIS WEEK**\n"
-                    + "\n\n".join(_pick_line(p) for p in week_picks[:3])
-                )
 
         if not sections:
             return  # nothing worth alerting on
