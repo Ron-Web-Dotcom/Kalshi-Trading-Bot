@@ -197,8 +197,10 @@ class DiscordAlerter:
 
         mode_tag = "📝 PAPER" if mode == "PAPER" else "💰 LIVE"
         now_utc  = datetime.now(timezone.utc)
+        from src.utils.eastern_time import now_et as _now_et, format_et as _fmt_et
+        _today_et = _now_et().date()
 
-        def _hrs_left(p: Dict):
+        def _close_dt(p: Dict):
             ct = p.get("close_time", "")
             if not ct:
                 return None
@@ -206,23 +208,37 @@ class DiscordAlerter:
                 cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
                 if cd.tzinfo is None:
                     cd = cd.replace(tzinfo=timezone.utc)
-                return (cd - now_utc).total_seconds() / 3600
+                return cd
             except Exception:
                 return None
 
-        def _timing_tag(hrs, close_time="") -> str:
+        def _hrs_left(p: Dict):
+            cd = _close_dt(p)
+            if cd is None:
+                return None
+            return (cd - now_utc).total_seconds() / 3600
+
+        def _is_today_et(p: Dict) -> bool:
+            """True if close_time falls on today's ET calendar date."""
+            cd = _close_dt(p)
+            if cd is None:
+                return False
+            import zoneinfo
+            et = cd.astimezone(zoneinfo.ZoneInfo("America/New_York"))
+            return et.date() == _today_et
+
+        def _timing_tag(hrs, close_time="", is_today: bool = False) -> str:
             if hrs is None or hrs < 0:
                 return " ⏰ resolving now"
             if hrs <= 3:
                 return f" 🔴 LIVE — {hrs:.0f}h left"
-            if hrs <= 24:
+            if is_today:
                 # Show actual ET resolve time e.g. "🟡 TODAY 3:30 PM ET"
                 try:
-                    from src.utils.eastern_time import format_et
                     cd = datetime.fromisoformat(str(close_time).replace("Z", "+00:00"))
                     if cd.tzinfo is None:
                         cd = cd.replace(tzinfo=timezone.utc)
-                    et_time = format_et(cd, "%I:%M %p")
+                    et_time = _fmt_et(cd, "%I:%M %p")
                     return f" 🟡 TODAY {et_time} ET"
                 except Exception:
                     return " 🟡 TODAY"
@@ -238,17 +254,17 @@ class DiscordAlerter:
             ev_s   = f" EV {ev:+.1f}¢" if ev is not None else ""
             reason = (p.get("reasoning") or "")[:120]
             hrs    = _hrs_left(p)
-            timing = _timing_tag(hrs, p.get("close_time", ""))
+            timing = _timing_tag(hrs, p.get("close_time", ""), is_today=_is_today_et(p))
             return (
                 f"{plat} **{title}**{timing}\n"
                 f"→ **{side}** @ **{price:.0f}¢** | **{conf:.0f}%**{ev_s}\n"
                 f"_{reason}_"
             )
 
-        # Only show picks resolving today or tomorrow — drop anything beyond 48h
+        # Only show picks resolving today or tomorrow — drop anything beyond 48h or already closed
         in_bet   = [p for p in picks if p.get("_in_bet") or p.get("is_live") and p.get("contracts")]
         watching_all = [p for p in picks if p not in in_bet]
-        watching = [p for p in watching_all if (lambda h: h is None or 0 < h <= 48)(_hrs_left(p))]
+        watching = [p for p in watching_all if (lambda h: h is not None and 0 < h <= 48)(_hrs_left(p))]
 
         sections = []
 
@@ -257,8 +273,9 @@ class DiscordAlerter:
             sections.append(section)
 
         if watching:
-            today_picks = [p for p in watching if (lambda h: h is not None and 0 < h <= 24)(_hrs_left(p))]
-            week_picks  = [p for p in watching if p not in today_picks]
+            # Use ET calendar date — not 24h window — for TODAY vs TOMORROW
+            today_picks = [p for p in watching if _is_today_et(p)]
+            week_picks  = [p for p in watching if not _is_today_et(p)]
 
             if today_picks:
                 sections.append(
@@ -1479,6 +1496,23 @@ class DiscordAlerter:
                 seen_tickers.add(t)
                 buy_signals.append(b)
 
+        import zoneinfo as _zi
+        _tz_et  = _zi.ZoneInfo("America/New_York")
+        _now_ds = datetime.now(timezone.utc)
+        _today_ds = _now_ds.astimezone(_tz_et).date()
+
+        def _is_today_ds(b) -> bool:
+            ct = b.get("close_time", "")
+            if not ct:
+                return False
+            try:
+                cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if cd.tzinfo is None:
+                    cd = cd.replace(tzinfo=timezone.utc)
+                return cd.astimezone(_tz_et).date() == _today_ds and (cd - _now_ds).total_seconds() > 0
+            except Exception:
+                return False
+
         def _hrs_to_close(b):
             ct = b.get("close_time", "")
             if not ct:
@@ -1487,12 +1521,12 @@ class DiscordAlerter:
                 cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
                 if cd.tzinfo is None:
                     cd = cd.replace(tzinfo=timezone.utc)
-                return (cd - datetime.now(timezone.utc)).total_seconds() / 3600
+                return (cd - _now_ds).total_seconds() / 3600
             except Exception:
                 return 999
 
-        today_buys   = [b for b in buy_signals if 0 < _hrs_to_close(b) <= 24][:3]
-        watch_buys   = [b for b in buy_signals if _hrs_to_close(b) > 24][:3]
+        today_buys   = [b for b in buy_signals if _is_today_ds(b)][:3]
+        watch_buys   = [b for b in buy_signals if not _is_today_ds(b) and _hrs_to_close(b) > 0][:3]
 
         if today_buys or watch_buys:
             rlines = []
