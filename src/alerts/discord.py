@@ -53,11 +53,11 @@ class DiscordAlerter:
     def _display_ticker(ticker: str, title: str = "") -> str:
         """Return a human-readable label — never expose raw hex condition IDs."""
         if title and not title.startswith("0x"):
-            return title[:80]
+            return title
         if ticker and not ticker.startswith("0x"):
-            return ticker[:60]
+            return ticker
         # Polymarket hex conditionId — strip entirely, use title or generic label
-        return title[:80] if title else "Polymarket Market"
+        return title if title else "Polymarket Market"
 
     async def send_message(self, text: str) -> bool:
         """Post a plain-text message as a minimal Discord embed."""
@@ -427,7 +427,7 @@ class DiscordAlerter:
         for i, t in enumerate(trades, 1):
             reasoning = (t.get("reasoning") or "")[:200]
             if reasoning:
-                title_short = self._display_ticker(t.get("ticker", ""), t.get("title", ""))[:40]
+                title_short = self._display_ticker(t.get("ticker", ""), t.get("title", ""))[:120]
                 fields.append({
                     "name": f"#{i} Reasoning — {title_short}",
                     "value": reasoning,
@@ -673,7 +673,7 @@ class DiscordAlerter:
 
         for i, m in enumerate(misses[:6], 1):
             plat    = "🟣" if m.get("platform") == "polymarket" else "🟦"
-            title   = self._display_ticker(m.get("ticker", ""), m.get("title", "") or "")[:60]
+            title   = self._display_ticker(m.get("ticker", ""), m.get("title", "") or "")[:120]
             side    = (m.get("side") or "yes").upper()
             conf    = m.get("confidence", 0)
             price   = m.get("yes_ask", 0) if side == "YES" else m.get("no_ask", 0)
@@ -738,7 +738,7 @@ class DiscordAlerter:
         for i, nm in enumerate(misses, 1):
             ev_str  = f" EV {nm['net_ev']:+.1f}¢" if nm.get("net_ev") is not None else ""
             plat    = "🟣" if nm.get("platform") == "polymarket" else "🟦"
-            title   = self._display_ticker(nm.get("ticker", ""), nm.get("title", "") or "")[:65]
+            title   = self._display_ticker(nm.get("ticker", ""), nm.get("title", "") or "")[:120]
             reason  = (nm.get("reasoning") or "no reasoning")[:120]
             conf    = nm.get("confidence", 0)
             side    = (nm.get("side") or "yes").upper()
@@ -923,15 +923,30 @@ class DiscordAlerter:
         regular_scan_top: Optional[List[Dict]] = None,
     ) -> None:
         """Hourly heartbeat — clean stats, watching section, best pick."""
-        from src.utils.eastern_time import format_et, et_label
+        from src.utils.eastern_time import format_et, et_label, now_et as _hb_now_et
+        import zoneinfo as _hb_zi
         now_utc  = datetime.now(timezone.utc)
         hhmm     = format_et(now_utc, "%I:%M %p") + f" {et_label()}"
         color    = 0x5865F2
+        _hb_tz_et    = _hb_zi.ZoneInfo("America/New_York")
+        _hb_today_et = _hb_now_et().date()
+        _hb_tomorrow_et = _hb_today_et.__class__.fromordinal(_hb_today_et.toordinal() + 1)
+
+        def _close_et_date(ct: str):
+            if not ct:
+                return None
+            try:
+                cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if cd.tzinfo is None:
+                    cd = cd.replace(tzinfo=timezone.utc)
+                return cd.astimezone(_hb_tz_et).date()
+            except Exception:
+                return None
 
         all_evals = all_evaluations or []
 
         def _timing(ct: str) -> str:
-            """Classify a market by how soon it expires."""
+            """Classify a market by how soon it expires — using ET calendar date."""
             if not ct:
                 return "📅 Long-term"
             try:
@@ -943,13 +958,12 @@ class DiscordAlerter:
                     return "⏰ Resolving now"
                 if hours <= 3:
                     return "🔥 Ends <3h"
-                if hours <= 24:
+                et_date = close_dt.astimezone(_hb_tz_et).date()
+                if et_date == _hb_today_et:
                     return "⏳ Ends today"
-                if hours <= 72:
-                    return "📆 Ends this week"
-                if hours <= 720:
-                    return "🗓 Ends this month"
-                return "📅 Long-term"
+                if et_date == _hb_tomorrow_et:
+                    return "📆 Ends tomorrow"
+                return "📅 Future"
             except Exception:
                 return "📅 Long-term"
 
@@ -969,7 +983,7 @@ class DiscordAlerter:
             lines = []
             for e in show:
                 plat   = "🟣" if e.get("platform") == "polymarket" else "🟦"
-                ttl    = self._display_ticker(e.get("ticker", ""), e.get("title", "") or "")[:48]
+                ttl    = self._display_ticker(e.get("ticker", ""), e.get("title", "") or "")[:120]
                 action = e.get("action", "HOLD")
                 conf   = e.get("confidence", 0)
                 ev     = e.get("net_ev")
@@ -994,20 +1008,12 @@ class DiscordAlerter:
         def _market_line(m: Dict, badge: str = "") -> str:
             plat   = m.get("platform", "kalshi")
             icon   = "🟣" if plat == "polymarket" else "🟦"
-            title  = self._display_ticker(m.get("ticker", ""), m.get("title", "") or "")[:55]
+            title  = self._display_ticker(m.get("ticker", ""), m.get("title", "") or "")[:120]
             yes    = float(m.get("yes_ask", 0) or 0)
             no     = float(m.get("no_ask", 0) or (100 - yes if yes else 0))
             timing = _timing(m.get("close_time", ""))
             # Only show BUY intent for today's events — future events are WATCHING
-            try:
-                ct = m.get("close_time", "")
-                _cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00")) if ct else None
-                if _cd and _cd.tzinfo is None:
-                    _cd = _cd.replace(tzinfo=timezone.utc)
-                _hrs = (_cd - now_utc).total_seconds() / 3600 if _cd else 999
-            except Exception:
-                _hrs = 999
-            is_today = _hrs <= 24
+            is_today = (_close_et_date(m.get("close_time", "")) == _hb_today_et)
             ev     = eval_by_ticker.get(m.get("ticker", ""))
             if ev and is_today:
                 action = ev.get("action", "HOLD")
@@ -1367,7 +1373,7 @@ class DiscordAlerter:
             headline = f"🎯 Bot placed **{len(new_positions)}** new prediction bet(s) — confidence was there!"
             color    = 0x00BFFF
         elif top_buy:
-            ttl = self._display_ticker(top_buy.get("ticker",""), top_buy.get("title","") or "")[:40]
+            ttl = self._display_ticker(top_buy.get("ticker",""), top_buy.get("title","") or "")[:120]
             headline = f"🧠 Bot spotted a strong edge on **{ttl}** — watching for right entry point"
             color    = 0x5865F2
         elif losses_here:
@@ -1390,7 +1396,7 @@ class DiscordAlerter:
             side  = (p.get("side") or "yes").upper()
             price = float(p.get("avg_price") or 0)
             size  = float(p.get("size_usd") or 0) or round(price * int(p.get("contracts") or 0) / 100, 2)
-            label = self._display_ticker(p.get("ticker","?"), p.get("title","") or "")[:50]
+            label = self._display_ticker(p.get("ticker","?"), p.get("title","") or "")[:120]
             is_live_bet = p.get("is_live") or p.get("_momentum")
             tag   = " ⚡ LIVE BET" if is_live_bet else ""
             activity_lines.append(
@@ -1410,7 +1416,7 @@ class DiscordAlerter:
                 "take-profit hit 🎉"    if why.startswith("take_profit") else
                 "AI opted out"          if why.startswith("ai_reeval") else "closed"
             )
-            label = self._display_ticker(c.get("ticker","?"), c.get("title","") or "")[:50]
+            label = self._display_ticker(c.get("ticker","?"), c.get("title","") or "")[:120]
             plat  = "🟣" if c.get("platform") == "polymarket" else "🟦"
             activity_lines.append(
                 f"{icon}: {plat} **{label}**\n"
@@ -1430,7 +1436,7 @@ class DiscordAlerter:
         if live_pos:
             llines = []
             for lp in live_pos[:3]:
-                label    = self._display_ticker(lp.get("ticker","?"), lp.get("title","") or "")[:50]
+                label    = self._display_ticker(lp.get("ticker","?"), lp.get("title","") or "")[:120]
                 side     = (lp.get("side") or "yes").upper()
                 entry    = float(lp.get("entry_price") or lp.get("yes_ask") or 0)
                 move     = lp.get("move_pct", 0)
@@ -1465,7 +1471,7 @@ class DiscordAlerter:
                 total_payout  += profit_if_win
                 pnl       = (cur_price - avg_price) * contracts / 100
                 total_unreal  += pnl
-                label = self._display_ticker(p.get("ticker","?"), p.get("title","") or "")[:46]
+                label = self._display_ticker(p.get("ticker","?"), p.get("title","") or "")[:120]
                 olines.append(
                     f"{plat} **{label}**\n"
                     f"   {side} | {contracts}x @ {avg_price:.0f}¢ | in **${size_usd:.2f}** → profit **+${profit_if_win:.2f}**"
@@ -1587,7 +1593,7 @@ class DiscordAlerter:
                 nm_lines = []
                 for nm in nm_list:
                     plat_nm = "🟣" if nm.get("platform") == "polymarket" else "🟦"
-                    ttl_nm  = self._display_ticker(nm.get("ticker",""), nm.get("title","") or "")[:50]
+                    ttl_nm  = self._display_ticker(nm.get("ticker",""), nm.get("title","") or "")[:120]
                     conf_nm = nm.get("confidence", 0)
                     side_nm = (nm.get("side") or "YES").upper()
                     skip_nm = (nm.get("skip_reason") or "below threshold")[:55]
