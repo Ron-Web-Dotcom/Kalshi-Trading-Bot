@@ -237,8 +237,9 @@ class DiscordAlerter:
         def _timing_tag(hrs, close_time="", is_today: bool = False) -> str:
             if hrs is None or hrs < 0:
                 return " ⏰ resolving now"
-            if hrs <= 3:
-                return f" 🔴 LIVE — {hrs:.0f}h left"
+            if hrs <= 1:
+                mins = int(hrs * 60)
+                return f" 🔴 LIVE — {mins}min left" if mins > 0 else " 🔴 LIVE — closing now"
             if is_today:
                 # Show actual ET resolve time e.g. "🟡 TODAY 3:30 PM ET"
                 try:
@@ -956,8 +957,9 @@ class DiscordAlerter:
                 hours = (close_dt - now_utc).total_seconds() / 3600
                 if hours < 0:
                     return "⏰ Resolving now"
-                if hours <= 3:
-                    return "🔥 Ends <3h"
+                if hours <= 1:
+                    mins = int(hours * 60)
+                    return f"🔴 LIVE — {mins}min left"
                 et_date = close_dt.astimezone(_hb_tz_et).date()
                 if et_date == _hb_today_et:
                     return "⏳ Ends today"
