@@ -218,14 +218,21 @@ class DiscordAlerter:
                 return None
             return (cd - now_utc).total_seconds() / 3600
 
-        def _is_today_et(p: Dict) -> bool:
-            """True if close_time falls on today's ET calendar date."""
+        import zoneinfo as _ziet
+        _tz_et_ba  = _ziet.ZoneInfo("America/New_York")
+        _tomorrow_et = _today_et.__class__.fromordinal(_today_et.toordinal() + 1)
+
+        def _et_date(p: Dict):
             cd = _close_dt(p)
             if cd is None:
-                return False
-            import zoneinfo
-            et = cd.astimezone(zoneinfo.ZoneInfo("America/New_York"))
-            return et.date() == _today_et
+                return None
+            return cd.astimezone(_tz_et_ba).date()
+
+        def _is_today_et(p: Dict) -> bool:
+            return _et_date(p) == _today_et
+
+        def _is_tomorrow_et(p: Dict) -> bool:
+            return _et_date(p) == _tomorrow_et
 
         def _timing_tag(hrs, close_time="", is_today: bool = False) -> str:
             if hrs is None or hrs < 0:
@@ -246,7 +253,7 @@ class DiscordAlerter:
 
         def _pick_line(p: Dict) -> str:
             plat   = "🟣" if p.get("platform") == "polymarket" else "🟦"
-            title  = self._display_ticker(p.get("ticker", ""), p.get("title", "") or "")[:80]
+            title  = self._display_ticker(p.get("ticker", ""), p.get("title", "") or "")[:120]
             side   = (p.get("side") or "YES").upper()
             price  = float(p.get("price_cents") or p.get("yes_ask") or 0)
             conf   = float(p.get("confidence") or 0)
@@ -261,10 +268,10 @@ class DiscordAlerter:
                 f"_{reason}_"
             )
 
-        # Only show picks resolving today or tomorrow — drop anything beyond 48h or already closed
+        # Only show picks resolving today or tomorrow by ET calendar date
         in_bet   = [p for p in picks if p.get("_in_bet") or p.get("is_live") and p.get("contracts")]
         watching_all = [p for p in picks if p not in in_bet]
-        watching = [p for p in watching_all if (lambda h: h is not None and 0 < h <= 48)(_hrs_left(p))]
+        watching = [p for p in watching_all if _is_today_et(p) or _is_tomorrow_et(p)]
 
         sections = []
 
@@ -273,9 +280,8 @@ class DiscordAlerter:
             sections.append(section)
 
         if watching:
-            # Use ET calendar date — not 24h window — for TODAY vs TOMORROW
             today_picks = [p for p in watching if _is_today_et(p)]
-            week_picks  = [p for p in watching if not _is_today_et(p)]
+            week_picks  = [p for p in watching if _is_tomorrow_et(p)]
 
             if today_picks:
                 sections.append(
@@ -1525,19 +1531,35 @@ class DiscordAlerter:
             except Exception:
                 return 999
 
-        today_buys   = [b for b in buy_signals if _is_today_ds(b)][:3]
-        watch_buys   = [b for b in buy_signals if not _is_today_ds(b) and _hrs_to_close(b) > 0][:3]
+        _tomorrow_ds = (_now_ds.astimezone(_tz_et).date().__class__.fromordinal(
+            _today_ds.toordinal() + 1))
+
+        def _is_tomorrow_ds(b) -> bool:
+            ct = b.get("close_time", "")
+            if not ct:
+                return False
+            try:
+                cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if cd.tzinfo is None:
+                    cd = cd.replace(tzinfo=timezone.utc)
+                return cd.astimezone(_tz_et).date() == _tomorrow_ds
+            except Exception:
+                return False
+
+        # Only show today and tomorrow — no picks 2+ days away
+        today_buys = [b for b in buy_signals if _is_today_ds(b)][:3]
+        watch_buys = [b for b in buy_signals if _is_tomorrow_ds(b)][:3]
 
         if today_buys or watch_buys:
             rlines = []
             for b in today_buys:
                 plat   = "🟣" if b.get("platform") == "polymarket" else "🟦"
-                label  = self._display_ticker(b.get("ticker",""), b.get("title","") or "")[:48]
+                label  = self._display_ticker(b.get("ticker",""), b.get("title","") or "")[:120]
                 conf   = b.get("confidence", 0)
                 ev     = b.get("net_ev")
                 ev_s   = f" | EV {ev:+.1f}¢" if ev is not None else ""
                 side   = (b.get("side") or "YES").upper()
-                reason = (b.get("reasoning") or "")[:90]
+                reason = (b.get("reasoning") or "")[:120]
                 rlines.append(
                     f"🟢 {plat} **{label}**\n"
                     f"   BUY **{side}** TODAY — {conf:.0f}% conf{ev_s}\n"
@@ -1545,13 +1567,11 @@ class DiscordAlerter:
                 )
             for b in watch_buys:
                 plat   = "🟣" if b.get("platform") == "polymarket" else "🟦"
-                label  = self._display_ticker(b.get("ticker",""), b.get("title","") or "")[:48]
+                label  = self._display_ticker(b.get("ticker",""), b.get("title","") or "")[:120]
                 conf   = b.get("confidence", 0)
-                hrs    = _hrs_to_close(b)
-                days   = int(hrs / 24)
                 rlines.append(
                     f"👀 {plat} **{label}**\n"
-                    f"   WATCHING — {conf:.0f}% conf — bid placed on event day (~{days}d away)"
+                    f"   WATCHING — {conf:.0f}% conf — bid placed on event day (~1d away)"
                 )
             fields.append({
                 "name":   "🧠 Bot's Best Picks Right Now",
