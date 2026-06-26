@@ -352,8 +352,10 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             _et_now = _dt.now(_pytz.timezone("America/New_York"))
         _today_midnight_et   = _et_now.replace(hour=0, minute=0, second=0, microsecond=0)
         _tonight_midnight_et = _today_midnight_et + _td(days=1)
+        _tomorrow_end_et     = _today_midnight_et + _td(days=2)   # end of tomorrow ET
         _week_end_et         = _today_midnight_et + _td(days=7)
-        _tonight_utc = _tonight_midnight_et.astimezone(_tz.utc)
+        _tonight_utc    = _tonight_midnight_et.astimezone(_tz.utc)
+        _tomorrow_end_utc = _tomorrow_end_et.astimezone(_tz.utc)
         _week_end_utc = _week_end_et.astimezone(_tz.utc)
 
         def _closes_today(m):
@@ -366,6 +368,19 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 if close_dt.tzinfo is None:
                     close_dt = close_dt.replace(tzinfo=_tz.utc)
                 return now_utc < close_dt <= _tonight_utc
+            except Exception:
+                return False
+
+        def _closes_tomorrow(m):
+            """True if market closes on tomorrow's ET calendar date."""
+            ct = m.get("close_time", "")
+            if not ct:
+                return False
+            try:
+                close_dt = _dt.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if close_dt.tzinfo is None:
+                    close_dt = close_dt.replace(tzinfo=_tz.utc)
+                return _tonight_utc < close_dt <= _tomorrow_end_utc
             except Exception:
                 return False
 
@@ -443,11 +458,11 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     and m.get("close_time")
                     and not is_junk(m.get("title", ""))
                 ]
-                # Split into short-term (≤24h) and long-term (≤7 days) — mirrors Kalshi pools
+                # Split into today (bid eligible) and tomorrow (watch/score only) — 2-day scan
                 poly_short = [m for m in _poly_base if _closes_today(m)]
-                poly_long  = [m for m in _poly_base if _closes_within_week(m)
+                poly_long  = [m for m in _poly_base if _closes_tomorrow(m)
                               and m.get("ticker") not in {x.get("ticker") for x in poly_short}]
-                poly_markets = poly_short + poly_long   # short-term first (higher priority)
+                poly_markets = poly_short + poly_long   # today first (higher priority)
                 logger.info("Polymarket: %d markets stored, %d tradeable",
                             len(raw_poly), len(poly_markets))
             except Exception as pe:
@@ -725,9 +740,9 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
                 # live_trades_alert is owned by live_market_manager — skip here to avoid duplicate alerts
 
-        # Long-term pool: markets closing TOMORROW through 7 days (regular scan)
-        # Explicitly excludes today — today's markets belong to live scan only.
-        # When event day arrives, the market naturally moves to short_term/live.
+        # Scan pool: markets closing TOMORROW only (today+tomorrow = 2-day scan window)
+        # Bandwidth tracks up to 7 days but we only actively score today + tomorrow.
+        # When tomorrow becomes today the market moves to short_term/live for bidding.
         long_term = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
@@ -736,8 +751,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             and m.get("volume", 0) >= max(min_vol, 10)
             and (m.get("title") or "")
             and m.get("close_time")
-            and _closes_within_week(m)
-            and not _closes_today(m)                      # exclude today → live scan owns today
+            and _closes_tomorrow(m)                       # tomorrow only — not today, not 2+ days
             and not is_junk(m.get("title", ""))
         ]
 
@@ -865,19 +879,12 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 _hours_out = (_close_dt - now_utc).total_seconds() / 3600
             except Exception:
                 pass
-            _week_min_conf = 75.0
-            if _hours_out > 24:
-                # Don't place bids on future events — WATCH until event day
-                # When the event day arrives it moves to short_term/live and gets bid then
+            # Bid only on today's ET calendar date — LIVE (≤1h) or TODAY (>1h same date)
+            _best_is_today = _closes_today(_best_market)
+            if not _best_is_today:
                 logger.info(
-                    "Best opportunity WATCHING — %s closes in %.0fh (not today) — will bid on event day",
+                    "Best opportunity WATCHING — %s closes in %.0fh (not today ET) — will bid on event day",
                     _best_market.get("ticker", "?"), _hours_out,
-                )
-                best = None
-            elif _hours_out > 24 and _best_conf < _week_min_conf:
-                logger.info(
-                    "Best opportunity SKIPPED — %s closes in %.0fh but conf=%.0f%% < %.0f%% required for 7-day markets",
-                    _best_market.get("ticker", "?"), _hours_out, _best_conf, _week_min_conf,
                 )
                 best = None
 
