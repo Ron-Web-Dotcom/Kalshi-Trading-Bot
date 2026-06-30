@@ -1293,12 +1293,24 @@ class TradingBot:
                             _pc.get_live_now_markets(max_markets=50),
                             return_exceptions=True,
                         )
+                        def _norm_price(m: dict) -> dict:
+                            def _n(v):
+                                try:
+                                    f = float(v or 0)
+                                    return f * 100 if f < 1.0 else f
+                                except Exception:
+                                    return 0.0
+                            ya = _n(m.get("yes_ask") or m.get("last_price"))
+                            if ya > 0:
+                                m["yes_ask"] = round(ya, 2)
+                                m["no_ask"]  = round(100 - ya, 2)
+                            return m
                         for m in (kalshi_live_now if isinstance(kalshi_live_now, list) else []):
                             m["_platform_live"] = True
-                            candidates.append(m)
+                            candidates.append(_norm_price(m))
                         for m in (poly_live_now if isinstance(poly_live_now, list) else []):
                             m["_platform_live"] = True
-                            candidates.append(m)
+                            candidates.append(_norm_price(m))
                     except Exception as _pe:
                         logger.debug("Live platform fetch in scan loop: %s", _pe)
 

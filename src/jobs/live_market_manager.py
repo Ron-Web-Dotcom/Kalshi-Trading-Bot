@@ -778,9 +778,11 @@ async def run_live_manager_cycle(db, discord, settings, kalshi_trader, poly_trad
             now_utc = _now_utc()
             elapsed = (now_utc - _last_price_alert_time).total_seconds() if _last_price_alert_time else PRICE_ALERT_INTERVAL + 1
             if elapsed >= PRICE_ALERT_INTERVAL:
-                sent = await _send_live_positions_update(discord, _live_slots)
-                if sent:
-                    _last_price_alert_time = now_utc
+                try:
+                    sent = await _send_live_positions_update(discord, _live_slots)
+                except Exception:
+                    sent = False
+                _last_price_alert_time = now_utc  # always update to avoid retry-every-5min loop
 
     except Exception as e:
         logger.error("Live manager cycle error: %s", e, exc_info=True)
