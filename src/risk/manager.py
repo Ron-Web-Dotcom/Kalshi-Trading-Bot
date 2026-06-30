@@ -157,15 +157,14 @@ class RiskManager:
         if db is None:
             return False, ""
 
-        # Check 1: daily loss total — join trade_logs to filter by paper/live flag
+        # Check 1: daily loss total — use trade_logs directly to avoid JOIN fan-out
         try:
             paper_flag = 0 if settings.trading.live_trading_enabled else 1
             today = datetime.now(timezone.utc).date().isoformat()
             row = await db.fetchone(
-                "SELECT COALESCE(SUM(p.pnl), 0) AS total_pnl "
-                "FROM positions p "
-                "JOIN trade_logs t ON t.ticker = p.ticker AND t.paper_trade = ? "
-                "WHERE p.status='closed' AND p.closed_at >= ?",
+                "SELECT COALESCE(SUM(pnl), 0) AS total_pnl "
+                "FROM trade_logs "
+                "WHERE paper_trade = ? AND resolved_at >= ? AND pnl IS NOT NULL",
                 (paper_flag, today + "T00:00:00"),
             )
             total_pnl = float((row or {}).get("total_pnl", 0) or 0)

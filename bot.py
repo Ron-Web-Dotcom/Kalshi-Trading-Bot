@@ -243,6 +243,7 @@ class TradingBot:
             et = _net()
             if 3 <= et.hour < 5:
                 if not _sleep_mode_notified:
+                    _sleep_mode_notified = True  # set before send to prevent retry loop on failure
                     try:
                         from src.alerts.discord import DiscordAlerter as _DA
                         await _DA().send_message(
@@ -250,7 +251,6 @@ class TradingBot:
                             "Bot pausing all scanning & alerts until 5:00 AM ET.\n"
                             "Existing positions are safe — no changes during sleep. 💤"
                         )
-                        _sleep_mode_notified = True
                     except Exception:
                         pass
                     # GC before sleeping to free unreferenced memory
@@ -551,7 +551,7 @@ class TradingBot:
                         for h in _HB_HOURS
                     ]
                     _upcoming = [t if t > _et_now else t + _hb_td(days=1) for t in _upcoming]
-                    await asyncio.sleep((min(_upcoming) - _et_now).total_seconds())
+                    await asyncio.sleep(max(0.0, (min(_upcoming) - _et_now).total_seconds()))
                 except asyncio.CancelledError:
                     break
                 except Exception as _se:
@@ -1288,11 +1288,21 @@ class TradingBot:
                         from src.clients.polymarket_client import PolymarketTradingClient as _PC
                         _kc = _KC()
                         _pc = _PC()
-                        kalshi_live_now, poly_live_now = await asyncio.gather(
-                            _kc.get_live_now_markets(max_markets=50),
-                            _pc.get_live_now_markets(max_markets=50),
-                            return_exceptions=True,
-                        )
+                        try:
+                            kalshi_live_now, poly_live_now = await asyncio.gather(
+                                _kc.get_live_now_markets(max_markets=50),
+                                _pc.get_live_now_markets(max_markets=50),
+                                return_exceptions=True,
+                            )
+                        finally:
+                            try:
+                                await _kc.close()
+                            except Exception:
+                                pass
+                            try:
+                                await _pc.close()
+                            except Exception:
+                                pass
                         def _norm_price(m: dict) -> dict:
                             def _n(v):
                                 try:

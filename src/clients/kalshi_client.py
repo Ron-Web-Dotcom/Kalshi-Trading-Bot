@@ -369,7 +369,8 @@ class KalshiClient:
                 def _norm(v):
                     try:
                         f = float(v or 0)
-                        return f if f <= 1.0 else f / 100.0
+                        # Kalshi stores prices in cents (0-100); convert fractions to cents
+                        return f * 100 if f < 1.0 else f
                     except Exception:
                         return 0.0
                 for r in (rows or []):
