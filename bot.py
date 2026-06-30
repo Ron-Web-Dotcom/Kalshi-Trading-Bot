@@ -130,6 +130,10 @@ class TradingBot:
             await self.db.execute("ALTER TABLE trade_logs ADD COLUMN exit_price REAL")
         except Exception:
             pass
+        try:
+            await self.db.execute("ALTER TABLE positions ADD COLUMN exit_price REAL")
+        except Exception:
+            pass  # already exists
 
         # Orphan cleanup: mark old unresolved trade_logs as VOID if position is gone AND
         # trade is older than 2 days (clearly stale, not a same-day open position).
@@ -341,7 +345,7 @@ class TradingBot:
 
                     # Open positions — only active (trade loop deletes resolved ones)
                     open_rows = await self.db.fetchall(
-                        "SELECT platform, COUNT(*) as n FROM positions p "
+                        "SELECT p.platform, COUNT(*) as n FROM positions p "
                         "LEFT JOIN markets m ON m.ticker = p.ticker "
                         "WHERE p.status='open' "
                         "AND (m.close_time IS NULL OR m.close_time > datetime('now')) "

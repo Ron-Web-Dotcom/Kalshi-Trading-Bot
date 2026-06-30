@@ -196,12 +196,14 @@ async def _check_and_exit(
         hl = _hours_left(close_time)
         if hl is not None and hl <= 0:
             logger.info("LIVE EXIT %s — market resolved (close_time passed)", ticker)
-            await _close_position(db, ticker, reason_override or "market_resolved", slot=slot, exit_price=current)
+            safe_price = current if current is not None else entry
+            await _close_position(db, ticker, reason_override or "market_resolved", slot=slot, exit_price=safe_price)
             await _send_resolution_alert(discord, slot, final_price=current)
             return True
 
     if reason_override:
-        await _close_position(db, ticker, reason_override, slot=slot, exit_price=current)
+        safe_price = current if current is not None else entry
+        await _close_position(db, ticker, reason_override, slot=slot, exit_price=safe_price)
         return True
 
     # b) Stop-loss check
@@ -298,6 +300,8 @@ async def _fill_slots(
             return now < cd <= _tonight_utc
         except Exception:
             return False
+
+    def _kalshi_price(m: Dict) -> float:
         """Best available price for a Kalshi market — yes_ask with last_price fallback."""
         p = float(m.get("yes_ask") or 0)
         if not p:

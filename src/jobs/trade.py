@@ -103,7 +103,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
     # ── Open positions: log them + check cap ─────────────────────────────
     open_positions_rows = await db.fetchall(
-        "SELECT ticker, side, contracts, avg_price, current_price, pnl, platform, title "
+        "SELECT ticker, side, contracts, avg_price, current_price, pnl, platform, title, opened_at "
         "FROM positions WHERE status='open'"
     )
     open_count   = len(open_positions_rows)
@@ -1088,7 +1088,7 @@ async def _resolve_expired_positions(db, live_mode: bool = False, risk=None) -> 
         "LEFT JOIN markets m ON m.ticker = p.ticker "
         "WHERE p.status='open' "
         "AND COALESCE(NULLIF(m.close_time,''), NULLIF(p.close_time,'')) IS NOT NULL "
-        "AND datetime(substr(replace(COALESCE(NULLIF(m.close_time,''), NULLIF(p.close_time,'')),'T',' '),1,19)) < datetime('now')"
+        "AND datetime(substr(replace(replace(COALESCE(NULLIF(m.close_time,''), NULLIF(p.close_time,'')),'Z',''),'T',' '),1,19)) < datetime('now')"
     )
 
     if not expired:
