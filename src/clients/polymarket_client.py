@@ -177,9 +177,9 @@ class PolymarketTradingClient:
                 yes_price = val * 100 if val <= 1.0 else val
                 no_price  = 100 - yes_price
 
-            # Default to 50/50 if completely missing — market exists but no quotes yet
+            # Skip markets with no real price data — don't fabricate 50/50
             if yes_price == 0 and no_price == 0:
-                yes_price, no_price = 50.0, 50.0
+                return None
 
             # Volume — Gamma returns in USDC as string or float
             raw_vol = m.get("volume") or m.get("volumeNum") or 0
