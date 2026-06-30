@@ -248,8 +248,14 @@ async def make_decision_for_market(
         ai_result, rule_result = await asyncio.gather(
             _ai_task(),
             _run_rule_engine(market, context),
-            return_exceptions=False,
+            return_exceptions=True,
         )
+        if isinstance(ai_result, BaseException):
+            logger.warning("AI task raised exception — falling back to rule engine: %s", ai_result)
+            ai_result = None
+        if isinstance(rule_result, BaseException):
+            logger.warning("Rule engine raised exception: %s", rule_result)
+            rule_result = None
         final = _merge(ai_result, rule_result)
 
     if final is None:

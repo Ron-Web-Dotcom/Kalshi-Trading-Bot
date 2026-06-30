@@ -308,6 +308,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         f"Net edge after fee={net:.1f}¢"
                     ),
                     signal_source="cross_market_arb",
+                    market_title=market.get("title", "") or market.get("question", ""),
                 )
                 if rec:
                     trades_this_cycle += 1

@@ -194,6 +194,6 @@ class PolyPaperTrader:
                 logger.debug("Discord alert failed: %s", _de)
 
         if self.risk:
-            self.risk.record_trade(ticker)
+            self.risk.record_trade(ticker, platform="polymarket")
 
         return record

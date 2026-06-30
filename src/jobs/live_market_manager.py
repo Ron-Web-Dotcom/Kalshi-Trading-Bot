@@ -106,6 +106,17 @@ async def _close_position(db, ticker: str, reason: str, slot: Optional[Dict] = N
                        current_price=?, exit_price=?, pnl=?
                  WHERE ticker=? AND status='open'
             """, (now, reason[:200], exit_price, exit_price, pnl, ticker))
+            # Stamp the matching trade_log so W/L stats are counted
+            result_str = "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN")
+            platform = (slot or {}).get("platform") or "kalshi"
+            await db.execute("""
+                UPDATE trade_logs
+                   SET pnl=?, result=?, resolved_at=?
+                 WHERE ticker=? AND signal_source='live_scan'
+                   AND (pnl IS NULL OR pnl=0)
+                   AND (platform=? OR platform IS NULL)
+                 ORDER BY executed_at DESC LIMIT 1
+            """, (pnl, result_str, now, ticker, platform))
         else:
             # Fallback: close without overwriting existing pnl
             await db.execute("""

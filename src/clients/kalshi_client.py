@@ -378,7 +378,7 @@ class KalshiClient:
                     yes_ask = _norm(m.get("yes_ask") or m.get("last_price") or m.get("yes_bid"))
                     if not yes_ask:
                         continue  # skip truly priceless markets
-                    no_ask = _norm(m.get("no_ask")) or round(1.0 - yes_ask, 3)
+                    no_ask = _norm(m.get("no_ask")) or round(100.0 - yes_ask, 2)
                     try:
                         close_dt = datetime.fromisoformat(str(m["close_time"]).replace("Z", "+00:00"))
                         if close_dt.tzinfo is None:
@@ -416,11 +416,11 @@ class KalshiClient:
                 def _p(v):
                     try:
                         f = float(v or 0)
-                        return f if f <= 1.0 else f / 100.0  # convert cents→fraction if >1
+                        return f * 100 if f < 1.0 else f  # normalise fractions → cents
                     except Exception:
                         return 0.0
                 yes_ask = _p(m.get("yes_ask") or m.get("last_price") or m.get("yes_bid"))
-                no_ask  = _p(m.get("no_ask")) or round(1.0 - yes_ask, 3)
+                no_ask  = _p(m.get("no_ask")) or round(100.0 - yes_ask, 2)
                 if yes_ask > 0:
                     m.update(yes_ask=yes_ask, no_ask=no_ask, is_live=True,
                              hours_to_close=round(hours_left, 2))

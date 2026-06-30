@@ -788,7 +788,10 @@ class TradingBot:
                 except Exception as e:
                     logger.error("Daily summary error: %s", e)
 
-                await asyncio.sleep(23 * 3600)  # safety — won't fire twice
+                # Sleep until 30s past the next midnight ET to avoid firing twice
+                _et_after = now_et()
+                _next_mid = (_et_after + timedelta(days=1)).replace(hour=0, minute=0, second=30, microsecond=0)
+                await asyncio.sleep(max(0.0, (_next_mid - _et_after).total_seconds()))
 
         def _on_signal(signum, frame):
             logger.info("Shutdown signal %s — stopping bot...", signum)
