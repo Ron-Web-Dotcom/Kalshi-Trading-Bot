@@ -262,7 +262,10 @@ class TradingBot:
                 wake = et.replace(hour=5, minute=0, second=0, microsecond=0)
                 secs = (wake - et).total_seconds()
                 logger.info("😴 Sleep mode: quiet hours 3–5am ET — resuming at 5:00am (%.0f min)", secs / 60)
-                await asyncio.sleep(secs)
+                try:
+                    await asyncio.sleep(max(0.0, secs))
+                except asyncio.CancelledError:
+                    raise
                 return True
             _sleep_mode_notified = False  # reset for next night
             return False
@@ -322,7 +325,7 @@ class TradingBot:
                     for h in _HB_HOURS
                 ]
                 _upcoming = [t if t > _et_now else t + _hb_td(days=1) for t in _upcoming]
-                await asyncio.sleep((min(_upcoming) - _et_now).total_seconds())
+                await asyncio.sleep(max(0.0, (min(_upcoming) - _et_now).total_seconds()))
             while not self._shutdown.is_set():
                 try:
                     discord = DiscordAlerter()
@@ -583,13 +586,13 @@ class TradingBot:
                         upcoming_et = [t if t > et_now else t + timedelta(days=1) for t in targets_et]
                         next_et     = min(upcoming_et)
                         period      = _SUMMARY_HOURS[next_et.hour]
-                        await asyncio.sleep((next_et - et_now).total_seconds())
+                        await asyncio.sleep(max(0.0, (next_et - et_now).total_seconds()))
                 else:
                     targets_et  = [et_now.replace(hour=h, minute=0, second=0, microsecond=0) for h in _SUMMARY_HOURS]
                     upcoming_et = [t if t > et_now else t + timedelta(days=1) for t in targets_et]
                     next_et     = min(upcoming_et)
                     period      = _SUMMARY_HOURS[next_et.hour]
-                    await asyncio.sleep((next_et - et_now).total_seconds())
+                    await asyncio.sleep(max(0.0, (next_et - et_now).total_seconds()))
                     # Re-read period after sleep in case of drift
                     period = _SUMMARY_HOURS.get(now_et().hour, period)
                 if self._shutdown.is_set():
@@ -1128,6 +1131,7 @@ class TradingBot:
 
             # Morning wake-up summary at 5am ET after sleep mode
             _morning_summary_sent = False
+            _summary_6am_sent = False
 
             while not self._shutdown.is_set():
                 await asyncio.sleep(LIVE_SCAN_INTERVAL)
@@ -1137,6 +1141,7 @@ class TradingBot:
                 # Sleep mode 3–5am ET
                 if await _sleep_mode_wait():
                     _morning_summary_sent = False  # reset so morning summary fires
+                    _summary_6am_sent = False
                     continue
 
                 et_now = now_et()
@@ -1189,7 +1194,7 @@ class TradingBot:
                         logger.debug("Morning wake-up error: %s", _me)
 
                 # 6am — full morning summary
-                if et_now.hour == 6 and _morning_summary_sent and not getattr(_sleep_mode_wait, '_summary_6am_sent', False):
+                if et_now.hour == 6 and _morning_summary_sent and not _summary_6am_sent:
                     try:
                         from src.alerts.discord import DiscordAlerter as _DA
                         _d = _DA()
@@ -1209,12 +1214,12 @@ class TradingBot:
                             f"🏆 All-time: {total} closed | Win rate: {wr} | PnL: ${float(wl.get('pnl',0) or 0):.2f}\n"
                             f"🔍 Live scan active — bot alert firing every 10 min"
                         )
-                        _sleep_mode_wait._summary_6am_sent = True
+                        _summary_6am_sent = True
                         logger.info("6am morning summary sent")
                     except Exception as _me:
                         logger.debug("6am summary error: %s", _me)
                 elif et_now.hour == 7:
-                    _sleep_mode_wait._summary_6am_sent = False  # reset for next day
+                    _summary_6am_sent = False  # reset for next day
 
                 try:
                     mode = "PAPER" if not settings.trading.live_trading_enabled else "LIVE"

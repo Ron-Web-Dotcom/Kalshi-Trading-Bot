@@ -82,13 +82,11 @@ async def _load_live_positions(db) -> List[Dict]:
             SELECT p.ticker, p.side, p.avg_price, p.current_price,
                    p.contracts, p.platform, p.title, p.opened_at
             FROM positions p
-            INNER JOIN trade_logs tl ON tl.ticker = p.ticker
-                AND tl.signal_source = 'live_scan'
-                AND tl.executed_at = (
-                    SELECT MAX(executed_at) FROM trade_logs
-                    WHERE ticker = p.ticker AND signal_source = 'live_scan'
-                )
             WHERE p.status = 'open'
+              AND EXISTS (
+                  SELECT 1 FROM trade_logs tl
+                   WHERE tl.ticker = p.ticker AND tl.signal_source = 'live_scan'
+              )
         """)
         return [dict(r) for r in rows] if rows else []
     except Exception as e:
@@ -288,7 +286,7 @@ async def _fill_slots(
         _tonight_et = _et_now.replace(hour=23, minute=59, second=59, microsecond=0)
         _tonight_utc = _tonight_et.astimezone(timezone.utc)
     except Exception:
-        _tonight_utc = datetime.now(timezone.utc).replace(hour=23, minute=59, second=59)
+        _tonight_utc = datetime.now(timezone.utc).replace(hour=23, minute=59, second=59, microsecond=0)
 
     def _closes_today(m: Dict) -> bool:
         ct = m.get("close_time") or ""
@@ -331,9 +329,10 @@ async def _fill_slots(
     ]
 
     if not live_k and raw_k:
-        sample = live_k[:1] or []
-        # log a raw sample before filtering to see actual field names
-        raw_sample = (await kalshi.get_all_markets(status="open", max_markets=1, sort_by_close=True) or [None])[0]
+        try:
+            raw_sample = (await kalshi.get_all_markets(status="open", max_markets=1, sort_by_close=True) or [None])[0]
+        except Exception:
+            raw_sample = None
         logger.warning(
             "Kalshi: %d live markets fetched but all filtered out. Sample keys+prices: %s",
             raw_k,

@@ -59,7 +59,7 @@ class PolymarketTradingClient:
                 port = random.choice(_PROXY_PORTS)
                 # Replace port in proxy URL: swap out whatever port was set
                 import re
-                proxy = re.sub(r':\d+$', f':{port}', _PROXY_BASE)
+                proxy = re.sub(r':\d+(/?)$', f':{port}\\1', _PROXY_BASE)
                 logger.debug("Polymarket: proxy exit port %d", port)
             ua = random.choice(_USER_AGENTS)
             self._http = httpx.AsyncClient(

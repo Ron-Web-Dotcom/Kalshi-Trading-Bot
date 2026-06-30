@@ -479,7 +479,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         )
         trades_today  = (trades_today_row or {}).get("n", 0)
         max_per_day   = settings.trading.max_trades_per_day
-        trade_gate_on = (trades_today >= max_per_day and trades_this_cycle == 0)
+        trade_gate_on = (trades_today >= max_per_day)
 
         if trade_gate_on:
             logger.info(
@@ -665,7 +665,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                                  0.5 if live_conf >= 70 else 0.25)
                     live_size = round(max(min_size, min(live_base * live_mult, max_size)), 2)
                     live_contracts = max(1, int(live_size / (live_price / 100))) if live_price > 0 else 0
-                    live_exp_profit = live_contracts * (live_net_ev / 100) if live_net_ev else None
+                    live_exp_profit = live_contracts * (live_net_ev / 100) if live_net_ev is not None else None
                     live_roi = (live_exp_profit / live_size * 100) if (live_exp_profit and live_size) else None
                     live_min_roi = settings.trading.min_profit_roi_pct * 0.4
                     live_min_abs = settings.trading.min_profit_abs_usd * 0.4
