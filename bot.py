@@ -27,11 +27,12 @@ from src.config.settings import settings
 logger = get_trading_logger("main")
 
 # Cycle intervals (seconds) — bot runs 24/7 continuously
-INGEST_INTERVAL    = 180   # refresh market data every 3 min
-TRACK_INTERVAL     = 60    # check position PnL every 1 min
-EVAL_INTERVAL      = 300   # print performance snapshot every 5 min
-TRADE_INTERVAL     = 45    # run trading cycle every 45 s
-HEARTBEAT_INTERVAL = 3600  # send hourly heartbeat every 60 min
+INGEST_INTERVAL        = 180    # refresh Kalshi market data every 3 min
+POLY_INGEST_INTERVAL   = 1800   # refresh Polymarket every 30 min (saves proxy bandwidth)
+TRACK_INTERVAL         = 60     # check position PnL every 1 min
+EVAL_INTERVAL          = 300    # print performance snapshot every 5 min
+TRADE_INTERVAL         = 45     # run trading cycle every 45 s
+HEARTBEAT_INTERVAL     = 3600   # send hourly heartbeat every 60 min
 
 
 class TradingBot:
@@ -263,10 +264,17 @@ class TradingBot:
             return False
 
         async def ingest_loop():
+            """Kalshi ingestion every 3 min; Polymarket every 30 min to conserve proxy bandwidth."""
+            _poly_last = 0.0
+            import time as _time
             while not self._shutdown.is_set():
                 await asyncio.sleep(INGEST_INTERVAL)
                 try:
-                    count = await run_ingestion(self.db)
+                    _now = _time.monotonic()
+                    _run_poly = (_now - _poly_last) >= POLY_INGEST_INTERVAL
+                    count = await run_ingestion(self.db, run_polymarket=_run_poly)
+                    if _run_poly:
+                        _poly_last = _time.monotonic()
                     logger.info("Market refresh: %d markets", count)
                 except Exception as e:
                     logger.error("Ingest error: %s", e)

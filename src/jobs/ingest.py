@@ -10,8 +10,9 @@ from src.utils.junk_filter import is_junk
 logger = logging.getLogger("trading.jobs.ingest")
 
 
-async def run_ingestion(db_manager, market_queue: Optional[asyncio.Queue] = None) -> int:
-    """Fetch markets from Kalshi and Polymarket, store them. Returns total count."""
+async def run_ingestion(db_manager, market_queue: Optional[asyncio.Queue] = None,
+                        run_polymarket: bool = True) -> int:
+    """Fetch markets from Kalshi (always) and Polymarket (throttled). Returns total count."""
     from src.clients.kalshi_client import KalshiClient
     from src.clients.polymarket_client import PolymarketTradingClient
     from src.data.market_data import MarketDataFetcher
@@ -34,11 +35,11 @@ async def run_ingestion(db_manager, market_queue: Optional[asyncio.Queue] = None
         await kalshi.close()
 
     # ── Polymarket ────────────────────────────────────────────────────────────
-    if settings.polymarket.enabled:
+    if settings.polymarket.enabled and run_polymarket:
         poly = PolymarketTradingClient()
         try:
             logger.info("━━━ POLYMARKET INGEST START ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            raw_poly = await poly.get_markets(limit=500)
+            raw_poly = await poly.get_markets(limit=100)
             now_ts   = datetime.now(timezone.utc).isoformat()
             rows = []
             for pm in raw_poly:
