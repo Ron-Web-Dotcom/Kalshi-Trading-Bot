@@ -352,7 +352,7 @@ class TradingBot:
                         "GROUP BY p.platform"
                     )
                     open_n = sum((r.get("n") or 0) for r in (open_rows or []))
-                    open_by_platform = {r.get("platform", "kalshi"): r.get("n", 0) for r in (open_rows or [])}
+                    open_by_platform = {(r.get("platform") or "kalshi"): r.get("n", 0) for r in (open_rows or [])}
                     # Live in-play tickers from live slot manager
                     from src.jobs.live_market_manager import _live_slots as _hb_ls
                     live_tickers = set(_hb_ls.keys())
@@ -590,6 +590,8 @@ class TradingBot:
                     next_et     = min(upcoming_et)
                     period      = _SUMMARY_HOURS[next_et.hour]
                     await asyncio.sleep((next_et - et_now).total_seconds())
+                    # Re-read period after sleep in case of drift
+                    period = _SUMMARY_HOURS.get(now_et().hour, period)
                 if self._shutdown.is_set():
                     break
 
@@ -933,7 +935,8 @@ class TradingBot:
                     continue
 
                 try:
-                    today = datetime.now(timezone.utc).date()
+                    from src.utils.eastern_time import now_et as _ba_now_et
+                    today = _ba_now_et().date()
                     if today != _alerted_date:
                         _alerted.clear()
                         _result_sent.clear()   # allow same-ticker alerts on a new day

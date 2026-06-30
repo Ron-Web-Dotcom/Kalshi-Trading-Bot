@@ -1158,6 +1158,12 @@ async def _resolve_expired_positions(db, live_mode: bool = False, risk=None) -> 
             await db.execute(
                 "DELETE FROM positions WHERE ticker=? AND status='open'", (ticker,)
             )
+            # Sync live slot manager so phantom slots don't block new fills
+            try:
+                from src.jobs.live_market_manager import _live_slots as _lslots
+                _lslots.pop(ticker, None)
+            except Exception:
+                pass
             _tl_row = await db.fetchone(
                 "SELECT id FROM trade_logs WHERE ticker=? AND (platform=? OR platform IS NULL) "
                 "AND (pnl IS NULL OR pnl=0) ORDER BY executed_at DESC LIMIT 1", (ticker, platform)
@@ -1199,6 +1205,12 @@ async def _resolve_expired_positions(db, live_mode: bool = False, risk=None) -> 
             "DELETE FROM positions WHERE ticker=? AND status='open'",
             (ticker,)
         )
+        # Sync live slot manager so phantom slots don't block new fills
+        try:
+            from src.jobs.live_market_manager import _live_slots as _lslots
+            _lslots.pop(ticker, None)
+        except Exception:
+            pass
 
         logger.info(
             "RESOLVED [%s] %s → %s | entry=%.0f¢ exit=%.0f¢ pnl=$%.2f",

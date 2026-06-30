@@ -460,11 +460,12 @@ class DiscordAlerter:
     async def arb_signal(self, ticker: str, signal_type: str,
                           gross_edge: float, net_edge: float,
                           side: str = "", kalshi_price: float = 0,
-                          poly_price: float = 0) -> None:
+                          poly_price: float = 0,
+                          market_title: str = "") -> None:
         """Alert for arbitrage signal detected (only if ALERT_ON_SIGNAL=true)."""
         if not self.cfg.alert_on_signal:
             return
-        label = self._display_ticker(ticker)
+        label = self._display_ticker(ticker, market_title)
         if signal_type == "internal_arb":
             desc = (
                 f"**Internal arb** on _{label}_\n"

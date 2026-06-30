@@ -82,11 +82,13 @@ async def _load_live_positions(db) -> List[Dict]:
             SELECT p.ticker, p.side, p.avg_price, p.current_price,
                    p.contracts, p.platform, p.title, p.opened_at
             FROM positions p
+            INNER JOIN trade_logs tl ON tl.ticker = p.ticker
+                AND tl.signal_source = 'live_scan'
+                AND tl.executed_at = (
+                    SELECT MAX(executed_at) FROM trade_logs
+                    WHERE ticker = p.ticker AND signal_source = 'live_scan'
+                )
             WHERE p.status = 'open'
-              AND p.ticker IN (
-                  SELECT DISTINCT ticker FROM trade_logs
-                  WHERE signal_source = 'live_scan'
-              )
         """)
         return [dict(r) for r in rows] if rows else []
     except Exception as e:
@@ -280,9 +282,9 @@ async def _fill_slots(
 
     # Live scan = TODAY only (midnight to midnight ET)
     try:
-        import pytz as _pytz
-        _et = _pytz.timezone("America/New_York")
-        _et_now = datetime.now(_et)
+        from src.utils.eastern_time import now_et as _lm_now_et
+        import zoneinfo as _lm_zi
+        _et_now = _lm_now_et()
         _tonight_et = _et_now.replace(hour=23, minute=59, second=59, microsecond=0)
         _tonight_utc = _tonight_et.astimezone(timezone.utc)
     except Exception:
