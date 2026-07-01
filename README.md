@@ -52,9 +52,9 @@ Runs 24/7 on a VPS — paper trading by default, live trading when you're ready.
                                    │
                                    ▼
                     ┌──────────────────────────────────┐
-                    │  ⚡ MULTI-MODEL AI ENGINE         │
+                    │  ⚡ AI ENGINE                     │
                     │  decide.py · rule_engine.py      │
-                    │  GPT-4o-mini · Grok · Claude     │
+                    │  GPT-4o-mini · rule-engine fallback│
                     ├──────────────────────────────────┤
                     │  EV Calculation (Kelly criterion) │
                     │  Confidence score  (min 70%)     │
@@ -157,12 +157,11 @@ Runs 24/7 on a VPS — paper trading by default, live trading when you're ready.
                           └────────────────┬──────────────────┘
                                            │
                      ┌─────────────────────┼───────────────────────┐
-                     ▼                     ▼                        ▼
-             ┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐
-             │  GPT-4o-mini │    │   xAI Grok       │    │  Anthropic Claude│
-             │  (OpenAI)    │    │                  │    │                  │
-             └──────┬───────┘    └───────┬──────────┘    └────────┬─────────┘
-                    └───────────────────┬┘──────────────────────────┘
+                                        ▼
+                              ┌──────────────────┐
+                              │   GPT-4o-mini    │
+                              │   (OpenAI)       │
+                              └─────────┬────────┘
                                         │
                               ┌─────────┴──────────┐
                               │   RULE ENGINE       │
@@ -373,14 +372,14 @@ All settings are in `/opt/kalshi-bot/.env`. Restart the bot after any change.
 | `ARBITRAGE_THRESHOLD_PCT` | `5.0` | Min price diff (%) to generate an arb signal |
 | `OVERTRADE_COOLDOWN_MINUTES` | `5` | Min minutes between signals on same ticker |
 
-### AI (Claude)
+### AI (GPT-4o-mini)
 | Variable | Default | Description |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Your Claude API key |
-| `AI_MODEL` | `claude-sonnet-4-6` | Claude model to use |
-| `MIN_AI_CONFIDENCE` | `70.0` | Claude must be ≥ this % confident to trade |
+| `OPENAI_API_KEY` | — | Your OpenAI API key |
+| `AI_MODEL` | `gpt-4o-mini` | OpenAI model to use |
+| `MIN_AI_CONFIDENCE` | `70.0` | AI must be ≥ this % confident to trade |
 | `AI_ENABLED` | `true` | Disable to use rule-based fallback only |
-| `DAILY_AI_BUDGET` | `10.0` | Max Claude API spend per day (USD) |
+| `DAILY_AI_BUDGET` | `10.0` | Max OpenAI API spend per day (USD) |
 
 ### Auto-Scaling
 | Variable | Default | Description |
