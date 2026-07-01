@@ -30,8 +30,8 @@ jobs:
         run: |
           pip install --upgrade pip setuptools wheel
           pip install pytest pytest-asyncio aiosqlite python-dotenv httpx cryptography openai
-      - name: Install package
-        run: pip install -e . --no-deps
+      - name: Add src to path
+        run: echo "PYTHONPATH=$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
       - name: Run regression tests
         env:
           # Dummy values so settings don't fail on import
