@@ -1574,9 +1574,9 @@ class DiscordAlerter:
             except Exception:
                 return False
 
-        # Today's bids + up to 7 days of watching
+        # Today's bids + tomorrow only — anything further out is not "right now"
         today_buys = [b for b in buy_signals if _is_today_ds(b)][:3]
-        watch_buys = [b for b in buy_signals if not _is_today_ds(b) and 0 < _hrs_to_close(b) <= 168][:5]
+        watch_buys = [b for b in buy_signals if not _is_today_ds(b) and 0 < _hrs_to_close(b) <= 48][:5]
 
         if today_buys or watch_buys:
             rlines = []
