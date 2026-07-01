@@ -26,7 +26,7 @@ class TradingSystemResults:
 class UnifiedAdvancedTradingSystem:
     """Compatibility wrapper used by beast_mode_dashboard and beast_mode_bot."""
 
-    def __init__(self, db_manager=None, kalshi_client=None, xai_client=None):  # xai_client kept for compat
+    def __init__(self, db_manager=None, kalshi_client=None):
         self.db_manager = db_manager
         self.kalshi_client = kalshi_client
 
