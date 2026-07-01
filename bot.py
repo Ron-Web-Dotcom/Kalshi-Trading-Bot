@@ -377,13 +377,9 @@ class TradingBot:
                     )
                     paper_pnl = (pnl_row or {}).get("pnl", 0.0)
 
-                    # Unrealised PnL: dynamic from market prices (positions.pnl is always 0 on insert)
+                    # Unrealised PnL: read from positions.pnl which track.py updates each cycle
                     unrealised_row = await self.db.fetchone(
-                        "SELECT COALESCE(SUM("
-                        "  CASE WHEN p.side='yes' THEN (COALESCE(m.yes_ask, p.avg_price) - p.avg_price) * p.contracts / 100.0 "
-                        "       WHEN p.side='no'  THEN (COALESCE(m.no_ask,  p.avg_price) - p.avg_price) * p.contracts / 100.0 "
-                        "       ELSE 0 END"
-                        "), 0) as pnl FROM positions p LEFT JOIN markets m ON m.ticker = p.ticker WHERE p.status='open'"
+                        "SELECT COALESCE(SUM(pnl), 0) as pnl FROM positions WHERE status='open' AND pnl IS NOT NULL"
                     )
                     unrealised_pnl = (unrealised_row or {}).get("pnl", 0.0) or 0.0
 
@@ -757,11 +753,7 @@ class TradingBot:
                         "SELECT COUNT(*) as n FROM positions WHERE status='open'"
                     ) or {}
                     unrealised_row = await self.db.fetchone(
-                        "SELECT COALESCE(SUM("
-                        "  CASE WHEN p.side='yes' THEN (COALESCE(m.yes_ask, p.avg_price) - p.avg_price) * p.contracts / 100.0 "
-                        "       WHEN p.side='no'  THEN (COALESCE(m.no_ask,  p.avg_price) - p.avg_price) * p.contracts / 100.0 "
-                        "       ELSE 0 END"
-                        "), 0) as pnl FROM positions p LEFT JOIN markets m ON m.ticker = p.ticker WHERE p.status='open'"
+                        "SELECT COALESCE(SUM(pnl), 0) as pnl FROM positions WHERE status='open' AND pnl IS NOT NULL"
                     ) or {}
                     unrealised_pnl = float(unrealised_row.get("pnl", 0.0) or 0.0)
 
