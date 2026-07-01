@@ -995,8 +995,11 @@ class TradingBot:
                             return True
                         # Suppress noise-level edge — minimum 3¢ EV to appear in alerts
                         net_ev = pick.get("net_ev")
-                        if net_ev is not None and float(net_ev) < 3.0:
-                            return True
+                        try:
+                            if net_ev is not None and float(net_ev) < 3.0:
+                                return True
+                        except (ValueError, TypeError):
+                            pass
                         return False
 
                     # 1. All active live slots — any open position in live manager
@@ -1104,6 +1107,11 @@ class TradingBot:
                                         pick = {**pick, "_in_bet": True}
                                     all_watching.append(pick)
 
+                    # Sort by confidence first so the best pick per correlated group wins.
+                    all_watching.sort(
+                        key=lambda x: (0 if x.get("is_live") else 1, -float(x.get("confidence", 0) or 0))
+                    )
+
                     # Correlated-pick dedup: keep only the best pick per event.
                     # Two picks are "same event" when their non-trivial words overlap ≥50%.
                     import re as _ba_re
@@ -1135,9 +1143,6 @@ class TradingBot:
                     all_watching = _deduped_watching
 
                     if all_watching:
-                        all_watching.sort(
-                            key=lambda x: (0 if x.get("is_live") else 1, -float(x.get("confidence", 0)))
-                        )
                         batch_keys = frozenset(
                             f"{p.get('ticker')}:{int(float(p.get('confidence',0))//10)*10}"
                             for p in all_watching
