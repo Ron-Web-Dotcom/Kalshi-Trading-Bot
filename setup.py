@@ -65,8 +65,8 @@ def check_virtual_environment():
 def check_dependencies():
     """Check if required dependencies are installed."""
     required_packages = [
-        'pandas', 'numpy', 'aiosqlite', 'httpx', 'openai', 
-        'anthropic', 'cryptography', 'pydantic'
+        'pandas', 'numpy', 'aiosqlite', 'httpx', 'openai',
+        'cryptography', 'pydantic'
     ]
     
     missing = []

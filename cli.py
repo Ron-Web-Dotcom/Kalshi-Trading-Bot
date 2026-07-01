@@ -559,7 +559,7 @@ def cmd_health(args: argparse.Namespace) -> None:
 
     for var, placeholder in (
         ("KALSHI_API_KEY_ID", "your-key-id-uuid-here"),
-        ("ANTHROPIC_API_KEY", "your_anthropic_api_key_here"),
+        ("OPENAI_API_KEY", "your_openai_api_key_here"),
     ):
         val = os.getenv(var, "")
         if val and val not in ("", placeholder):

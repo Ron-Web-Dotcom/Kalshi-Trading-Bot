@@ -3,7 +3,7 @@
 import os
 import pytest
 
-os.environ.setdefault("ANTHROPIC_API_KEY", "")  # ensure no key → rule-based path
+os.environ.setdefault("OPENAI_API_KEY", "")  # ensure no key → rule-based path
 
 from src.ai.decision import AIDecisionEngine
 

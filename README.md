@@ -260,9 +260,6 @@ KALSHI_API_KEY_ID=your-key-id-uuid-here
 KALSHI_PRIVATE_KEY_PATH=/opt/kalshi-bot/kalshi_private_key.pem
 KALSHI_USE_DEMO=true          # keep true until ready for real money
 
-# Claude AI — from https://console.anthropic.com/
-ANTHROPIC_API_KEY=sk-ant-...
-
 # Discord alerts (optional but strongly recommended)
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR/WEBHOOK
 
@@ -471,8 +468,8 @@ cd /opt/kalshi-bot && .venv/bin/python cli.py health
 - Key ID and private key don't match — re-download the pair from Kalshi settings
 
 **AI always returns HOLD**
-- Verify `ANTHROPIC_API_KEY` is set correctly
-- Check Claude credits at https://console.anthropic.com/
+- Verify `OPENAI_API_KEY` is set correctly
+- Check OpenAI credits at https://platform.openai.com/usage
 - Lower `MIN_AI_CONFIDENCE` to 60 and watch logs
 
 **Discord not receiving alerts**

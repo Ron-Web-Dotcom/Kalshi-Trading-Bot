@@ -3,12 +3,8 @@
 Kalshi AI Trading Bot — example LLM-driven directional strategy
 
 Main entry point for the example AI directional strategy. The actual
-LLM call goes through src/clients/xai_client.py → openrouter_client.py,
-which uses an OpenRouter fallback chain (try the configured model,
-fall back if it errors). Despite earlier README claims, this is NOT
-a parallel multi-model ensemble — only one model is called per
-decision. Configure the model and fallback order in
-src/config/settings.py.
+LLM call goes through src/ai/decision.py using GPT-4o-mini (OpenAI)
+with a rule-engine fallback. Configure the model in src/config/settings.py.
 
 This is one example strategy. Fork it to build your own.
 
@@ -37,7 +33,6 @@ from src.jobs.evaluate import run_evaluation
 from src.utils.logging_setup import setup_logging, get_trading_logger
 from src.utils.database import DatabaseManager
 from src.clients.kalshi_client import KalshiClient
-from src.clients.xai_client import XAIClient
 from src.config.settings import settings
 
 # Import Beast Mode components
@@ -116,11 +111,6 @@ class BeastModeBot:
             # Initialize other components
             kalshi_client = KalshiClient()
 
-            # LLM client — single-model with OpenRouter fallback chain. The
-            # XAIClient name is historical; it routes through OpenRouter,
-            # not xAI directly. Cost tracking lives on this client.
-            self.xai_client = XAIClient(db_manager=db_manager)
-
             # Small delay to ensure everything is ready
             await asyncio.sleep(1)
             
@@ -180,7 +170,6 @@ class BeastModeBot:
             # Wait for shutdown or completion
             await asyncio.gather(*tasks, return_exceptions=True)
 
-            await self.xai_client.close()
             await kalshi_client.close()
             
             self.logger.info("🏁 Beast Mode Bot shut down gracefully")
@@ -262,20 +251,6 @@ class BeastModeBot:
         """
         if not settings.trading.enable_daily_cost_limiting:
             return True
-
-        # The xai_client owns the persistent daily tracker.
-        if hasattr(self, "xai_client") and self.xai_client is not None:
-            tracker = getattr(self.xai_client, "daily_tracker", None)
-            if tracker is None:
-                return True
-            if tracker.total_cost >= tracker.daily_limit:
-                self.logger.warning(
-                    "🚫 Daily AI cost limit reached - trading paused",
-                    daily_cost=tracker.total_cost,
-                    daily_limit=tracker.daily_limit,
-                    requests_today=tracker.request_count,
-                )
-                return False
 
         return True
 

@@ -26,10 +26,9 @@ class TradingSystemResults:
 class UnifiedAdvancedTradingSystem:
     """Compatibility wrapper used by beast_mode_dashboard and beast_mode_bot."""
 
-    def __init__(self, db_manager=None, kalshi_client=None, xai_client=None):
+    def __init__(self, db_manager=None, kalshi_client=None, xai_client=None):  # xai_client kept for compat
         self.db_manager = db_manager
         self.kalshi_client = kalshi_client
-        self.xai_client = xai_client
 
     def get_system_performance_summary(self) -> Dict[str, Any]:
         return {
