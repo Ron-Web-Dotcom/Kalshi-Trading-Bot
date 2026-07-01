@@ -418,7 +418,31 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             if m.get("ticker") in open_tickers:
                 return True
             t = (m.get("title") or "").strip().lower()
-            return bool(t and t in open_titles)
+            if t and t in open_titles:
+                return True
+            # Block correlated exact-score / spread positions on the same event.
+            # Strip score patterns and modifiers, then check if the remaining
+            # "event words" overlap with any existing open position title.
+            import re as _re
+            _score_pat = _re.compile(
+                r'\bexact score[:\s]*|\bspread[:\s]*|\bo/?u[:\s]*|\bover[/\s]under[:\s]*'
+                r'|\b\d+[:\-]\d+\b|\(-?\d+\.?\d*\)'
+                r'|\b(yes|no|will|the|be|on|at|in|a|an|is|to|of|and|or|for)\b'
+                r'|[?!,.]',
+                _re.IGNORECASE,
+            )
+            def _event_words(title: str):
+                stripped = _score_pat.sub(' ', title.lower())
+                words = {w for w in stripped.split() if len(w) > 2}
+                return words
+            new_words = _event_words(t)
+            if len(new_words) >= 2:
+                for existing_title in open_titles:
+                    existing_words = _event_words(existing_title)
+                    overlap = new_words & existing_words
+                    if len(overlap) >= 2 and len(overlap) / max(len(new_words), 1) >= 0.5:
+                        return True
+            return False
 
         # ── 5. Fetch Polymarket candidates + store in DB (always — needed for position tracking) ──
         poly_markets = []

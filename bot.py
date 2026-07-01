@@ -993,6 +993,10 @@ class TradingBot:
                             price = float(entry)
                         if price < 5 or price > 95:
                             return True
+                        # Suppress noise-level edge — minimum 3¢ EV to appear in alerts
+                        net_ev = pick.get("net_ev")
+                        if net_ev is not None and float(net_ev) < 3.0:
+                            return True
                         return False
 
                     # 1. All active live slots — any open position in live manager
@@ -1096,7 +1100,39 @@ class TradingBot:
                                 # Only include if not already alerted at this confidence band
                                 if _alerted.get(ticker, {}).get("band") != band:
                                     seen_watch.add(ticker)
+                                    if ticker in _open_tickers:
+                                        pick = {**pick, "_in_bet": True}
                                     all_watching.append(pick)
+
+                    # Correlated-pick dedup: keep only the best pick per event.
+                    # Two picks are "same event" when their non-trivial words overlap ≥50%.
+                    import re as _ba_re
+                    _ba_stop = _ba_re.compile(
+                        r'\bexact score[:\s]*|\bspread[:\s]*|\bo/?u[:\s]*|\bover[/\s]under[:\s]*'
+                        r'|\b\d+[:\-]\d+\b|\(-?\d+\.?\d*\)'
+                        r'|\b(yes|no|will|the|be|on|at|in|a|an|is|to|of|and|or|for|vs|vs\.)\b'
+                        r'|[?!,.]',
+                        _ba_re.IGNORECASE,
+                    )
+                    def _ba_event_words(title: str) -> frozenset:
+                        stripped = _ba_stop.sub(' ', (title or "").lower())
+                        return frozenset(w for w in stripped.split() if len(w) > 2)
+
+                    _deduped_watching = []
+                    _seen_event_word_sets: list = []
+                    for p in all_watching:
+                        p_words = _ba_event_words(p.get("title") or p.get("ticker") or "")
+                        correlated = False
+                        if len(p_words) >= 2:
+                            for sw in _seen_event_word_sets:
+                                overlap = p_words & sw
+                                if len(overlap) >= 2 and len(overlap) / max(len(p_words), 1) >= 0.5:
+                                    correlated = True
+                                    break
+                        if not correlated:
+                            _deduped_watching.append(p)
+                            _seen_event_word_sets.append(p_words)
+                    all_watching = _deduped_watching
 
                     if all_watching:
                         all_watching.sort(

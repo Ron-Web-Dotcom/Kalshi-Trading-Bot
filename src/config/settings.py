@@ -87,9 +87,9 @@ class TradingConfig:
     min_ai_confidence: float = field(default_factory=lambda: _env_float("MIN_AI_CONFIDENCE", 70.0))
     min_confidence_to_trade: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE_TO_TRADE", 0.70))
 
-    # Minimum profit requirements — paper mode: just need any positive edge
-    min_profit_roi_pct: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ROI_PCT", 0.01))
-    min_profit_abs_usd: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ABS_USD", 0.01))
+    # Minimum profit requirements — need real edge, not statistical noise
+    min_profit_roi_pct: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ROI_PCT", 1.0))
+    min_profit_abs_usd: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ABS_USD", 0.05))
 
     # AI position re-evaluation — check open positions against fresh data each cycle
     enable_ai_reeval: bool  = field(default_factory=lambda: _env_bool("ENABLE_AI_REEVAL", True))
