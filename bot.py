@@ -450,6 +450,15 @@ class TradingBot:
                         "AND title NOT LIKE '%by december 31%' "
                         "AND title NOT LIKE '%before 2027%' "
                         "AND title NOT LIKE '%before 2028%' "
+                        "AND title NOT LIKE '%will the announcer%' "
+                        "AND title NOT LIKE '%say ''aggressive''%' "
+                        "AND title NOT LIKE '%say ''clutch''%' "
+                        "AND title NOT LIKE '%say ''impressive''%' "
+                        "AND title NOT LIKE '%meme coin%' "
+                        "AND title NOT LIKE '%rug pull%' "
+                        "AND title NOT LIKE '%pump%' "
+                        "AND title NOT LIKE '%before end of%' "
+                        "AND title NOT LIKE '%all-time high%' "
                     )
                     kal_cand = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time FROM markets "
@@ -1058,6 +1067,15 @@ class TradingBot:
                                 "alerted_at": now_utc, "result_sent": False,
                             }
 
+                    # Mark picks with open positions as _in_bet so Discord shows "BIDS ACTIVE"
+                    try:
+                        _open_pos_rows = await self.db.fetchall(
+                            "SELECT ticker FROM positions WHERE status='open'"
+                        ) or []
+                        _open_tickers = {r["ticker"] for r in _open_pos_rows}
+                    except Exception:
+                        _open_tickers = set()
+
                     # Full watching list — live slots + new picks, deduped
                     seen_watch = set()
                     all_watching = []
@@ -1065,6 +1083,9 @@ class TradingBot:
                         t = p.get("ticker", "")
                         if t not in seen_watch:
                             seen_watch.add(t)
+                            # Mark as in_bet if there's an open position for this ticker
+                            if t in _open_tickers:
+                                p = {**p, "_in_bet": True}
                             all_watching.append(p)
                     for ticker, slot in list(_ls.items()):
                         if ticker not in seen_watch:

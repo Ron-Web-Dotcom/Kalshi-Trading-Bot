@@ -42,6 +42,13 @@ JUNK_PHRASES = [
     "uzbekistan win", "kuala lumpur",
     "lck 2026", "gen.g esports",
     "victor wembanyama", "wembanyama",
+    # Novelty / announcer / phrase markets
+    "will the announcer", "say 'aggressive'", "say 'clutch'",
+    "say 'impressive'", "say 'incredible'", "say 'unbelievable'",
+    "announcer say", "commentator say",
+    # Meme / low-liquidity crypto
+    "meme coin", "rug pull", "all-time high by",
+    "pump to", "moon by",
 ]
 
 

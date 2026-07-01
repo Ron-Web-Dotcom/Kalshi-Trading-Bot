@@ -32,19 +32,27 @@ class DiscordAlerter:
             logger.warning("Discord alert timed out (>5s) — trade cycle unaffected")
             return False
         except Exception as e:
-            logger.warning("Discord alert failed: %s", e)
+            # Log 400s at error level — these are usually "message too long"
+            lvl = "error" if "400" in str(e) else "warning"
+            getattr(logger, lvl)("Discord alert failed: %s", e)
             return False
 
     def _embed(self, title: str, description: str, color: int,
                fields: Optional[List[Dict]] = None) -> Dict:
+        # Discord limits: title 256, description 4096, field value 1024, total embed 6000
+        safe_fields = []
+        if fields:
+            for f in fields:
+                v = f.get("value", "") or ""
+                safe_fields.append({**f, "value": v[:1024] or "​"})
         embed: Dict = {
-            "title": title,
-            "description": description,
+            "title": title[:256],
+            "description": description[:4096],
             "color": color,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        if fields:
-            embed["fields"] = fields
+        if safe_fields:
+            embed["fields"] = safe_fields
         return {"embeds": [embed]}
 
     # ── Alert methods ─────────────────────────────────────────────────────────
