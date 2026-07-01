@@ -200,8 +200,8 @@ async def run_tracking(db_manager) -> None:
                     )
                     if _tl_track and _tl_track.get("id"):
                         await db_manager.execute(
-                            "UPDATE trade_logs SET pnl=?, resolved_at=datetime('now'), result=? WHERE id=?",
-                            (pnl, "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN"), _tl_track["id"])
+                            "UPDATE trade_logs SET pnl=?, resolved_at=?, result=? WHERE id=?",
+                            (pnl, datetime.now(timezone.utc).isoformat(), "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN"), _tl_track["id"])
                         )
                     risk.record_result(ticker, pnl, platform)
                     try:

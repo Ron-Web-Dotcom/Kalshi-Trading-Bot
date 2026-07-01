@@ -111,7 +111,7 @@ class DailyStats:
 
     def best_pick_by_platform(self) -> Dict[str, Optional[Dict]]:
         """Return the best pick per platform — Kalshi and Polymarket each get a fair slot."""
-        kal  = next((e for e in self.all_evaluations if e.get("platform", "kalshi") != "polymarket"), None)
+        kal  = next((e for e in self.all_evaluations if e.get("platform", "kalshi") == "kalshi"), None)
         poly = next((e for e in self.all_evaluations if e.get("platform") == "polymarket"), None)
         return {"kalshi": kal, "polymarket": poly}
 
