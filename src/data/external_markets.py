@@ -177,8 +177,11 @@ class ExternalMarketComparator:
             else:
                 # Kalshi overprices YES → buy NO on Kalshi
                 side       = "no"
-                gross_edge = poly_no - kalshi_no if poly_no > kalshi_no else kalshi_yes - poly_yes
+                gross_edge = poly_no - kalshi_no  # positive when Kalshi NO is cheaper than Poly NO
                 buy_price  = kalshi_no
+                if gross_edge <= 0:
+                    # No edge on either side — skip this pair
+                    continue
 
             net_edge = gross_edge - buy_price * KALSHI_FEE
 

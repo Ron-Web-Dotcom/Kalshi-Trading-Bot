@@ -19,7 +19,7 @@ import os
 
 logger = logging.getLogger("trading.calibrator")
 
-_THRESHOLD_FILE  = "/tmp/kalshi_conf_threshold.json"
+_THRESHOLD_FILE  = os.path.join(os.path.dirname(__file__), "..", "..", "data", "conf_threshold.json")
 _DEFAULT         = 65.0
 _FLOOR_CONF      = 60.0
 _CEIL_CONF       = 75.0
