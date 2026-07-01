@@ -18,6 +18,172 @@ Runs 24/7 on a VPS — paper trading by default, live trading when you're ready.
 
 ---
 
+## Process Flow Map
+
+```
+                    ┌─────────────────────────────────┐
+                    │     🧠  BOT BRAIN  (bot.py)      │
+                    │  Async event loop · 60s cycles   │
+                    └──────────────┬──────────────────┘
+                                   │
+          ┌────────────────────────┼────────────────────────┐
+          ▼                        ▼                         ▼
+ ┌────────────────┐     ┌────────────────────┐    ┌──────────────────┐
+ │  🟦 KALSHI API │     │  🟣 POLYMARKET API │    │  🌐 EXTERNAL DATA│
+ │kalshi_client.py│     │polymarket_client.py│    │context_builder.py│
+ ├────────────────┤     ├────────────────────┤    ├──────────────────┤
+ │ Markets/Prices │     │  YES/NO prices     │    │ Sports scores    │
+ │ YES/NO ask     │     │  Volume · Close    │    │ News / web search│
+ │ Volume · Book  │     │  CLOB order book   │    │ Weather · YouTube │
+ │ Balance · Auth │     │  Arb cross-check   │    │ Crypto/eq feeds  │
+ └───────┬────────┘     └─────────┬──────────┘    └────────┬─────────┘
+          └────────────────────────┼────────────────────────┘
+                                   │
+                                   ▼
+                    ┌──────────────────────────────────┐
+                    │  🔍 JUNK FILTER + DEDUP           │
+                    │  junk_filter.py · external_markets│
+                    │  ▸ Price window: 8¢ – 92¢        │
+                    │  ▸ Today + Tomorrow only          │
+                    │  ▸ Junk phrases blocked           │
+                    │  ▸ Correlated positions blocked   │
+                    │  ▸ Kalshi ↔ Poly arb check       │
+                    └──────────────┬───────────────────┘
+                                   │
+                                   ▼
+                    ┌──────────────────────────────────┐
+                    │  ⚡ MULTI-MODEL AI ENGINE         │
+                    │  decide.py · rule_engine.py      │
+                    │  GPT-4o-mini · Grok · Claude     │
+                    ├──────────────────────────────────┤
+                    │  EV Calculation (Kelly criterion) │
+                    │  Confidence score  (min 70%)     │
+                    │  Decision: BUY / HOLD / SKIP     │
+                    │  Side: YES or NO · Kelly size    │
+                    └──────────────┬───────────────────┘
+                                   │
+                                   ▼
+                    ┌──────────────────────────────────┐
+                    │  🛡️  RISK GATE                    │
+                    │  risk/manager.py · scaling.py    │
+                    │  ▸ Daily loss limit              │
+                    │  ▸ Max open positions (50)       │
+                    │  ▸ Cooldown per ticker+platform  │
+                    │  ▸ Kill switch                   │
+                    │  ▸ Consecutive loss brake        │
+                    │  ▸ Auto-scale up / down          │
+                    └──────────────┬───────────────────┘
+                                   │
+                    ┌──────────────┴───────────────┐
+                    ▼                               ▼
+       ┌────────────────────┐         ┌─────────────────────┐
+       │  📄 PAPER TRADER   │         │  🔴 LIVE TRADER      │
+       │  paper_trader.py   │         │  live_trader.py      │
+       │  poly_paper_trader │         │  (disabled by default│
+       │  Simulated fills   │         │  LIVE_TRADING=false) │
+       │  SQLite trade_logs │         │  RSA auth · Kalshi   │
+       │  PnL tracking      │         │  Duplicate guard     │
+       └────────────────────┘         └─────────────────────┘
+                                   │
+                                   ▼
+          ┌────────────────────────────────────────────────┐
+          │           BACKGROUND LOOPS (async, parallel)   │
+          │  ⏰ Trade Cycle   · Every 60s                  │
+          │  📍 Live Scanner  · Every 60s (10 live slots)  │
+          │  📊 Position Tracker · P&L · Stop/Take · Reeval│
+          │  💓 Heartbeat     · 3·9·15·21 ET (Discord)    │
+          │  📋 Daily Summary · 6am & 6pm ET              │
+          │  🌙 Sleep Mode    · 3am–5am ET (quiet hours)  │
+          └──────────────────────┬─────────────────────────┘
+                                   │
+                                   ▼
+          ┌────────────────────────────────────────────────┐
+          │              DISCORD ALERTS (discord.py)       │
+          │  📈 Trade Alert  · BUY executed, EV, size     │
+          │  💓 Heartbeat    · Open bets, PnL, best picks │
+          │  📋 Summary      · 6am/6pm win rate, all-time │
+          │  ⚠️  Error Alert  · API failures, kill switch  │
+          └──────────────────────┬─────────────────────────┘
+                                   │
+                                   ▼
+          ┌────────────────────────────────────────────────┐
+          │                   CI GUARDS                    │
+          │  ✅ Ruff Lint          · every push            │
+          │  🧪 21 Regression Tests · every push           │
+          │  🔒 No secrets in git  · .env never committed  │
+          └────────────────────────────────────────────────┘
+```
+
+---
+
+## Data Source Tree
+
+```
+                         🤖 KALSHI AI TRADING BOT
+                                    │
+          ┌─────────────────────────┼──────────────────────────┐
+          │                         │                           │
+    ┌─────┴──────┐          ┌───────┴───────┐         ┌────────┴────────┐
+    │ KALSHI API │          │ POLYMARKET API│         │  EXTERNAL DATA  │
+    │(kalshi_    │          │(polymarket_   │         │(context_builder │
+    │ client.py) │          │ client.py)    │         │    .py)         │
+    └─────┬──────┘          └───────┬───────┘         └────────┬────────┘
+          │                         │                           │
+     ┌────┴────┐               ┌────┴────┐              ┌──────┴──────┐
+     │ Markets │               │ Markets │              │   Sports    │
+     │ Prices  │               │ Prices  │              │  Scores &   │
+     │YES ask  │               │YES/NO   │              │   Odds      │
+     │NO ask   │               │ (cents) │              │(SofaScore,  │
+     │ Volume  │               │ Volume  │              │ ESPN, etc.) │
+     │  Book   │               │  CLOB   │              └──────┬──────┘
+     │ Balance │               │  Book   │                     │
+     └────┬────┘               └────┬────┘              ┌──────┴──────┐
+          │                         │                    │    News &   │
+     ┌────┴────┐               ┌────┴────┐              │ Web Search  │
+     │  Close  │               │  Close  │              │ (live facts)│
+     │  time   │               │  time   │              └──────┬──────┘
+     │  Status │               │  Status │                     │
+     │  Auth   │               │  Arb    │              ┌──────┴──────┐
+     └────┬────┘               └────┬────┘              │  Weather ·  │
+          │                         │                    │  YouTube ·  │
+          └────────────┬────────────┘                    │  Crypto/EQ  │
+                       │                                 └──────┬──────┘
+                       └───────────────────┬─────────────────────┘
+                                           │
+                          ┌────────────────┴──────────────────┐
+                          │       PRE-FILTER + DEDUP           │
+                          │  junk_filter.py · external_markets │
+                          │  8¢–92¢ · today+tomorrow · dedup  │
+                          └────────────────┬──────────────────┘
+                                           │
+                     ┌─────────────────────┼───────────────────────┐
+                     ▼                     ▼                        ▼
+             ┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐
+             │  GPT-4o-mini │    │   xAI Grok       │    │  Anthropic Claude│
+             │  (OpenAI)    │    │                  │    │                  │
+             └──────┬───────┘    └───────┬──────────┘    └────────┬─────────┘
+                    └───────────────────┬┘──────────────────────────┘
+                                        │
+                              ┌─────────┴──────────┐
+                              │   RULE ENGINE       │
+                              │   (fallback)        │
+                              └─────────┬──────────┘
+                                        │
+                              ┌─────────┴──────────┐
+                              │    RISK GATE        │
+                              │  risk/manager.py   │
+                              └─────────┬──────────┘
+                                        │
+                     ┌──────────────────┴──────────────────┐
+                     ▼                                       ▼
+           ┌──────────────────┐                  ┌──────────────────────┐
+           │   PAPER TRADER   │                  │  DISCORD ALERTS      │
+           │  (SQLite PnL)    │                  │  Trade · PnL · Error │
+           └──────────────────┘                  └──────────────────────┘
+```
+
+---
+
 ## Architecture
 
 ```
