@@ -72,7 +72,7 @@ def _parse_probability_from_text(text: str) -> Optional[float]:
         v = float(pct.group(1))
         if 1 <= v <= 99:
             return v
-    dec = re.search(r'\b0\.(\d{2})\b', text)
+    dec = re.search(r'\b0\.(\d+)\b', text)
     if dec:
         return float("0." + dec.group(1)) * 100
     return None

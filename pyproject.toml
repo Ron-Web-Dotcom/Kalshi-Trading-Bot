@@ -106,3 +106,33 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes (undefined names, unused imports, etc.)
+    "B",    # flake8-bugbear (common bugs: mutable defaults, loop vars, etc.)
+    "S",    # flake8-bandit (security: hardcoded secrets, SQL injection, etc.)
+    "UP",   # pyupgrade (modern Python idioms)
+    "SIM",  # flake8-simplify (simplifiable conditions)
+    "RUF",  # Ruff-specific rules
+]
+ignore = [
+    "S101",  # assert in tests is fine
+    "S311",  # random is fine for non-crypto use
+    "S603",  # subprocess is intentional in scripts
+    "S607",  # partial path for subprocess is fine
+    "E501",  # line length handled by formatter
+    "B008",  # function calls in default args (we use field(default_factory=...))
+    "S105",  # hardcoded password — lots of false positives on config field names
+    "S106",
+    "S107",
+    "SIM108", # ternary expressions — we prefer explicit if/else in complex logic
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "B"]   # security and bugbear rules too strict in tests

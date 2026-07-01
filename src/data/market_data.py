@@ -91,8 +91,8 @@ class MarketDataFetcher:
             logger.info("─" * 80)
             for m in top:
                 ticker    = m.get("ticker", "")
-                yes_bid   = m.get("yes_bid", 0)
-                yes_ask   = m.get("yes_ask", 0)
+                yes_bid   = float(m.get("yes_bid") or 0)
+                yes_ask   = float(m.get("yes_ask") or 0)
                 volume    = m.get("volume", 0)
                 title     = (m.get("title", "") or "")[:40]
                 logger.info(
@@ -100,16 +100,18 @@ class MarketDataFetcher:
                 )
             logger.info("─" * 80)
 
-        # Mark any market not in this fresh batch as closed so stale rows don't get traded
-        fetched_tickers = [m.get("ticker") for m in markets if m.get("ticker")]
-        if fetched_tickers:
-            placeholders = ",".join("?" * len(fetched_tickers))
-        # Mark stale markets as closed using timestamp instead of NOT IN (avoids SQLite 999-param limit)
-        if markets:
-            await self.db.execute(
-                "UPDATE markets SET status='closed' WHERE status='open' AND fetched_at < ? AND (platform='kalshi' OR platform IS NULL)",
-                (now,)
-            )
+        # Mark stale markets as closed (ticker-based exclusion avoids closing rows
+        # written in the same second or by concurrent processes)
+        if rows:
+            fetched_tickers = [r[0] for r in rows]  # ticker is index 0
+            chunk_size = 900
+            for i in range(0, len(fetched_tickers), chunk_size):
+                chunk = fetched_tickers[i:i + chunk_size]
+                placeholders = ",".join("?" * len(chunk))
+                await self.db.execute(
+                    f"UPDATE markets SET status='closed' WHERE status='open' AND ticker NOT IN ({placeholders}) AND (platform='kalshi' OR platform IS NULL)",
+                    chunk
+                )
 
         # Purge closed markets older than 7 days to prevent unbounded DB growth
         await self.db.execute(

@@ -313,11 +313,33 @@ async def _youtube_search(q: str) -> List[str]:
         videos = []
 
         # YouTube embeds initial data as a JSON blob in a <script> tag
-        match = re.search(r'var ytInitialData\s*=\s*(\{.*?\});\s*</script>', html, re.DOTALL)
-        if match:
+        prefix = 'var ytInitialData\s*=\s*'
+        idx = html.find('var ytInitialData = ')
+        if idx == -1:
+            idx = html.find('var ytInitialData=')
+        if idx != -1:
+            # Advance past the '= ' to the opening brace
+            brace_start = html.index('{', idx)
+            # Walk the string counting braces to find the matching close
+            depth = 0
+            end = brace_start
+            for i, ch in enumerate(html[brace_start:], brace_start):
+                if ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+            raw_json = html[brace_start:end]
+            match = True  # sentinel so the block below runs
+        else:
+            raw_json = None
+            match = False
+        if match and raw_json:
             import json
             try:
-                yt_data = json.loads(match.group(1))
+                yt_data = json.loads(raw_json)
                 # Navigate to video renderers
                 contents = (
                     yt_data

@@ -63,7 +63,7 @@ class ArbitrageDetector:
                 gross_edge = kalshi_price - poly_price
 
             # Deduct Kalshi fee from gross edge
-            fee_cents = kalshi_price * KALSHI_FEE_PCT
+            fee_cents = (kalshi_price if side == "yes" else (100 - kalshi_price)) * KALSHI_FEE_PCT
             net_edge = gross_edge - fee_cents
 
             if net_edge <= 0:
@@ -125,7 +125,8 @@ class ArbitrageDetector:
             # threshold_pct is in percent; net_edge is in cents — compare apples to apples
             # A net_edge of 4¢ on a ~100¢ payout = 4% ROI, so threshold_pct≈cents here
             # Use a minimum absolute edge of 2¢ to avoid fee-eroded trades
-            if net_edge < max(self.threshold_pct, 2.0):
+            threshold_cents = self.threshold_pct  # 1 pct-point == 1 cent on Kalshi's 0-100 cent scale
+            if net_edge < max(threshold_cents, 2.0):
                 continue
 
             key = ticker + "_internal"

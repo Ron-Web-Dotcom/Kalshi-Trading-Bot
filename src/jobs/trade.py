@@ -52,7 +52,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         db = DatabaseManager()
         await db.initialize()
 
-    results = TradingResults()
+    results           = TradingResults()
+    trades_this_cycle = 0
 
     # ── Kill switch check (must be FIRST) ──────────────────────────────────
     from src.utils.kill_switch import is_active as kill_switch_active
@@ -90,8 +91,6 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 logger.info("Live portfolio: $%.2f", portfolio_val)
         except Exception as _be:
             logger.warning("Could not fetch live balance — using config $%.2f: %s", portfolio_val, _be)
-    results           = TradingResults()
-    trades_this_cycle = 0
 
     # ── Daily loss lockout check ──────────────────────────────────────────
     locked, lockout_reason = await risk.check_daily_loss_lockout(db)
@@ -308,6 +307,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         f"Net edge after fee={net:.1f}¢"
                     ),
                     signal_source="cross_market_arb",
+                    market_title=market.get("title", "") or market.get("question", ""),
                 )
                 if rec:
                     trades_this_cycle += 1
@@ -417,7 +417,31 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             if m.get("ticker") in open_tickers:
                 return True
             t = (m.get("title") or "").strip().lower()
-            return bool(t and t in open_titles)
+            if t and t in open_titles:
+                return True
+            # Block correlated exact-score / spread positions on the same event.
+            # Strip score patterns and modifiers, then check if the remaining
+            # "event words" overlap with any existing open position title.
+            import re as _re
+            _score_pat = _re.compile(
+                r'\bexact score[:\s]*|\bspread[:\s]*|\bo/?u[:\s]*|\bover[/\s]under[:\s]*'
+                r'|\b\d+[:\-]\d+\b|\(-?\d+\.?\d*\)'
+                r'|\b(yes|no|will|the|be|on|at|in|a|an|is|to|of|and|or|for)\b'
+                r'|[?!,.]',
+                _re.IGNORECASE,
+            )
+            def _event_words(title: str):
+                stripped = _score_pat.sub(' ', title.lower())
+                words = {w for w in stripped.split() if len(w) > 2}
+                return words
+            new_words = _event_words(t)
+            if len(new_words) >= 2:
+                for existing_title in open_titles:
+                    existing_words = _event_words(existing_title)
+                    overlap = new_words & existing_words
+                    if len(overlap) >= 2 and len(overlap) / max(len(new_words), 1) >= 0.5:
+                        return True
+            return False
 
         # ── 5. Fetch Polymarket candidates + store in DB (always — needed for position tracking) ──
         poly_markets = []
@@ -1173,6 +1197,11 @@ async def _resolve_expired_positions(db, live_mode: bool = False, risk=None) -> 
                     "UPDATE trade_logs SET result='EXPIRED', resolved_at=datetime('now'), pnl=0 WHERE id=?",
                     (_tl_row["id"],)
                 )
+            continue
+
+        # Guard for entry == 0 edge case (unresolvable position)
+        if exit_p == 0 and entry == 0:
+            logger.warning("SKIP %s — both exit_p and entry are 0, position unresolvable", ticker)
             continue
 
         pnl_cents = (exit_p - entry) * contracts

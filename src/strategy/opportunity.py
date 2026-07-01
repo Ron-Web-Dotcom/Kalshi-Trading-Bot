@@ -180,7 +180,7 @@ class OpportunityHunter:
         if poly_markets:
             all_candidates.extend(poly_markets)
 
-        poly_by_ticker = {c["kalshi_ticker"]: c for c in poly_comps}
+        poly_by_ticker = {c["kalshi_ticker"]: c for c in poly_comps if "kalshi_ticker" in c}
 
         logger.info(
             "── Opportunity Hunt (%d Kalshi + %d Polymarket = %d total) ──",
@@ -253,7 +253,7 @@ class OpportunityHunter:
                 self._mark_rejected(ticker, decision.get("reasoning", "")[:60])
                 continue  # zero-score market can never be best — skip it
             yes_ask = float(market.get("yes_ask") or market.get("last_price") or 0)
-            no_ask  = float(market.get("no_ask")  or (100 - yes_ask))
+            no_ask = float((100 - yes_ask) if market.get("no_ask") is None else market.get("no_ask"))
 
             logger.info(
                 "  [AI] %-32s pre=%.2f score=%.3f | conf=%d%% ev=%.1f¢ | %s",

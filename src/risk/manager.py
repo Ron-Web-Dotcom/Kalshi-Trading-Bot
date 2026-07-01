@@ -98,8 +98,8 @@ class RiskManager:
 
     @staticmethod
     def _ticker_category(ticker: str) -> str:
-        """Extract category prefix from ticker (e.g. 'KXETHD' → 'KXETH')."""
-        return ticker.split("-")[0] if "-" in ticker else ticker[:4]
+        """Extract category prefix from ticker (e.g. 'KXETHD-24' → 'KXETHD')."""
+        return ticker.split("-")[0] if "-" in ticker else ticker
 
     def record_trade(self, ticker: str, pnl: float = 0.0, platform: str = "kalshi"):
         """Record a completed trade for cooldown tracking."""
@@ -157,15 +157,14 @@ class RiskManager:
         if db is None:
             return False, ""
 
-        # Check 1: daily loss total — join trade_logs to filter by paper/live flag
+        # Check 1: daily loss total — use trade_logs directly to avoid JOIN fan-out
         try:
             paper_flag = 0 if settings.trading.live_trading_enabled else 1
             today = datetime.now(timezone.utc).date().isoformat()
             row = await db.fetchone(
-                "SELECT COALESCE(SUM(p.pnl), 0) AS total_pnl "
-                "FROM positions p "
-                "JOIN trade_logs t ON t.ticker = p.ticker AND t.paper_trade = ? "
-                "WHERE p.status='closed' AND p.closed_at >= ?",
+                "SELECT COALESCE(SUM(pnl), 0) AS total_pnl "
+                "FROM trade_logs "
+                "WHERE paper_trade = ? AND resolved_at >= ? AND pnl IS NOT NULL",
                 (paper_flag, today + "T00:00:00"),
             )
             total_pnl = float((row or {}).get("total_pnl", 0) or 0)
@@ -201,4 +200,4 @@ class RiskManager:
         """Convert dollar amount to number of contracts at given price (cents)."""
         if price_cents <= 0:
             return 0
-        return max(1, int(dollars / (price_cents / 100)))
+        return int(dollars / (price_cents / 100))

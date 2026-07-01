@@ -50,7 +50,7 @@ class TradingBot:
 
         self.live_mode  = live_mode
         self.db         = DatabaseManager()
-        self._shutdown  = asyncio.Event()
+        self._shutdown: asyncio.Event | None = None
         self._cycle     = 0
 
         # Singletons — share state across cycles so cooldowns, scaling, and
@@ -230,6 +230,7 @@ class TradingBot:
         gc.collect()
 
     async def run_loop(self):
+        self._shutdown = asyncio.Event()
         await self.startup()
 
         # ── Sleep mode: 3:00–5:00 AM ET — bot pauses all scanning ───────────
@@ -243,6 +244,7 @@ class TradingBot:
             et = _net()
             if 3 <= et.hour < 5:
                 if not _sleep_mode_notified:
+                    _sleep_mode_notified = True  # set before send to prevent retry loop on failure
                     try:
                         from src.alerts.discord import DiscordAlerter as _DA
                         await _DA().send_message(
@@ -250,7 +252,6 @@ class TradingBot:
                             "Bot pausing all scanning & alerts until 5:00 AM ET.\n"
                             "Existing positions are safe — no changes during sleep. 💤"
                         )
-                        _sleep_mode_notified = True
                     except Exception:
                         pass
                     # GC before sleeping to free unreferenced memory
@@ -450,6 +451,15 @@ class TradingBot:
                         "AND title NOT LIKE '%by december 31%' "
                         "AND title NOT LIKE '%before 2027%' "
                         "AND title NOT LIKE '%before 2028%' "
+                        "AND title NOT LIKE '%will the announcer%' "
+                        "AND title NOT LIKE '%say ''aggressive''%' "
+                        "AND title NOT LIKE '%say ''clutch''%' "
+                        "AND title NOT LIKE '%say ''impressive''%' "
+                        "AND title NOT LIKE '%meme coin%' "
+                        "AND title NOT LIKE '%rug pull%' "
+                        "AND title NOT LIKE '%pump%' "
+                        "AND title NOT LIKE '%before end of%' "
+                        "AND title NOT LIKE '%all-time high%' "
                     )
                     kal_cand = await self.db.fetchall(
                         "SELECT ticker, title, yes_ask, no_ask, volume, platform, close_time FROM markets "
@@ -551,7 +561,7 @@ class TradingBot:
                         for h in _HB_HOURS
                     ]
                     _upcoming = [t if t > _et_now else t + _hb_td(days=1) for t in _upcoming]
-                    await asyncio.sleep((min(_upcoming) - _et_now).total_seconds())
+                    await asyncio.sleep(max(0.0, (min(_upcoming) - _et_now).total_seconds()))
                 except asyncio.CancelledError:
                     break
                 except Exception as _se:
@@ -760,7 +770,7 @@ class TradingBot:
                     # Read trades_executed from DB — in-memory counter resets on restart
                     trades_db_row = await self.db.fetchone(
                         "SELECT COUNT(*) as n FROM trade_logs WHERE paper_trade=? AND executed_at >= ? AND executed_at < ?",
-                        (_paper_flag, report_date + "T00:00:00", report_date + "T23:59:59")
+                        (_paper_flag, report_date + "T00:00:00", _next_day + "T00:00:00")
                     ) or {}
                     snap["trades_executed"] = trades_db_row.get("n", 0) or snap.get("trades_executed", 0)
 
@@ -788,11 +798,16 @@ class TradingBot:
                 except Exception as e:
                     logger.error("Daily summary error: %s", e)
 
-                await asyncio.sleep(23 * 3600)  # safety — won't fire twice
+                # Sleep until 30s past the next midnight ET to avoid firing twice
+                _et_after = now_et()
+                _next_mid = (_et_after + timedelta(days=1)).replace(hour=0, minute=0, second=30, microsecond=0)
+                await asyncio.sleep(max(0.0, (_next_mid - _et_after).total_seconds()))
+
+        loop = asyncio.get_event_loop()
 
         def _on_signal(signum, frame):
             logger.info("Shutdown signal %s — stopping bot...", signum)
-            self._shutdown.set()
+            loop.call_soon_threadsafe(self._shutdown.set)
 
         signal.signal(signal.SIGINT,  _on_signal)
         signal.signal(signal.SIGTERM, _on_signal)
@@ -981,6 +996,13 @@ class TradingBot:
                             price = float(entry)
                         if price < 5 or price > 95:
                             return True
+                        # Suppress noise-level edge — minimum 3¢ EV to appear in alerts
+                        net_ev = pick.get("net_ev")
+                        try:
+                            if net_ev is not None and float(net_ev) < 3.0:
+                                return True
+                        except (ValueError, TypeError):
+                            pass
                         return False
 
                     # 1. All active live slots — any open position in live manager
@@ -1055,6 +1077,15 @@ class TradingBot:
                                 "alerted_at": now_utc, "result_sent": False,
                             }
 
+                    # Mark picks with open positions as _in_bet so Discord shows "BIDS ACTIVE"
+                    try:
+                        _open_pos_rows = await self.db.fetchall(
+                            "SELECT ticker FROM positions WHERE status='open'"
+                        ) or []
+                        _open_tickers = {r["ticker"] for r in _open_pos_rows}
+                    except Exception:
+                        _open_tickers = set()
+
                     # Full watching list — live slots + new picks, deduped
                     seen_watch = set()
                     all_watching = []
@@ -1062,6 +1093,9 @@ class TradingBot:
                         t = p.get("ticker", "")
                         if t not in seen_watch:
                             seen_watch.add(t)
+                            # Mark as in_bet if there's an open position for this ticker
+                            if t in _open_tickers:
+                                p = {**p, "_in_bet": True}
                             all_watching.append(p)
                     for ticker, slot in list(_ls.items()):
                         if ticker not in seen_watch:
@@ -1072,12 +1106,46 @@ class TradingBot:
                                 # Only include if not already alerted at this confidence band
                                 if _alerted.get(ticker, {}).get("band") != band:
                                     seen_watch.add(ticker)
+                                    if ticker in _open_tickers:
+                                        pick = {**pick, "_in_bet": True}
                                     all_watching.append(pick)
 
+                    # Sort by confidence first so the best pick per correlated group wins.
+                    all_watching.sort(
+                        key=lambda x: (0 if x.get("is_live") else 1, -float(x.get("confidence", 0) or 0))
+                    )
+
+                    # Correlated-pick dedup: keep only the best pick per event.
+                    # Two picks are "same event" when their non-trivial words overlap ≥50%.
+                    import re as _ba_re
+                    _ba_stop = _ba_re.compile(
+                        r'\bexact score[:\s]*|\bspread[:\s]*|\bo/?u[:\s]*|\bover[/\s]under[:\s]*'
+                        r'|\b\d+[:\-]\d+\b|\(-?\d+\.?\d*\)'
+                        r'|\b(yes|no|will|the|be|on|at|in|a|an|is|to|of|and|or|for|vs|vs\.)\b'
+                        r'|[?!,.]',
+                        _ba_re.IGNORECASE,
+                    )
+                    def _ba_event_words(title: str) -> frozenset:
+                        stripped = _ba_stop.sub(' ', (title or "").lower())
+                        return frozenset(w for w in stripped.split() if len(w) > 2)
+
+                    _deduped_watching = []
+                    _seen_event_word_sets: list = []
+                    for p in all_watching:
+                        p_words = _ba_event_words(p.get("title") or p.get("ticker") or "")
+                        correlated = False
+                        if len(p_words) >= 2:
+                            for sw in _seen_event_word_sets:
+                                overlap = p_words & sw
+                                if len(overlap) >= 2 and len(overlap) / max(len(p_words), 1) >= 0.5:
+                                    correlated = True
+                                    break
+                        if not correlated:
+                            _deduped_watching.append(p)
+                            _seen_event_word_sets.append(p_words)
+                    all_watching = _deduped_watching
+
                     if all_watching:
-                        all_watching.sort(
-                            key=lambda x: (0 if x.get("is_live") else 1, -float(x.get("confidence", 0)))
-                        )
                         batch_keys = frozenset(
                             f"{p.get('ticker')}:{int(float(p.get('confidence',0))//10)*10}"
                             for p in all_watching
@@ -1288,17 +1356,39 @@ class TradingBot:
                         from src.clients.polymarket_client import PolymarketTradingClient as _PC
                         _kc = _KC()
                         _pc = _PC()
-                        kalshi_live_now, poly_live_now = await asyncio.gather(
-                            _kc.get_live_now_markets(max_markets=50),
-                            _pc.get_live_now_markets(max_markets=50),
-                            return_exceptions=True,
-                        )
+                        try:
+                            kalshi_live_now, poly_live_now = await asyncio.gather(
+                                _kc.get_live_now_markets(max_markets=50),
+                                _pc.get_live_now_markets(max_markets=50),
+                                return_exceptions=True,
+                            )
+                        finally:
+                            try:
+                                await _kc.close()
+                            except Exception:
+                                pass
+                            try:
+                                await _pc.close()
+                            except Exception:
+                                pass
+                        def _norm_price(m: dict) -> dict:
+                            def _n(v):
+                                try:
+                                    f = float(v or 0)
+                                    return f * 100 if f < 1.0 else f
+                                except Exception:
+                                    return 0.0
+                            ya = _n(m.get("yes_ask") or m.get("last_price"))
+                            if ya > 0:
+                                m["yes_ask"] = round(ya, 2)
+                                m["no_ask"]  = round(100 - ya, 2)
+                            return m
                         for m in (kalshi_live_now if isinstance(kalshi_live_now, list) else []):
                             m["_platform_live"] = True
-                            candidates.append(m)
+                            candidates.append(_norm_price(m))
                         for m in (poly_live_now if isinstance(poly_live_now, list) else []):
                             m["_platform_live"] = True
-                            candidates.append(m)
+                            candidates.append(_norm_price(m))
                     except Exception as _pe:
                         logger.debug("Live platform fetch in scan loop: %s", _pe)
 

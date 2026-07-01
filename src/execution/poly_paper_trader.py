@@ -80,7 +80,7 @@ class PolyPaperTrader:
         # Polymarket uses USDC; min order
         size = max(size, self.poly_cfg.min_order_usdc)
 
-        contracts  = max(1, int(size / (price_cents / 100)))
+        contracts = int(size / (price_cents / 100))
         if contracts < 1:
             logger.warning("POLY REJECT %s: 0 contracts computed", ticker)
             return None
@@ -194,6 +194,6 @@ class PolyPaperTrader:
                 logger.debug("Discord alert failed: %s", _de)
 
         if self.risk:
-            self.risk.record_trade(ticker)
+            self.risk.record_trade(ticker, platform="polymarket")
 
         return record

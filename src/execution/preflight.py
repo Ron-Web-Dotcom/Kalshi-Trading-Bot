@@ -3,12 +3,12 @@
 import asyncio
 import sys
 import logging
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 logger = logging.getLogger("trading.preflight")
 
 
-async def run_preflight(verbose: bool = True) -> Tuple[bool, List[str]]:
+async def run_preflight(verbose: bool = True) -> Tuple[bool, List[str], Optional[float]]:
     """
     Run all safety checks required before live trading.
     Returns (all_passed, list_of_results).
@@ -56,10 +56,13 @@ async def run_preflight(verbose: bool = True) -> Tuple[bool, List[str]]:
     kalshi = KalshiClient()
     try:
         bal = await kalshi.get_balance()
-        balance_usd = bal.get("balance", bal.get("available_balance_cents", 0))
-        if isinstance(balance_usd, (int, float)):
-            # Kalshi returns balance in cents
-            balance_usd = balance_usd / 100
+        raw = bal.get("balance", bal.get("available_balance_cents"))
+        if raw is None:
+            raise ValueError(f"No balance key found in API response: {list(bal.keys())}")
+        if not isinstance(raw, (int, float)):
+            raise ValueError(f"Unexpected balance type {type(raw).__name__}: {raw!r}")
+        # Kalshi returns balance in cents
+        balance_usd = raw / 100
         if balance_usd and balance_usd > 0:
             ok(f"Kalshi API connected | Balance: ${balance_usd:.2f}")
         else:

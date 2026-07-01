@@ -19,7 +19,7 @@ import os
 
 logger = logging.getLogger("trading.calibrator")
 
-_THRESHOLD_FILE  = "/tmp/kalshi_conf_threshold.json"
+_THRESHOLD_FILE  = os.path.join(os.path.dirname(__file__), "..", "..", "data", "conf_threshold.json")
 _DEFAULT         = 65.0
 _FLOOR_CONF      = 60.0
 _CEIL_CONF       = 75.0
@@ -75,9 +75,10 @@ async def calibrate(db) -> float:
 
     try:
         rows = await db.fetchall(
-            "SELECT confidence, pnl FROM positions "
-            "WHERE status='closed' AND pnl IS NOT NULL AND confidence IS NOT NULL "
-            "ORDER BY closed_at DESC LIMIT 200"
+            "SELECT tl.ai_confidence AS confidence, p.pnl FROM positions p "
+            "JOIN trade_logs tl ON tl.ticker = p.ticker "
+            "WHERE p.status='closed' AND p.pnl IS NOT NULL AND tl.ai_confidence IS NOT NULL "
+            "ORDER BY p.closed_at DESC LIMIT 200"
         )
     except Exception as e:
         logger.debug("Calibrator DB read failed: %s", e)

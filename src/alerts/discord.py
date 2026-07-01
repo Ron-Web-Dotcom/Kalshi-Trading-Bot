@@ -32,19 +32,27 @@ class DiscordAlerter:
             logger.warning("Discord alert timed out (>5s) — trade cycle unaffected")
             return False
         except Exception as e:
-            logger.warning("Discord alert failed: %s", e)
+            # Log 400s at error level — these are usually "message too long"
+            lvl = "error" if "400" in str(e) else "warning"
+            getattr(logger, lvl)("Discord alert failed: %s", e)
             return False
 
     def _embed(self, title: str, description: str, color: int,
                fields: Optional[List[Dict]] = None) -> Dict:
+        # Discord limits: title 256, description 4096, field value 1024, total embed 6000
+        safe_fields = []
+        if fields:
+            for f in fields:
+                v = f.get("value", "") or ""
+                safe_fields.append({**f, "value": v[:1024] or "​"})
         embed: Dict = {
-            "title": title,
-            "description": description,
+            "title": title[:256],
+            "description": description[:4096],
             "color": color,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        if fields:
-            embed["fields"] = fields
+        if safe_fields:
+            embed["fields"] = safe_fields
         return {"embeds": [embed]}
 
     # ── Alert methods ─────────────────────────────────────────────────────────
@@ -173,7 +181,7 @@ class DiscordAlerter:
             f"**{display}**\n"
             f"Side: **{side.upper()}** @ **{price:.0f}¢** | {contracts} contracts | Capital: **${size_dollars:.2f}**\n"
             f"Max payout: **${max_payout:.2f}**{ev_s}{exp_s}\n"
-            f"Confidence: **{ai_confidence:.0f}%**\n"
+            f"Confidence: **{f'{ai_confidence:.0f}' if ai_confidence is not None else 'N/A'}%**\n"
         )
         if reasoning:
             body += f"\n_{reasoning[:200]}_"
@@ -274,7 +282,7 @@ class DiscordAlerter:
             )
 
         # Show picks within 7 days — bid only placed on event day
-        in_bet   = [p for p in picks if p.get("_in_bet") or p.get("is_live") and p.get("contracts")]
+        in_bet   = [p for p in picks if p.get("_in_bet") or (p.get("is_live") and p.get("contracts"))]
         watching_all = [p for p in picks if p not in in_bet]
 
         def _days_out(p) -> float:

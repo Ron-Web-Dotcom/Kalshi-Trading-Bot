@@ -96,7 +96,7 @@ async def run_tracking(db_manager) -> None:
                         # YES wins when YES price → 100; NO wins when NO price → 100 (YES → 0)
                         final_price  = 100.0 if (
                             (side == "yes" and cur_price >= 95) or
-                            (side == "no"  and cur_price <= 5)
+                            (side == "no"  and cur_price >= 95)
                         ) else 0.0
                         pnl = (final_price - avg_price) * contracts / 100
                         await db_manager.execute("""
@@ -200,8 +200,8 @@ async def run_tracking(db_manager) -> None:
                     )
                     if _tl_track and _tl_track.get("id"):
                         await db_manager.execute(
-                            "UPDATE trade_logs SET pnl=?, resolved_at=datetime('now'), result=? WHERE id=?",
-                            (pnl, "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN"), _tl_track["id"])
+                            "UPDATE trade_logs SET pnl=?, resolved_at=?, result=? WHERE id=?",
+                            (pnl, datetime.now(timezone.utc).isoformat(), "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN"), _tl_track["id"])
                         )
                     risk.record_result(ticker, pnl, platform)
                     try:

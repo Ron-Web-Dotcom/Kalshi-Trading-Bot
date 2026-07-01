@@ -263,7 +263,9 @@ HARD RULES:
 - confidence ≥ {self.trading_cfg.min_ai_confidence:.0f} required to BUY
 - If true_prob differs from market price: that gap IS the edge — compute EV from it"""
 
-    async def decide(self, market: Dict, signals: List[Dict] = [], prebuilt_context: str = "") -> AIDecision:
+    async def decide(self, market: Dict, signals: List[Dict] = None, prebuilt_context: str = "") -> AIDecision:
+        if signals is None:
+            signals = []
         ticker = market.get("ticker", "UNKNOWN")
 
         if not self.cfg.openai_api_key:

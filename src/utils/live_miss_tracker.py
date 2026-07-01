@@ -118,7 +118,7 @@ class LiveMissTracker:
             contracts = 10.0 / (price / 100) if price > 0 else 0
             pnl_per_10 = contracts * (100 - price) * 0.98 / 100
         else:
-            pnl_per_10 = -(entry["yes_ask"] if predicted == "yes" else entry["no_ask"]) / 10
+            pnl_per_10 = -10.0
 
         entry["resolved_at"]    = datetime.now(timezone.utc).isoformat()
         entry["actual_outcome"] = actual
