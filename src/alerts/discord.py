@@ -102,7 +102,8 @@ class DiscordAlerter:
                               poly_enabled: bool = False,
                               health_results: Optional[Dict] = None) -> None:
         """Send bot startup notification — rate-limited to once per 3 minutes."""
-        import time, os
+        import time
+        import os
         now = time.time()
         try:
             if os.path.exists(self._STARTUP_TS_FILE):
@@ -562,9 +563,9 @@ class DiscordAlerter:
             trigger_emoji = "🤖"
             trigger_label = "AI Opted Out — Bad Trade Detected"
             explanation   = (
-                f"The AI re-analysed this position with fresh real-world data and "
-                f"determined the original bet no longer makes sense. "
-                f"It exited early to limit losses."
+                "The AI re-analysed this position with fresh real-world data and "
+                "determined the original bet no longer makes sense. "
+                "It exited early to limit losses."
             )
         else:
             trigger_emoji = "🔒"
@@ -1377,10 +1378,10 @@ class DiscordAlerter:
         top_buy     = next((b for b in buys if b.get("action") == "BUY"), None)
 
         if has_live and has_new:
-            headline = f"⚡🎯 Bot placed a LIVE in-play bet AND a new prediction — it's been busy!"
+            headline = "⚡🎯 Bot placed a LIVE in-play bet AND a new prediction — it's been busy!"
             color    = 0xFF4400
         elif has_live:
-            headline = f"⚡ OH SNAP — Bot entered a LIVE in-play market! Game on! 🎮"
+            headline = "⚡ OH SNAP — Bot entered a LIVE in-play market! Game on! 🎮"
             color    = 0xFF4400
         elif wins_here and has_new:
             total_won = sum(c.get("pnl", 0) or 0 for c in wins_here)
@@ -1448,7 +1449,7 @@ class DiscordAlerter:
             activity_lines.append("_No new bets or settlements this period — scanning continued non-stop_")
 
         fields.append({
-            "name":   f"📋 What The Bot Did (since last check-in)",
+            "name":   "📋 What The Bot Did (since last check-in)",
             "value":  "\n\n".join(activity_lines),
             "inline": False,
         })

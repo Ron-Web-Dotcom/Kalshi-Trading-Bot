@@ -13,7 +13,6 @@ Requires DISCORD_BOT_TOKEN and DISCORD_COMMAND_CHANNEL_ID in .env.
 Get a bot token at: https://discord.com/developers/applications
 """
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -28,7 +27,6 @@ _last_message_id: Optional[str] = None
 
 class DiscordCommandListener:
     def __init__(self, db=None):
-        from src.config.settings import settings
         import os
         self.token      = os.environ.get("DISCORD_BOT_TOKEN", "")
         self.channel_id = os.environ.get("DISCORD_COMMAND_CHANNEL_ID", "")
@@ -98,7 +96,7 @@ class DiscordCommandListener:
 
     async def _handle(self, cmd: str) -> None:
         from src.config.settings import settings
-        from src.utils.kill_switch import engage as ks_engage, clear as ks_clear, is_active as ks_active
+        from src.utils.kill_switch import engage as ks_engage, clear as ks_clear
 
         if cmd == "!live on":
             settings.trading.live_trading_enabled = True

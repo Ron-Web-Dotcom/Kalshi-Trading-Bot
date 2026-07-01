@@ -25,7 +25,6 @@ The hourly digest:
   - Highlights "would have earned $X" using the price at scan time
 """
 
-import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional

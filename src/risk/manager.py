@@ -1,7 +1,7 @@
 """Phase 7 — risk management: size limits, daily loss, cooldown, exposure."""
 
 import logging
-from datetime import datetime, timezone, date, timedelta
+from datetime import datetime, timezone, date
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger("trading.risk")

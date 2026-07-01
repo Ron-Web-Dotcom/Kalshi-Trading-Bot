@@ -5,7 +5,6 @@ import os
 import sys
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
-from typing import Optional
 
 _loggers: dict = {}
 

@@ -151,12 +151,12 @@ TEAM_ALIASES: Dict[str, str] = {
     "timberwolves":"MIN",  "pacers":     "IND",
     # MLB
     "yankees":     "NYY",  "red sox":    "BOS", "dodgers":    "LAD",
-    "cubs":        "CHC",  "mets":       "NYM", "giants":     "SF",
-    "braves":      "ATL",  "astros":     "HOU", "cardinals":  "STL",
+    "cubs":        "CHC",  "mets":       "NYM", "sf giants":  "SF",
+    "braves":      "ATL",  "astros":     "HOU", "st. louis cardinals": "STL",
     "phillies":    "PHI",  "blue jays":  "TOR", "padres":     "SD",
     "brewers":     "MIL",  "mariners":   "SEA", "nationals":  "WSH",
     "tigers":      "DET",  "white sox":  "CWS", "twins":      "MIN",
-    "athletics":   "OAK",  "angels":     "LAA", "rangers":    "TEX",
+    "athletics":   "OAK",  "angels":     "LAA", "texas rangers": "TEX",
     "royals":      "KC",   "orioles":    "BAL", "pirates":    "PIT",
     "reds":        "CIN",  "rockies":    "COL", "diamondbacks":"ARI",
     "marlins":     "MIA",  "rays":       "TB",
@@ -165,20 +165,20 @@ TEAM_ALIASES: Dict[str, str] = {
     "rangers":     "NYR",  "islanders":  "NYI", "flyers":     "PHI",
     "penguins":    "PIT",  "capitals":   "WSH", "blackhawks": "CHI",
     "red wings":   "DET",  "blues":      "STL", "wild":       "MIN",
-    "predators":   "NSH",  "lightning":  "TB",  "panthers":   "FLA",
+    "predators":   "NSH",  "lightning":  "TB",  "florida panthers": "FLA",
     "hurricanes":  "CAR",  "avalanche":  "COL", "golden knights": "VGK",
     "oilers":      "EDM",  "flames":     "CGY", "canucks":    "VAN",
-    "sharks":      "SJS",  "ducks":      "ANA", "kings":      "LAK",
-    "coyotes":     "ARI",  "jets":       "WPG", "senators":   "OTT",
+    "sharks":      "SJS",  "ducks":      "ANA", "la kings":   "LAK",
+    "coyotes":     "ARI",  "winnipeg jets": "WPG", "senators":   "OTT",
 
     # Soccer — Premier League (EPL)
     "arsenal":         "ARS",  "chelsea":       "CHE",  "liverpool":    "LIV",
     "manchester city": "MCI",  "man city":      "MCI",  "man utd":      "MUN",
-    "manchester united":"MUN", "tottenham":     "TOT",  "spurs":        "TOT",
+    "manchester united":"MUN", "tottenham":     "TOT",  "tottenham hotspur": "TOT",
     "newcastle":       "NEW",  "aston villa":   "AVL",  "west ham":     "WHU",
     "brighton":        "BHA",  "everton":       "EVE",  "fulham":       "FUL",
     "brentford":       "BRE",  "crystal palace":"CRY",  "wolverhampton":"WOL",
-    "wolves":          "WOL",  "nottingham":    "NFO",  "leicester":    "LEI",
+    "wolverhampton wanderers": "WOL", "nottingham":    "NFO",  "leicester":    "LEI",
     "southampton":     "SOU",  "ipswich":       "IPS",  "bournemouth":  "BOU",
 
     # Soccer — La Liga
@@ -639,7 +639,7 @@ async def sofa_player_last_games(player_id: int, n: int = 5) -> Optional[str]:
         status = (ev.get("status") or {}).get("description", "")
         lines.append(f"  {home} {hs}–{as_} {away} ({status})")
 
-    return "Last {} games:\n".format(len(lines)) + "\n".join(lines)
+    return f"Last {len(lines)} games:\n" + "\n".join(lines)
 
 
 async def sofa_h2h(team1_id: int, team2_id: int) -> Optional[str]:

@@ -331,7 +331,6 @@ SPORTS: Dict[str, Set[str]] = {
     "club brugge": {"club brugge", "brugge"},
     "olympiacos": {"olympiacos"},
     "panathinaikos": {"panathinaikos"},
-    "benfica": {"benfica"},
     "crvena zvezda": {"red star belgrade", "crvena zvezda", "red star"},
 
     # -------------------------------------------------------------------------
@@ -797,7 +796,6 @@ POLITICS: Dict[str, Set[str]] = {
     "justin trudeau": {"trudeau", "justin trudeau", "pm trudeau"},
     "yoon suk-yeol": {"yoon", "yoon suk-yeol", "yoon suk yeol", "president yoon"},
     "fumio kishida": {"kishida", "fumio kishida", "pm kishida"},
-    "fumio kishida": {"kishida"},
     "shigeru ishiba": {"ishiba", "shigeru ishiba"},
     "narendra modi": {"modi", "narendra modi", "pm modi"},
     "lula": {"lula", "lula da silva", "luiz inácio lula da silva", "president lula"},

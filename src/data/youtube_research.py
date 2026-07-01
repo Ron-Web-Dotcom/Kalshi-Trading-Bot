@@ -26,7 +26,7 @@ import asyncio
 import logging
 import re
 import json
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 from urllib.parse import quote_plus
 
 import httpx
@@ -54,7 +54,7 @@ _CREDIBLE_CHANNELS = {
     "cnbc", "bloomberg", "the hill", "politico", "c-span", "cspan",
     "abc news", "nbc news", "cbs news", "npr",
     # Finance / Crypto
-    "cnbc", "bloomberg", "financial times", "wsj", "wall street journal",
+    "financial times", "wsj", "wall street journal",
     "coindesk", "cointelegraph", "crypto", "bankless",
     # Science / Tech
     "spacex", "nasa", "verge", "techcrunch", "wired",
@@ -336,7 +336,7 @@ async def deep_youtube_research(
             has_content = True
 
         if not description and not transcript:
-            lines.append(f"    (title only — transcript unavailable)")
+            lines.append("    (title only — transcript unavailable)")
 
     if not has_content and len(enriched) == 0:
         return ""

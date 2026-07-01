@@ -1,7 +1,6 @@
 """Kill switch — write KILL to kill_switch.txt to halt all trading immediately."""
 
 import logging
-import os
 from pathlib import Path
 
 logger = logging.getLogger("trading.kill_switch")

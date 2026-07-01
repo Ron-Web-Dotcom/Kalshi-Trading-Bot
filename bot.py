@@ -12,7 +12,6 @@ Usage:
 import asyncio
 import argparse
 import gc
-import logging
 import signal
 import sys
 from datetime import datetime, timezone
@@ -66,7 +65,7 @@ class TradingBot:
         mode  = "LIVE TRADING  ⚠️  REAL MONEY" if self.live_mode else "PAPER TRADING  ✅  No real money"
         lines = [
             "╔══════════════════════════════════════════════════╗",
-            f"║  KALSHI AI TRADING BOT                           ║",
+            "║  KALSHI AI TRADING BOT                           ║",
             f"║  Mode      : {mode:<36}║",
             f"║  AI model  : {settings.ai.model:<36}║",
             f"║  Base size : ${settings.trading.base_trade_size_dollars:<5.0f}  "
@@ -240,7 +239,6 @@ class TradingBot:
             """If in quiet hours (3–5am ET), notify Discord once, sleep until 5am, return True."""
             nonlocal _sleep_mode_notified
             from src.utils.eastern_time import now_et as _net
-            from datetime import timedelta as _td
             et = _net()
             if 3 <= et.hour < 5:
                 if not _sleep_mode_notified:
@@ -881,7 +879,6 @@ class TradingBot:
             from src.alerts.discord import DiscordAlerter
             from src.utils.daily_stats import stats as _da
             from src.jobs.live_market_manager import _live_slots as _ls
-            from src.data.live_event_detector import is_event_live_now
 
             # ticker → {band, pick_snapshot, alerted_at, result_sent}
             _alerted: dict = {}
@@ -1187,7 +1184,6 @@ class TradingBot:
             from src.data.context_builder import build_market_context
             from src.ai.decision import AIDecisionEngine
             from src.utils.eastern_time import now_et
-            from datetime import timedelta as _td
 
             LIVE_SCAN_INTERVAL  = 300   # 5 min
             _last_hour_digest   = None
@@ -1418,7 +1414,7 @@ class TradingBot:
                     #   2. closes TODAY (midnight-to-midnight ET): event starts + closes today
                     #      Kalshi/Poly close_time IS the source of truth — no ESPN needed
                     #   3. to_check: closes in 1-7 days → try is_event_live_now() fallback
-                    from datetime import datetime as _dt2, timezone as _tz2, timedelta as _td2
+                    from datetime import datetime as _dt2, timezone as _tz2
                     _now2 = _dt2.now(_tz2.utc)
                     # Tonight's midnight ET in UTC
                     try:

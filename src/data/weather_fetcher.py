@@ -10,7 +10,6 @@ wttr.in returns JSON with current conditions + 3-day forecast.
 """
 
 import logging
-import re
 from typing import Dict, List, Optional
 
 import httpx

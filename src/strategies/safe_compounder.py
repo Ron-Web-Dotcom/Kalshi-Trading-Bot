@@ -1,7 +1,7 @@
 """Safe compounder — conservative NO-side math-only strategy."""
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 logger = logging.getLogger("trading.safe_compounder")
 

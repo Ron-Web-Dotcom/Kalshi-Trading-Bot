@@ -1,7 +1,5 @@
 """Pre-flight checks before enabling live trading."""
 
-import asyncio
-import sys
 import logging
 from typing import List, Optional, Tuple
 

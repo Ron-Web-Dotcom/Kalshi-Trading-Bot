@@ -2,14 +2,11 @@
 
 import asyncio
 import base64
-import hashlib
-import hmac
 import json
 import logging
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode
 
 import httpx
 
@@ -30,8 +27,7 @@ logger = logging.getLogger("trading.kalshi_client")
 
 def _load_private_key(pem_text: str):
     """Load RSA private key from PEM string for request signing."""
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives import serialization
     key = serialization.load_pem_private_key(pem_text.encode(), password=None)
     return key
 
@@ -291,11 +287,7 @@ class KalshiClient:
                 is_live_event   = any(kw in title for kw in _live_event_kws)
                 # Sports: close within 24h — catches today's games day-of
                 # Non-sport live events: close within 3h (time-bounded)
-                if (is_sport_ticker or is_sport_title) and hours_left <= 24:
-                    m["_kalshi_live"] = True
-                    m["hours_to_close"] = round(hours_left, 2)
-                    live_markets.append(m)
-                elif is_live_event and hours_left <= 3:
+                if ((is_sport_ticker or is_sport_title) and hours_left <= 24) or (is_live_event and hours_left <= 3):
                     m["_kalshi_live"] = True
                     m["hours_to_close"] = round(hours_left, 2)
                     live_markets.append(m)

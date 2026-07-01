@@ -194,7 +194,7 @@ def _title_terms(title: str, n: int = 5) -> str:
     """Extract key search terms from a market title."""
     stops = {"will","the","a","an","to","by","at","in","on","of","or","and",
              "is","be","for","does","when","with","from","this","that","win",
-             "before","after","over","under","by","who","what","how","can"}
+             "before","after","over","under","who","what","how","can"}
     words = re.findall(r"[a-zA-Z]{3,}", title)
     terms = [w for w in words if w.lower() not in stops]
     return " ".join(terms[:n])
@@ -261,7 +261,7 @@ async def _sports_live(title: str) -> bool:
 
 
 async def _crypto_live(title: str) -> bool:
-    from src.data.entity_registry import find_entities_in_title, get_aliases, CRYPTO
+    from src.data.entity_registry import find_entities_in_title, CRYPTO
     entities = find_entities_in_title(title)
     _COINGECKO_IDS = {
         "bitcoin":"bitcoin","ethereum":"ethereum","solana":"solana",

@@ -181,9 +181,7 @@ def score(
         base_conf = min(base_conf + 3, 88.0)
 
     # Boost: sentiment aligns with probability edge
-    if side == "yes" and yes_sent > no_sent + 0.2:
-        base_conf = min(base_conf + 4, 88.0)
-    elif side == "no" and no_sent > yes_sent + 0.2:
+    if (side == "yes" and yes_sent > no_sent + 0.2) or (side == "no" and no_sent > yes_sent + 0.2):
         base_conf = min(base_conf + 4, 88.0)
 
     # Penalty: no probability sources at all

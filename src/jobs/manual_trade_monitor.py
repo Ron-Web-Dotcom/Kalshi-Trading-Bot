@@ -11,7 +11,7 @@ Each cycle:
 
 import logging
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Optional
 
 logger = logging.getLogger("trading.manual_monitor")
 

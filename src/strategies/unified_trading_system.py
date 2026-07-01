@@ -1,6 +1,5 @@
 """Unified trading system — wraps the full pipeline."""
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Any

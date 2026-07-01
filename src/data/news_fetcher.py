@@ -9,7 +9,6 @@ Falls back gracefully if any feed is unreachable.
 import logging
 import asyncio
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import httpx

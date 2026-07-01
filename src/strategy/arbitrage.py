@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 logger = logging.getLogger("trading.arbitrage")
 

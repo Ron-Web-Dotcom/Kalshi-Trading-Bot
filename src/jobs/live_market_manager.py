@@ -20,9 +20,8 @@ Key design choices:
   - On bad exit: immediately find replacement to keep 3 slots full
 """
 
-import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from src.utils.junk_filter import is_junk
@@ -162,7 +161,7 @@ async def _fetch_poly_price(ticker: str, db, side: str = "yes") -> Optional[floa
     try:
         col = "yes_ask" if side == "yes" else "no_ask"
         row = await db.fetchone(
-            f"SELECT yes_ask, no_ask FROM markets WHERE ticker=?", (ticker,)
+            "SELECT yes_ask, no_ask FROM markets WHERE ticker=?", (ticker,)
         )
         if not row:
             return None
@@ -300,7 +299,6 @@ async def _fill_slots(
     # Live scan = TODAY only (midnight to midnight ET)
     try:
         from src.utils.eastern_time import now_et as _lm_now_et
-        import zoneinfo as _lm_zi
         _et_now = _lm_now_et()
         _tonight_et = _et_now.replace(hour=23, minute=59, second=59, microsecond=0)
         _tonight_utc = _tonight_et.astimezone(timezone.utc)
@@ -590,7 +588,7 @@ async def _send_stopout_alert(discord, slot: Dict, current_price: float, loss_pc
 
         payload = {
             "embeds": [{
-                "title": f"🛑 LIVE OPT-OUT — Stop-Loss Triggered",
+                "title": "🛑 LIVE OPT-OUT — Stop-Loss Triggered",
                 "description": (
                     f"{plat_icon} **{title[:90]}**\n"
                     f"Price moved **{loss_pct:.1f}%** against us — cutting losses before it gets worse."

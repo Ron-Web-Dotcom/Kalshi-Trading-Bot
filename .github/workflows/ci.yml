@@ -28,6 +28,7 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: |
+          pip install --upgrade pip setuptools wheel
           pip install pytest pytest-asyncio aiosqlite python-dotenv httpx cryptography openai
       - name: Install package
         run: pip install -e . --no-deps

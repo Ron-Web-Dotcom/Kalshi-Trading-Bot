@@ -125,7 +125,9 @@ class OpportunityHunter:
 
     @classmethod
     def _load_rejections(cls) -> None:
-        import json, os, time
+        import json
+        import os
+        import time
         try:
             if os.path.exists(cls._REJECTION_FILE):
                 data = json.loads(open(cls._REJECTION_FILE).read())
@@ -395,7 +397,7 @@ class OpportunityHunter:
         )
 
         results = []
-        for pre_score, market in prescored[:ai_eval_n]:
+        for _, market in prescored[:ai_eval_n]:
             ticker = market.get("ticker", "")
             if self._is_recently_rejected(ticker):
                 logger.debug("Live AI skip (cached rejection): %s", ticker[:40])

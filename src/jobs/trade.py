@@ -1,8 +1,7 @@
 """Job: execute paper (or live) trades — full pipeline with detailed logging."""
 
 import logging
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from dataclasses import dataclass
 
 from src.utils.junk_filter import is_junk
 
@@ -38,7 +37,6 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
     from src.data.market_data import MarketDataFetcher
     from src.data.external_markets import ExternalMarketComparator
     from src.strategy.arbitrage import ArbitrageDetector
-    from src.jobs.decide import make_decision_for_market
     from src.execution.paper_trader import PaperTrader
     from src.execution.poly_paper_trader import PolyPaperTrader
     from src.risk.manager import RiskManager
@@ -522,7 +520,6 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         # Time-based "closing soon" is NOT sufficient to call something live —
         # "Will Rihanna release an album?" closing in 0h is not a live event.
         # Those markets go into the regular scan as EXPIRING candidates instead.
-        from src.data.live_event_detector import is_event_live_now
 
         # Keywords that suggest a real live event could be happening
         _LIVE_EVENT_KEYWORDS = {
@@ -1151,9 +1148,7 @@ async def _resolve_expired_positions(db, live_mode: bool = False, risk=None) -> 
                 if _mkt:
                     _yes = float(_mkt.get("yes_ask") or _mkt.get("last_price") or 0)
                     _no  = float(_mkt.get("no_ask") or 0)
-                    if _yes == 100 or _no == 100:
-                        exit_p = _no if side == "no" else _yes
-                    elif _yes > 0:
+                    if _yes == 100 or _no == 100 or _yes > 0:
                         exit_p = _no if side == "no" else _yes
             except Exception as _fe:
                 logger.debug("Live Kalshi price fetch for %s: %s", ticker, _fe)
@@ -1169,9 +1164,7 @@ async def _resolve_expired_positions(db, live_mode: bool = False, risk=None) -> 
                 if _pmkt:
                     _yes = float(_pmkt.get("yes_ask") or _pmkt.get("last_price") or 0)
                     _no  = float(_pmkt.get("no_ask") or 0)
-                    if _yes == 100 or _no == 100:
-                        exit_p = _no if side == "no" else _yes
-                    elif _yes > 0:
+                    if _yes == 100 or _no == 100 or _yes > 0:
                         exit_p = _no if side == "no" else _yes
             except Exception as _pfe:
                 logger.debug("Live Poly price fetch for %s: %s", _token, _pfe)

@@ -22,9 +22,9 @@ Pipeline per market:
 import asyncio
 import logging
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
-from src.data.price_feeds      import get_prices_for_keywords, format_prices, CRYPTO_IDS, EQUITY_SYMBOLS
+from src.data.price_feeds      import get_prices_for_keywords, format_prices
 from src.data.news_fetcher     import fetch_headlines, fetch_community_prediction, format_headlines
 from src.data.weather_fetcher  import extract_cities, fetch_weather, format_weather
 from src.data.sports_fetcher   import fetch_sports_context, detect_league, extract_teams, TEAM_ALIASES
@@ -179,7 +179,7 @@ async def build_market_context(
         league = detected_league or "nfl"
         # Use comprehensive multi-source sports data module
         try:
-            from src.data.sports_data import fetch_comprehensive_sports_context, ESPN_LEAGUES
+            from src.data.sports_data import fetch_comprehensive_sports_context
             teams = extract_teams(title)  # team abbreviations
             # Build full team display names from aliases
             t_lower = title.lower()
