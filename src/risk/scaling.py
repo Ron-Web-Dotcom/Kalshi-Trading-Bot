@@ -21,7 +21,7 @@ class AutoScaler:
 
         self._scale_factor = 1.0
         self._cumulative_pnl = 0.0
-        self._last_scale_pnl = 0.0
+        self._last_scale_pnl: Optional[float] = None
 
     def update(self, new_pnl: float) -> float:
         """
@@ -32,6 +32,8 @@ class AutoScaler:
             return self.base_size
 
         self._cumulative_pnl = new_pnl   # snapshot of total, not additive
+        if self._last_scale_pnl is None:
+            self._last_scale_pnl = new_pnl  # bootstrap: no delta on first call
         delta = new_pnl - self._last_scale_pnl
 
         if delta >= self.scale_up_milestone:

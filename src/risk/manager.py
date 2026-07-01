@@ -98,8 +98,8 @@ class RiskManager:
 
     @staticmethod
     def _ticker_category(ticker: str) -> str:
-        """Extract category prefix from ticker (e.g. 'KXETHD' → 'KXETH')."""
-        return ticker.split("-")[0] if "-" in ticker else ticker[:4]
+        """Extract category prefix from ticker (e.g. 'KXETHD-24' → 'KXETHD')."""
+        return ticker.split("-")[0] if "-" in ticker else ticker
 
     def record_trade(self, ticker: str, pnl: float = 0.0, platform: str = "kalshi"):
         """Record a completed trade for cooldown tracking."""
@@ -200,4 +200,4 @@ class RiskManager:
         """Convert dollar amount to number of contracts at given price (cents)."""
         if price_cents <= 0:
             return 0
-        return max(1, int(dollars / (price_cents / 100)))
+        return int(dollars / (price_cents / 100))

@@ -166,12 +166,15 @@ async def _fetch_poly_price(ticker: str, db, side: str = "yes") -> Optional[floa
         )
         if not row:
             return None
-        price = float((row or {}).get(col) or 0)
-        if not price:
-            other = float((row or {}).get("yes_ask" if side == "no" else "no_ask") or 0)
-            if other:
+        price_raw = row.get(col)
+        price = float(price_raw) if price_raw is not None else None
+        if price is None:
+            other_col = "yes_ask" if side == "no" else "no_ask"
+            other_raw = row.get(other_col)
+            other = float(other_raw) if other_raw is not None else None
+            if other is not None:
                 price = 100.0 - other
-        return price or None
+        return price
     except Exception:
         return None
 
@@ -410,7 +413,7 @@ async def _fill_slots(
         size = round(max(min_size, min(scaler.current_size * mult, max_size)), 2)
 
         # Profit gate — use EV if available, else estimate from confidence edge
-        contracts_est = size / (price / 100) if price > 0 else 0
+        contracts_est = size / (max(price, 1) / 100) if price > 0 else 0
         if net_ev > 0:
             exp_profit = contracts_est * (net_ev / 100)
         else:
@@ -485,7 +488,7 @@ async def _fill_slots(
 def _calc_pnl(slot: Dict, exit_price: float) -> tuple:
     """Return (pnl_dollars, pnl_pct, capital_in) for a slot."""
     entry     = float(slot.get("entry_price") or slot.get("avg_price") or 0)
-    contracts = int(slot.get("contracts") or 1)
+    contracts = int(slot.get("contracts") if slot.get("contracts") is not None else 1)
     side      = (slot.get("side") or "yes").lower()
     size_usd  = float(slot.get("size_usd") or (entry * contracts / 100))
 
@@ -504,7 +507,7 @@ async def _send_resolution_alert(discord, slot: Dict, final_price: Optional[floa
         ticker    = slot.get("ticker", "")
         title     = slot.get("title") or ticker
         side      = (slot.get("side") or "yes").upper()
-        contracts = int(slot.get("contracts") or 1)
+        contracts = int(slot.get("contracts") if slot.get("contracts") is not None else 1)
         plat      = slot.get("platform", "kalshi")
         plat_icon = "🟦" if plat == "kalshi" else "🟣"
         conf      = float(slot.get("confidence") or 0)
@@ -631,7 +634,7 @@ async def _send_live_positions_update(discord, slots: Dict) -> None:
         for ticker, slot in slots.items():
             cur = float(slot.get("current_price") or slot.get("entry_price") or 0)
             last = _last_reported_price.get(ticker, cur)
-            if last > 0 and abs(cur - last) / last * 100 >= PRICE_CHANGE_THRESHOLD:
+            if last <= 0 or abs(cur - last) / last * 100 >= PRICE_CHANGE_THRESHOLD:
                 changed.append((ticker, slot, cur, last))
 
         if not changed:
@@ -641,7 +644,7 @@ async def _send_live_positions_update(discord, slots: Dict) -> None:
         total_pnl = 0.0
         for ticker, slot, cur, last in changed:
             entry     = float(slot.get("entry_price") or slot.get("avg_price") or cur)
-            contracts = int(slot.get("contracts") or 1)
+            contracts = int(slot.get("contracts") if slot.get("contracts") is not None else 1)
             side      = (slot.get("side") or "yes").upper()
             plat      = slot.get("platform", "kalshi")
             plat_icon = "🟦" if plat == "kalshi" else "🟣"

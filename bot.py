@@ -50,7 +50,7 @@ class TradingBot:
 
         self.live_mode  = live_mode
         self.db         = DatabaseManager()
-        self._shutdown  = asyncio.Event()
+        self._shutdown: asyncio.Event | None = None
         self._cycle     = 0
 
         # Singletons — share state across cycles so cooldowns, scaling, and
@@ -230,6 +230,7 @@ class TradingBot:
         gc.collect()
 
     async def run_loop(self):
+        self._shutdown = asyncio.Event()
         await self.startup()
 
         # ── Sleep mode: 3:00–5:00 AM ET — bot pauses all scanning ───────────
@@ -769,7 +770,7 @@ class TradingBot:
                     # Read trades_executed from DB — in-memory counter resets on restart
                     trades_db_row = await self.db.fetchone(
                         "SELECT COUNT(*) as n FROM trade_logs WHERE paper_trade=? AND executed_at >= ? AND executed_at < ?",
-                        (_paper_flag, report_date + "T00:00:00", report_date + "T23:59:59")
+                        (_paper_flag, report_date + "T00:00:00", _next_day + "T00:00:00")
                     ) or {}
                     snap["trades_executed"] = trades_db_row.get("n", 0) or snap.get("trades_executed", 0)
 
@@ -802,9 +803,11 @@ class TradingBot:
                 _next_mid = (_et_after + timedelta(days=1)).replace(hour=0, minute=0, second=30, microsecond=0)
                 await asyncio.sleep(max(0.0, (_next_mid - _et_after).total_seconds()))
 
+        loop = asyncio.get_event_loop()
+
         def _on_signal(signum, frame):
             logger.info("Shutdown signal %s — stopping bot...", signum)
-            self._shutdown.set()
+            loop.call_soon_threadsafe(self._shutdown.set)
 
         signal.signal(signal.SIGINT,  _on_signal)
         signal.signal(signal.SIGTERM, _on_signal)

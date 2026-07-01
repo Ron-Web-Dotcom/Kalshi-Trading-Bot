@@ -188,7 +188,7 @@ async def build_market_context(
                 if abbr in teams and re.search(r'\b' + re.escape(alias) + r'\b', t_lower):
                     team_names.append(alias.title())
             tasks["sports"] = fetch_comprehensive_sports_context(
-                title, league, teams, team_names, timeout=min(timeout_seconds - 2, 8.0)
+                title, league, teams, team_names, timeout=max(min(timeout_seconds - 2, 8.0), 1.0)
             )
             # SofaScore deep research: player stats, H2H, recent form
             from src.data.sports_fetcher import fetch_sofa_deep_context
@@ -211,7 +211,7 @@ async def build_market_context(
     # Web search: ALWAYS run for every market — this is what gives AI real-world context
     # to make confident decisions. Without this, AI defaults to conf≤50 and never bids.
     from src.data.web_search import fetch_live_context
-    tasks["web_search"] = fetch_live_context(title, timeout=timeout_seconds - 2)
+    tasks["web_search"] = fetch_live_context(title, timeout=max(timeout_seconds - 2, 1.0))
 
     # Metaculus: optional community prediction (web_search already covers Manifold+Metaculus)
     if include_community:

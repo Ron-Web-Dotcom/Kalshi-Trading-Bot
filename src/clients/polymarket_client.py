@@ -408,7 +408,10 @@ class PolymarketTradingClient:
             return None
 
         price_frac = price_cents / 100.0
-        shares     = round(size_usdc / price_frac, 2) if price_frac > 0 else 0
+        if price_frac <= 0:
+            logger.error("POLY LIVE: invalid price_cents=%s, aborting order", price_cents)
+            return None
+        shares = round(size_usdc / price_frac, 2)
         body_dict  = {
             "order": {
                 "tokenID": token_id,

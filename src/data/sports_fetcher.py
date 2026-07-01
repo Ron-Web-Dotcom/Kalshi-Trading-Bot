@@ -398,7 +398,7 @@ async def fetch_sofa_live(sport_slug: str) -> List[Dict]:
         async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_SOFA_HEADERS) as client:
             r = await client.get(url)
             r.raise_for_status()
-        events = r.json().get("events") or []
+            events = r.json().get("events") or []
         results = []
         for e in events[:20]:
             home = (e.get("homeTeam") or {}).get("name", "")
@@ -426,7 +426,7 @@ async def fetch_sofa_search(query: str) -> List[Dict]:
         async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_SOFA_HEADERS) as client:
             r = await client.get(url, params={"q": query[:60]})
             r.raise_for_status()
-        data = r.json()
+            data = r.json()
         results = []
         # Extract team results
         for team in (data.get("teams") or {}).get("results", [])[:3]:
@@ -526,7 +526,7 @@ async def sofa_player_stats(player_id: int, tournament_id: int = None) -> Option
     s = stats  # shorthand
 
     # Universal
-    if s.get("rating"):           parts.append(f"Rating {s['rating']:.1f}")
+    if s.get("rating"):           parts.append(f"Rating {float(s['rating']):.1f}")
     if s.get("appearances"):      parts.append(f"{s['appearances']} games")
 
     # Basketball (NBA, NCAAB, WNBA)
@@ -566,12 +566,15 @@ async def sofa_player_stats(player_id: int, tournament_id: int = None) -> Option
         a  = s.get("goalAssists") or 0
         if g or a:
             parts.append(f"{g}G {a}A {g+a}pts (hockey)")
-    if s.get("plusMinus")         is not None: parts.append(f"{s['plusMinus']:+d} +/-")
+    if s.get("plusMinus")         is not None: parts.append(f"{int(s['plusMinus']):+d} +/-")
     if s.get("penaltyMinutes")    is not None: parts.append(f"{s['penaltyMinutes']} PIM")
     if s.get("shotsOnTarget")     is not None: parts.append(f"{s['shotsOnTarget']} SOG")
 
     # Baseball (MLB)
-    if s.get("battingAverage")    is not None: parts.append(f".{int(s['battingAverage']*1000):03d} AVG")
+    if s.get("battingAverage") is not None:
+        avg = s['battingAverage']
+        avg_int = int(avg) if avg >= 1 else int(avg * 1000)
+        parts.append(f".{avg_int:03d} AVG")
     if s.get("homeRuns")          is not None: parts.append(f"{s['homeRuns']} HR")
     if s.get("runsBattedIn")      is not None: parts.append(f"{s['runsBattedIn']} RBI")
     if s.get("stolenBases")       is not None: parts.append(f"{s['stolenBases']} SB")
@@ -793,10 +796,10 @@ async def fetch_sofa_deep_context(title: str) -> Optional[str]:
     if live_events:
         live_lines = []
         for ev in live_events[:4]:
-            home  = (ev.get("homeTeam") or {}).get("name", "?")
-            away  = (ev.get("awayTeam") or {}).get("name", "?")
-            hs    = (ev.get("homeScore") or {}).get("current", "?")
-            as_   = (ev.get("awayScore") or {}).get("current", "?")
+            home  = ev.get("home", "?")
+            away  = ev.get("away", "?")
+            hs    = ev.get("home_score", "?")
+            as_   = ev.get("away_score", "?")
             live_lines.append(f"  🔴 {home} {hs}–{as_} {away} (LIVE)")
         if live_lines:
             blocks.append("Live now on SofaScore:\n" + "\n".join(live_lines))

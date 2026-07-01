@@ -52,7 +52,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         db = DatabaseManager()
         await db.initialize()
 
-    results = TradingResults()
+    results           = TradingResults()
+    trades_this_cycle = 0
 
     # ── Kill switch check (must be FIRST) ──────────────────────────────────
     from src.utils.kill_switch import is_active as kill_switch_active
@@ -90,8 +91,6 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 logger.info("Live portfolio: $%.2f", portfolio_val)
         except Exception as _be:
             logger.warning("Could not fetch live balance — using config $%.2f: %s", portfolio_val, _be)
-    results           = TradingResults()
-    trades_this_cycle = 0
 
     # ── Daily loss lockout check ──────────────────────────────────────────
     locked, lockout_reason = await risk.check_daily_loss_lockout(db)
@@ -1198,6 +1197,11 @@ async def _resolve_expired_positions(db, live_mode: bool = False, risk=None) -> 
                     "UPDATE trade_logs SET result='EXPIRED', resolved_at=datetime('now'), pnl=0 WHERE id=?",
                     (_tl_row["id"],)
                 )
+            continue
+
+        # Guard for entry == 0 edge case (unresolvable position)
+        if exit_p == 0 and entry == 0:
+            logger.warning("SKIP %s — both exit_p and entry are 0, position unresolvable", ticker)
             continue
 
         pnl_cents = (exit_p - entry) * contracts

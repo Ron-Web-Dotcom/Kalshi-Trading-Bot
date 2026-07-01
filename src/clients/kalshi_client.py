@@ -15,7 +15,13 @@ import httpx
 
 # Global rate limiter shared across ALL KalshiClient instances
 # Kalshi allows ~3 req/s sustained — use a semaphore to serialize across tasks
-_KALSHI_GLOBAL_LOCK = asyncio.Lock()
+_KALSHI_GLOBAL_LOCK: Optional[asyncio.Lock] = None
+
+def _get_global_lock() -> asyncio.Lock:
+    global _KALSHI_GLOBAL_LOCK
+    if _KALSHI_GLOBAL_LOCK is None:
+        _KALSHI_GLOBAL_LOCK = asyncio.Lock()
+    return _KALSHI_GLOBAL_LOCK
 _KALSHI_MIN_INTERVAL = 0.4   # 2.5 req/s — safely under Kalshi's limit
 _kalshi_last_request = 0.0
 
@@ -92,7 +98,7 @@ class KalshiClient:
 
     async def _rate_limit(self):
         global _kalshi_last_request
-        async with _KALSHI_GLOBAL_LOCK:
+        async with _get_global_lock():
             elapsed = time.monotonic() - _kalshi_last_request
             if elapsed < _KALSHI_MIN_INTERVAL:
                 await asyncio.sleep(_KALSHI_MIN_INTERVAL - elapsed)
@@ -103,11 +109,12 @@ class KalshiClient:
         await self._rate_limit()
         client = await self._get_client()
         body_str = json.dumps(body) if body else ""
-        # Kalshi v2 RSA signature uses path only — no query string
-        headers = self._build_headers(method, path, body_str)
 
         for attempt in range(retries):
             try:
+                # Kalshi v2 RSA signature uses path only — no query string
+                # Headers must be rebuilt each attempt so the RSA timestamp is fresh
+                headers = self._build_headers(method, path, body_str)
                 resp = await client.request(
                     method, path, params=params,
                     content=body_str.encode() if body_str else None,
@@ -198,20 +205,21 @@ class KalshiClient:
                         continue
                     # Use market close_time if event didn't have one
                     m_close = m.get("close_time") or event_close
-                    if m_close and hours_away is None:
+                    market_hours_away = hours_away
+                    if m_close and market_hours_away is None:
                         try:
                             cdt = datetime.fromisoformat(str(m_close).replace("Z", "+00:00"))
                             if cdt.tzinfo is None:
                                 cdt = cdt.replace(tzinfo=timezone.utc)
-                            hours_away = (cdt - now).total_seconds() / 3600
+                            market_hours_away = (cdt - now).total_seconds() / 3600
                         except Exception:
                             pass
-                    if hours_away is not None and 0 < hours_away <= 24:
+                    if market_hours_away is not None and 0 < market_hours_away <= 24:
                         m.setdefault("title", title)
                         m.setdefault("category", category)
                         m.setdefault("close_time", m_close)
                         m["_kalshi_live"] = True
-                        m["hours_to_close"] = round(hours_away, 2)
+                        m["hours_to_close"] = round(market_hours_away, 2)
                         live_markets.append(m)
         except Exception as e:
             logger.debug("Kalshi /events live fetch: %s", e)

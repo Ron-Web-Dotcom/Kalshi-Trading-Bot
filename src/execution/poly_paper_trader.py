@@ -80,7 +80,7 @@ class PolyPaperTrader:
         # Polymarket uses USDC; min order
         size = max(size, self.poly_cfg.min_order_usdc)
 
-        contracts  = max(1, int(size / (price_cents / 100)))
+        contracts = int(size / (price_cents / 100))
         if contracts < 1:
             logger.warning("POLY REJECT %s: 0 contracts computed", ticker)
             return None

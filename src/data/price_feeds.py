@@ -109,7 +109,7 @@ async def get_equity_price(symbol_keyword: str) -> Optional[Dict]:
             meta = r.json()["chart"]["result"][0]["meta"]
             price      = meta.get("regularMarketPrice")
             prev_close = meta.get("previousClose") or meta.get("chartPreviousClose")
-            chg_pct    = ((price - prev_close) / prev_close * 100) if prev_close else None
+            chg_pct    = ((price - prev_close) / prev_close * 100) if (prev_close and price is not None) else None
             return {
                 "asset":      symbol_keyword.upper(),
                 "price":      price,

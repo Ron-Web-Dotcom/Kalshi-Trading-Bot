@@ -166,7 +166,7 @@ class ExternalMarketComparator:
             # How far apart are the two platforms?
             diff_yes = abs(kalshi_yes - poly_yes)
             diff_no  = abs(kalshi_no  - poly_no)
-            diff_pct = max(diff_yes, diff_no) / 100 * 100   # as percentage of $1
+            diff_pct = max(diff_yes, diff_no)   # as percentage of $1 (prices are already in cents 0–100)
 
             # Best side to buy on Kalshi given Polymarket as reference
             if kalshi_yes < poly_yes:
@@ -174,6 +174,9 @@ class ExternalMarketComparator:
                 side       = "yes"
                 gross_edge = poly_yes - kalshi_yes
                 buy_price  = kalshi_yes
+                if gross_edge <= 0:
+                    # No edge on either side — skip this pair
+                    continue
             else:
                 # Kalshi overprices YES → buy NO on Kalshi
                 side       = "no"

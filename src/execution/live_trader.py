@@ -70,7 +70,10 @@ class LiveTrader:
             size = self.cfg.base_trade_size_dollars
 
         size = self.risk.clamp_size(size) if self.risk else size
-        contracts = max(1, int(size / (price_cents / 100)))
+        contracts = int(size / (price_cents / 100))
+        if contracts < 1:
+            logger.warning(f"[LIVE] Refusing trade {ticker}: computed size too small (size={size:.2f}, price={price_cents}¢)")
+            return None
 
         notional = contracts * price_cents / 100
         fee = notional * KALSHI_FEE_PCT

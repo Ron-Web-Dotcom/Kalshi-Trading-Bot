@@ -181,7 +181,7 @@ class DiscordAlerter:
             f"**{display}**\n"
             f"Side: **{side.upper()}** @ **{price:.0f}¢** | {contracts} contracts | Capital: **${size_dollars:.2f}**\n"
             f"Max payout: **${max_payout:.2f}**{ev_s}{exp_s}\n"
-            f"Confidence: **{ai_confidence:.0f}%**\n"
+            f"Confidence: **{f'{ai_confidence:.0f}' if ai_confidence is not None else 'N/A'}%**\n"
         )
         if reasoning:
             body += f"\n_{reasoning[:200]}_"
@@ -282,7 +282,7 @@ class DiscordAlerter:
             )
 
         # Show picks within 7 days — bid only placed on event day
-        in_bet   = [p for p in picks if p.get("_in_bet") or p.get("is_live") and p.get("contracts")]
+        in_bet   = [p for p in picks if p.get("_in_bet") or (p.get("is_live") and p.get("contracts"))]
         watching_all = [p for p in picks if p not in in_bet]
 
         def _days_out(p) -> float:

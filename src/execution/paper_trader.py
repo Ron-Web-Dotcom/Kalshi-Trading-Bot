@@ -195,4 +195,4 @@ class PaperTrader:
     def _price_to_contracts(self, dollars: float, price_cents: float) -> int:
         if price_cents <= 0:
             return 0
-        return max(1, int(dollars / (price_cents / 100)))
+        return int(dollars / (price_cents / 100))
