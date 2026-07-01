@@ -1,5 +1,6 @@
-"""Phase 10 — AI decision layer using OpenAI."""
+"""AI decision layer — multi-model (GPT-4o-mini + Grok + Claude) with rule-engine fallback."""
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -33,12 +34,29 @@ class AIDecisionEngine:
         self.trading_cfg = settings.trading
         self.db = db
         self._client = None
+        self._grok_client = None
+        self._anthropic_client = None
 
     def _get_client(self):
         if self._client is None:
             from openai import AsyncOpenAI
             self._client = AsyncOpenAI(api_key=self.cfg.openai_api_key)
         return self._client
+
+    def _get_grok_client(self):
+        if self._grok_client is None and self.cfg.xai_api_key:
+            from openai import AsyncOpenAI
+            self._grok_client = AsyncOpenAI(
+                api_key=self.cfg.xai_api_key,
+                base_url="https://api.x.ai/v1",
+            )
+        return self._grok_client
+
+    def _get_anthropic_client(self):
+        if self._anthropic_client is None and self.cfg.anthropic_api_key:
+            import anthropic
+            self._anthropic_client = anthropic.AsyncAnthropic(api_key=self.cfg.anthropic_api_key)
+        return self._anthropic_client
 
     async def _build_bot_context(self) -> str:
         """Build a self-awareness block — bot's own track record, positions, risk state."""
@@ -263,13 +281,140 @@ HARD RULES:
 - confidence ≥ {self.trading_cfg.min_ai_confidence:.0f} required to BUY
 - If true_prob differs from market price: that gap IS the edge — compute EV from it"""
 
+    # ── per-model callers ────────────────────────────────────────────────────
+
+    async def _call_openai(self, prompt: str, ticker: str) -> Optional[Dict]:
+        try:
+            client = self._get_client()
+            response = await client.chat.completions.create(
+                model=self.cfg.model,
+                max_tokens=self.cfg.max_tokens,
+                temperature=self.cfg.temperature,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = (response.choices[0].message.content or "").strip()
+            data = self._parse_json(raw)
+            if data:
+                data["_model"] = self.cfg.model
+                data["_usage"] = response.usage
+            return data
+        except Exception as e:
+            logger.warning("[GPT] %s call failed: %s", ticker, e)
+            return None
+
+    async def _call_grok(self, prompt: str, ticker: str) -> Optional[Dict]:
+        client = self._get_grok_client()
+        if not client:
+            return None
+        try:
+            response = await client.chat.completions.create(
+                model="grok-3-mini",
+                max_tokens=self.cfg.max_tokens,
+                temperature=self.cfg.temperature,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = (response.choices[0].message.content or "").strip()
+            data = self._parse_json(raw)
+            if data:
+                data["_model"] = "grok-3-mini"
+            return data
+        except Exception as e:
+            logger.warning("[Grok] %s call failed: %s", ticker, e)
+            return None
+
+    async def _call_claude(self, prompt: str, ticker: str) -> Optional[Dict]:
+        client = self._get_anthropic_client()
+        if not client:
+            return None
+        try:
+            response = await client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=self.cfg.max_tokens,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = (response.content[0].text or "").strip()
+            data = self._parse_json(raw)
+            if data:
+                data["_model"] = "claude-haiku-4-5"
+            return data
+        except Exception as e:
+            logger.warning("[Claude] %s call failed: %s", ticker, e)
+            return None
+
+    @staticmethod
+    def _parse_json(raw: str) -> Optional[Dict]:
+        if not raw:
+            return None
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        try:
+            return json.loads(raw.strip())
+        except json.JSONDecodeError:
+            return None
+
+    @staticmethod
+    def _merge_model_results(results: List[Dict], ticker: str) -> Optional[Dict]:
+        valid = [r for r in results if r and isinstance(r, dict) and "action" in r]
+        if not valid:
+            return None
+        # Weight by confidence: highest-confidence result is primary
+        valid.sort(key=lambda r: float(r.get("confidence", 0)), reverse=True)
+        buy_votes  = sum(1 for r in valid if r.get("action", "").upper() == "BUY")
+        hold_votes = len(valid) - buy_votes
+        models_str = ", ".join(r.get("_model", "?") for r in valid)
+        primary    = valid[0]
+
+        # Require majority to BUY; single model = its own vote wins
+        if buy_votes > hold_votes:
+            merged_action = "BUY"
+        elif hold_votes > buy_votes:
+            merged_action = "HOLD"
+        else:
+            # Tie: default to primary (highest confidence)
+            merged_action = primary.get("action", "HOLD").upper()
+
+        # Average confidence across models (keeps it honest)
+        avg_conf = sum(float(r.get("confidence", 0)) for r in valid) / len(valid)
+
+        # Average true_prob if available
+        probs = [float(r["true_prob_yes"]) for r in valid if r.get("true_prob_yes") is not None]
+        avg_prob = sum(probs) / len(probs) if probs else None
+
+        # Average EV
+        evs = [float(r["net_ev_cents"]) for r in valid if r.get("net_ev_cents") is not None]
+        avg_ev = sum(evs) / len(evs) if evs else None
+
+        side = (primary.get("side") or "yes").lower()
+        if side not in ("yes", "no"):
+            side = "yes"
+
+        reasoning = primary.get("reasoning", "")
+        logger.info(
+            "[AI-MERGE] %s votes: BUY=%d HOLD=%d | avg_conf=%.0f%% | models=[%s]",
+            ticker, buy_votes, hold_votes, avg_conf, models_str,
+        )
+        return {
+            "action":       merged_action,
+            "side":         side,
+            "confidence":   avg_conf,
+            "reasoning":    reasoning,
+            "true_prob_yes": avg_prob,
+            "net_ev_cents": avg_ev,
+            "_model":       models_str,
+            "_usage":       primary.get("_usage"),
+        }
+
+    # ── main entry point ─────────────────────────────────────────────────────
+
     async def decide(self, market: Dict, signals: List[Dict] = None, prebuilt_context: str = "") -> AIDecision:
         if signals is None:
             signals = []
         ticker = market.get("ticker", "UNKNOWN")
 
-        if not self.cfg.openai_api_key:
-            logger.warning("No OPENAI_API_KEY set — using rule-based fallback")
+        if not self.cfg.openai_api_key and not self.cfg.anthropic_api_key and not self.cfg.xai_api_key:
+            logger.warning("No AI API keys set — using rule-based fallback")
             return self._rule_based_decision(market, signals)
 
         try:
@@ -282,121 +427,101 @@ HARD RULES:
         except Exception:
             context = ""
 
-        # Build bot self-awareness context — let AI know its own state
         bot_context = await self._build_bot_context()
-
         prompt = self._build_prompt(market, signals, context, bot_context)
-        try:
-            client = self._get_client()
-            response = await client.chat.completions.create(
-                model=self.cfg.model,
-                max_tokens=self.cfg.max_tokens,
-                temperature=self.cfg.temperature,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = (response.choices[0].message.content or "").strip()
-            if not raw:
-                logger.warning("AI returned empty response for %s — rule-based fallback", ticker)
-                return self._rule_based_decision(market, signals)
-            # Strip markdown fences if model wraps JSON
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            data = json.loads(raw.strip())
 
-            action      = data.get("action", "HOLD").upper()
-            side        = (data.get("side") or "yes").lower()
-            confidence  = max(0.0, min(float(data.get("confidence", 0)), 100.0))
-            reasoning   = str(data.get("reasoning", ""))[:500]
-            true_prob   = data.get("true_prob_yes")
-            net_ev      = data.get("net_ev_cents")
+        # Call all available models in parallel
+        tasks = [
+            self._call_openai(prompt, ticker) if self.cfg.openai_api_key else asyncio.sleep(0, result=None),
+            self._call_grok(prompt, ticker),
+            self._call_claude(prompt, ticker),
+        ]
+        raw_results = await asyncio.gather(*tasks, return_exceptions=False)
+        results = [r for r in raw_results if r is not None]
 
-            # Sanity clamps — physically impossible values indicate hallucination
-            if true_prob is not None:
-                true_prob = max(0.0, min(float(true_prob), 100.0))
-            if net_ev is not None:
-                net_ev = float(net_ev)
-                # Max possible net EV on any contract is (100-1)*0.98 = 97.02¢
-                net_ev = max(-100.0, min(net_ev, 97.0))
-
-            # Validate side is recognised
-            if side not in ("yes", "no"):
-                side = "yes"
-
-            # EV guard — scale minimum with confidence: high conf = lower EV required
-            if action == "BUY" and net_ev is not None:
-                min_ev = 0.5 if confidence >= 85 else 1.0 if confidence >= 75 else 2.0
-                if net_ev < min_ev:
-                    action = "HOLD"
-                    reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < {min_ev:.1f}¢ min at conf={confidence:.0f}%] " + reasoning
-
-            # Reject physically impossible EV given the market price
-            if action == "BUY" and net_ev is not None:
-                _yes_ask = float(market.get("yes_ask", 50))
-                _no_ask  = float(market.get("no_ask", 50))
-                price_for_side = _yes_ask if side == "yes" else _no_ask
-                max_possible_ev = (100.0 - price_for_side) * 0.98
-                if net_ev > max_possible_ev + 1.0:
-                    logger.warning(
-                        "[AI SANITY] %s net_ev=%.1f¢ > physical max=%.1f¢ — downgrading to HOLD",
-                        ticker, net_ev, max_possible_ev,
-                    )
-                    action = "HOLD"
-                    reasoning = f"[Sanity: impossible EV {net_ev:.1f}¢ > max {max_possible_ev:.1f}¢] " + reasoning
-
-            decision = AIDecision(
-                action=action,
-                confidence=confidence,
-                reasoning=reasoning,
-                model=self.cfg.model,
-                ticker=ticker,
-                side=side,
-                true_prob=true_prob,
-                net_ev=net_ev,
-            )
-
-            ev_str = f" | EV={net_ev:.1f}¢" if net_ev is not None else ""
-            tp_str = f" | P(YES)={true_prob:.0f}%" if true_prob is not None else ""
-            logger.info(
-                "[AI] %s → %s/%s | conf=%d%%%s%s | %s",
-                ticker, action, side.upper(), confidence, tp_str, ev_str, reasoning[:80],
-            )
-
-            # Persist decision — gpt-4o-mini pricing: $0.15/M input, $0.60/M output
-            if self.db:
-                now = datetime.now(timezone.utc).isoformat()
-                try:
-                    usage = response.usage
-                    cost = (usage.prompt_tokens * 0.15e-6 + usage.completion_tokens * 0.60e-6)
-                    await self.db.insert("ai_decisions", {
-                        "ticker": ticker,
-                        "action": action,
-                        "confidence": confidence,
-                        "reasoning": reasoning,
-                        "model": self.cfg.model,
-                        "prompt_tokens": usage.prompt_tokens,
-                        "completion_tokens": usage.completion_tokens,
-                        "cost_usd": cost,
-                        "decided_at": now,
-                    })
-                except Exception:
-                    pass
-
-            return decision
-
-        except json.JSONDecodeError as e:
-            logger.warning("AI JSON parse error for %s: %s — raw: %s", ticker, e, raw[:200] if 'raw' in dir() else "?")
+        data = self._merge_model_results(results, ticker)
+        if not data:
+            logger.warning("All models failed for %s — rule-based fallback", ticker)
             return self._rule_based_decision(market, signals)
-        except Exception as e:
-            err_str = str(e)
-            if "insufficient_quota" in err_str or "billing" in err_str.lower():
-                raise
-            if "model" in err_str.lower() or "not_found" in err_str.lower():
-                logger.error("AI MODEL ERROR for %s — check AI_MODEL env var: %s", ticker, e)
-            else:
-                logger.error("AI decision error for %s: %s", ticker, e)
-            return self._rule_based_decision(market, signals)
+
+        action      = data.get("action", "HOLD").upper()
+        side        = (data.get("side") or "yes").lower()
+        confidence  = max(0.0, min(float(data.get("confidence", 0)), 100.0))
+        reasoning   = str(data.get("reasoning", ""))[:500]
+        true_prob   = data.get("true_prob_yes")
+        net_ev      = data.get("net_ev_cents")
+        model_str   = data.get("_model", self.cfg.model)
+
+        if true_prob is not None:
+            true_prob = max(0.0, min(float(true_prob), 100.0))
+        if net_ev is not None:
+            net_ev = float(net_ev)
+            net_ev = max(-100.0, min(net_ev, 97.0))
+        if side not in ("yes", "no"):
+            side = "yes"
+
+        # EV guard
+        if action == "BUY" and net_ev is not None:
+            min_ev = 0.5 if confidence >= 85 else 1.0 if confidence >= 75 else 2.0
+            if net_ev < min_ev:
+                action = "HOLD"
+                reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < {min_ev:.1f}¢ min at conf={confidence:.0f}%] " + reasoning
+
+        # Physical EV sanity
+        if action == "BUY" and net_ev is not None:
+            _yes_ask = float(market.get("yes_ask", 50))
+            _no_ask  = float(market.get("no_ask", 50))
+            price_for_side = _yes_ask if side == "yes" else _no_ask
+            max_possible_ev = (100.0 - price_for_side) * 0.98
+            if net_ev > max_possible_ev + 1.0:
+                logger.warning(
+                    "[AI SANITY] %s net_ev=%.1f¢ > physical max=%.1f¢ — downgrading to HOLD",
+                    ticker, net_ev, max_possible_ev,
+                )
+                action = "HOLD"
+                reasoning = f"[Sanity: impossible EV {net_ev:.1f}¢ > max {max_possible_ev:.1f}¢] " + reasoning
+
+        decision = AIDecision(
+            action=action,
+            confidence=confidence,
+            reasoning=reasoning,
+            model=model_str,
+            ticker=ticker,
+            side=side,
+            true_prob=true_prob,
+            net_ev=net_ev,
+        )
+
+        ev_str = f" | EV={net_ev:.1f}¢" if net_ev is not None else ""
+        tp_str = f" | P(YES)={true_prob:.0f}%" if true_prob is not None else ""
+        logger.info(
+            "[AI] %s → %s/%s | conf=%d%%%s%s | models=[%s] | %s",
+            ticker, action, side.upper(), int(confidence), tp_str, ev_str, model_str, reasoning[:80],
+        )
+
+        if self.db:
+            now = datetime.now(timezone.utc).isoformat()
+            try:
+                usage = data.get("_usage")
+                cost = 0.0
+                if usage:
+                    cost = (getattr(usage, "prompt_tokens", 0) * 0.15e-6
+                            + getattr(usage, "completion_tokens", 0) * 0.60e-6)
+                await self.db.insert("ai_decisions", {
+                    "ticker":            ticker,
+                    "action":            action,
+                    "confidence":        confidence,
+                    "reasoning":         reasoning,
+                    "model":             model_str,
+                    "prompt_tokens":     getattr(usage, "prompt_tokens", 0) if usage else 0,
+                    "completion_tokens": getattr(usage, "completion_tokens", 0) if usage else 0,
+                    "cost_usd":          cost,
+                    "decided_at":        now,
+                })
+            except Exception:
+                pass
+
+        return decision
 
     def _rule_based_decision(self, market: Dict, signals: List[Dict]) -> AIDecision:
         """Fallback: rule-based decision when AI is unavailable."""

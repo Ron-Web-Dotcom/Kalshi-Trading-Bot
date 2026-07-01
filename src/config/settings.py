@@ -130,6 +130,8 @@ class AIConfig:
     max_tokens: int = field(default_factory=lambda: _env_int("AI_MAX_TOKENS", 1024))
     temperature: float = field(default_factory=lambda: _env_float("AI_TEMPERATURE", 0.3))
     enabled: bool = field(default_factory=lambda: _env_bool("AI_ENABLED", True))
+    anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))
+    xai_api_key: str = field(default_factory=lambda: _env("XAI_API_KEY"))
 
 
 @dataclass

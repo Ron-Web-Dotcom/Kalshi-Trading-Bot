@@ -3,7 +3,7 @@ PYTHON := python3.12
 .PHONY: test lint install ci
 
 install:
-	$(PYTHON) -m pip install pytest pytest-asyncio aiosqlite python-dotenv httpx cryptography openai --break-system-packages -q
+	$(PYTHON) -m pip install pytest pytest-asyncio aiosqlite python-dotenv httpx cryptography openai anthropic --break-system-packages -q
 
 lint:
 	ruff check src/ bot.py

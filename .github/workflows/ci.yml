@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip setuptools wheel
-          pip install pytest pytest-asyncio aiosqlite python-dotenv httpx cryptography openai
+          pip install pytest pytest-asyncio aiosqlite python-dotenv httpx cryptography openai anthropic
       - name: Add src to path
         run: echo "PYTHONPATH=$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
       - name: Run regression tests
@@ -41,4 +41,6 @@ jobs:
           DISCORD_WEBHOOK_URL: dummy
           POLY_API_KEY: dummy
           POLY_API_SECRET: dummy
+          ANTHROPIC_API_KEY: dummy
+          XAI_API_KEY: dummy
         run: pytest tests/test_bugs_regression.py -v --tb=short

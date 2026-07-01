@@ -30,7 +30,7 @@ INGEST_INTERVAL        = 180    # refresh Kalshi market data every 3 min
 POLY_INGEST_INTERVAL   = 1800   # refresh Polymarket every 30 min (saves proxy bandwidth)
 TRACK_INTERVAL         = 60     # check position PnL every 1 min
 EVAL_INTERVAL          = 300    # print performance snapshot every 5 min
-TRADE_INTERVAL         = 45     # run trading cycle every 45 s
+TRADE_INTERVAL         = 60     # run trading cycle every 60 s
 HEARTBEAT_INTERVAL     = 3600   # send hourly heartbeat every 60 min
 
 
@@ -1177,7 +1177,7 @@ class TradingBot:
             from src.ai.decision import AIDecisionEngine
             from src.utils.eastern_time import now_et
 
-            LIVE_SCAN_INTERVAL  = 300   # 5 min
+            LIVE_SCAN_INTERVAL  = 60    # 60 s — matches trade cycle cadence
             _last_hour_digest   = None
             _shown_reg_kal: set = set()   # rotate Kalshi regular picks each scan
             _shown_reg_poly: set = set()  # rotate Poly regular picks each scan
