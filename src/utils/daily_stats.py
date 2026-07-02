@@ -241,6 +241,25 @@ class DailyStats:
         parts.append(f"{minutes}m")
         return " ".join(parts)
 
+    async def restore_from_db(self, db) -> None:
+        """Restore today's counters from trade_logs so restarts don't zero out the daily stats."""
+        if db is None:
+            return
+        try:
+            from src.config.settings import settings
+            paper_flag = 0 if settings.trading.live_trading_enabled else 1
+            from src.utils.eastern_time import now_et
+            today = now_et().date().isoformat()
+            row = await db.fetchone(
+                "SELECT COUNT(*) as cnt FROM trade_logs WHERE paper_trade=? AND executed_at >= ?",
+                (paper_flag, today + "T00:00:00"),
+            )
+            if row:
+                self.trades_executed = max(self.trades_executed, int(row.get("cnt") or 0))
+            logger.info("Daily stats restored: %d trades executed today", self.trades_executed)
+        except Exception as e:
+            logger.debug("daily_stats.restore_from_db: %s", e)
+
     def reset_for_new_day(self) -> None:
         """Reset all daily counters. bot_start_time is preserved."""
         self.markets_scanned = 0

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 logger = logging.getLogger("trading.jobs.evaluate")
 
 
-async def run_evaluation(db=None) -> None:
+async def run_evaluation(db=None, scaler=None) -> None:
     """Compute and store a performance snapshot, log a clean summary table."""
     from src.utils.database import DatabaseManager
     from src.alerts.discord import DiscordAlerter
@@ -41,7 +41,7 @@ async def run_evaluation(db=None) -> None:
         open_pos  = stats["open_trades"]        or 0
         total_pnl = stats["total_pnl"]          or 0.0
         avg_conf  = stats["avg_confidence"]     or 0.0
-        win_rate  = (wins / (wins + losses) * 100) if (wins + losses) > 0 else 0.0
+        win_rate = (wins / (total - open_pos) * 100) if (total - open_pos) > 0 else 0.0
 
         # Last 5 completed trades
         last5 = await db.fetchall(f"""
@@ -52,7 +52,7 @@ async def run_evaluation(db=None) -> None:
             ORDER BY executed_at DESC LIMIT 5
         """)
 
-        scaler      = AutoScaler()
+        scaler      = scaler if scaler is not None else AutoScaler()
         scale_factor = scaler.update(total_pnl)
 
         now  = datetime.now(timezone.utc).isoformat()

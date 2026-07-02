@@ -121,7 +121,7 @@ class TestDailyLossLockout:
     async def test_no_lockout_when_no_losses(self):
         from src.risk.manager import RiskManager
         db = _make_db({
-            "SUM(pnl)": {"total_pnl": 10.0},
+            "CASE WHEN pnl < 0": {"daily_loss": 0.0},
             "LIMIT": [],
         })
         risk = RiskManager(db=db)
@@ -134,9 +134,9 @@ class TestDailyLossLockout:
         from src.risk.manager import RiskManager
         from src.config.settings import settings
         settings.trading.max_daily_loss_usd = 50.0
-        # total_pnl = -75 (loss of $75 > $50 limit)
+        # gross losses = $75 > $50 limit
         db = _make_db({
-            "SUM(pnl)": {"total_pnl": -75.0},
+            "CASE WHEN pnl < 0": {"daily_loss": 75.0},
             "LIMIT": [],
         })
         risk = RiskManager(db=db)
@@ -150,10 +150,10 @@ class TestDailyLossLockout:
         from src.risk.manager import RiskManager
         from src.config.settings import settings
         settings.trading.max_consecutive_losses = 3
-        # 3 losses in a row
-        loss_rows = [{"pnl": -5.0}, {"pnl": -3.0}, {"pnl": -2.0}]
+        # 3 losses in a row — rows now carry result='LOSS'
+        loss_rows = [{"result": "LOSS"}, {"result": "LOSS"}, {"result": "LOSS"}]
         db = _make_db({
-            "SUM(pnl)": {"total_pnl": 0.0},   # no daily loss limit hit
+            "CASE WHEN pnl < 0": {"daily_loss": 0.0},   # no daily loss limit hit
             "LIMIT": loss_rows,
         })
         risk = RiskManager(db=db)
@@ -167,9 +167,9 @@ class TestDailyLossLockout:
         from src.config.settings import settings
         settings.trading.max_consecutive_losses = 3
         # Last 3 include a win — no streak
-        mixed_rows = [{"pnl": 5.0}, {"pnl": -3.0}, {"pnl": -2.0}]
+        mixed_rows = [{"result": "WIN"}, {"result": "LOSS"}, {"result": "LOSS"}]
         db = _make_db({
-            "SUM(pnl)": {"total_pnl": 0.0},
+            "CASE WHEN pnl < 0": {"daily_loss": 0.0},
             "LIMIT": mixed_rows,
         })
         risk = RiskManager(db=db)

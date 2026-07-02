@@ -142,11 +142,21 @@ class OpportunityHunter:
     @classmethod
     def _save_rejections(cls) -> None:
         import json
+        import asyncio
+        snapshot = dict(cls._ai_rejection_cache)
+
+        def _write():
+            try:
+                with open(cls._REJECTION_FILE, "w") as f:
+                    json.dump(snapshot, f)
+            except Exception:
+                pass
+
         try:
-            with open(cls._REJECTION_FILE, "w") as f:
-                json.dump(cls._ai_rejection_cache, f)
-        except Exception:
-            pass
+            loop = asyncio.get_running_loop()
+            loop.run_in_executor(None, _write)
+        except RuntimeError:
+            _write()
 
     @classmethod
     def _is_recently_rejected(cls, ticker: str) -> bool:

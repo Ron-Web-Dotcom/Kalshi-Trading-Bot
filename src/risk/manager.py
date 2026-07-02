@@ -162,13 +162,12 @@ class RiskManager:
             paper_flag = 0 if settings.trading.live_trading_enabled else 1
             today = datetime.now(timezone.utc).date().isoformat()
             row = await db.fetchone(
-                "SELECT COALESCE(SUM(pnl), 0) AS total_pnl "
+                "SELECT COALESCE(SUM(CASE WHEN pnl < 0 THEN ABS(pnl) ELSE 0 END), 0) AS daily_loss "
                 "FROM trade_logs "
                 "WHERE paper_trade = ? AND resolved_at >= ? AND pnl IS NOT NULL",
                 (paper_flag, today + "T00:00:00"),
             )
-            total_pnl = float((row or {}).get("total_pnl", 0) or 0)
-            daily_loss = abs(total_pnl) if total_pnl < 0 else 0
+            daily_loss = float((row or {}).get("daily_loss", 0) or 0)
             if daily_loss >= max_loss:
                 return (
                     True,
@@ -180,12 +179,12 @@ class RiskManager:
         # Check 2: consecutive loss streak
         try:
             rows = await db.fetchall(
-                "SELECT pnl FROM positions WHERE status='closed' AND pnl IS NOT NULL "
-                "ORDER BY closed_at DESC LIMIT ?",
+                "SELECT result FROM trade_logs WHERE result IN ('WIN','LOSS') "
+                "ORDER BY resolved_at DESC LIMIT ?",
                 (max_streak,),
             )
             if rows and len(rows) >= max_streak:
-                all_losses = all((r.get("pnl") or 0) < 0 for r in rows)
+                all_losses = all(r.get("result") == 'LOSS' for r in rows)
                 if all_losses:
                     return (
                         True,

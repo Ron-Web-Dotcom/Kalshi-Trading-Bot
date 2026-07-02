@@ -258,6 +258,11 @@ async def make_decision_for_market(
             rule_result = None
         final = _merge(ai_result, rule_result)
 
+    # Enforce minimum confidence — never let sub-threshold signals escape
+    if final and float(final.get("confidence", 0)) < min_conf:
+        _log_hold(market, context, min_conf, signals)
+        return None
+
     if final is None:
         _log_hold(market, context, min_conf, signals)
         return None

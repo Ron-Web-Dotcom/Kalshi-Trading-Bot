@@ -75,10 +75,12 @@ async def calibrate(db) -> float:
 
     try:
         rows = await db.fetchall(
-            "SELECT tl.ai_confidence AS confidence, p.pnl FROM positions p "
-            "JOIN trade_logs tl ON tl.ticker = p.ticker "
-            "WHERE p.status='closed' AND p.pnl IS NOT NULL AND tl.ai_confidence IS NOT NULL "
-            "ORDER BY p.closed_at DESC LIMIT 200"
+            "SELECT tl.ai_confidence AS confidence, "
+            "CASE WHEN tl.result='WIN' THEN 1 ELSE 0 END as won "
+            "FROM trade_logs tl "
+            "WHERE tl.result IN ('WIN','LOSS','BREAK_EVEN') "
+            "  AND tl.ai_confidence IS NOT NULL "
+            "ORDER BY tl.resolved_at DESC LIMIT 200"
         )
     except Exception as e:
         logger.debug("Calibrator DB read failed: %s", e)
@@ -104,12 +106,11 @@ async def calibrate(db) -> float:
     bands: dict = {}
     for r in rows:
         conf = float(r.get("confidence") or 0)
-        pnl  = float(r.get("pnl") or 0)
         band = int(conf // 5) * 5
         if band not in bands:
             bands[band] = {"wins": 0, "total": 0}
         bands[band]["total"] += 1
-        if pnl > 0:
+        if r.get("won"):
             bands[band]["wins"] += 1
 
     new_thresh = current

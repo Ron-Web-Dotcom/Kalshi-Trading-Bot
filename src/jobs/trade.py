@@ -140,6 +140,11 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             "Max open positions (%d) reached — skipping new trade scan this cycle",
             open_count,
         )
+        try:
+            from src.utils.daily_stats import stats as daily_stats
+            daily_stats.record_skip("max_positions")
+        except Exception:
+            pass
         return results
 
     mode_label = "LIVE" if live_mode else "PAPER"
@@ -156,6 +161,9 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
     poly_trader = PolyPaperTrader(db=db, discord=discord, scaler=scaler, risk=risk)
 
     logger.info("━━━ TRADING CYCLE START (%s%s) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━", mode_label, poly_label)
+
+    # Fetch daily loss once at top level so arb + best-opp gates share the same value
+    daily_loss_db = await risk.get_daily_loss_from_db()
 
     try:
         # ── 1. Load markets ───────────────────────────────────────────────────
@@ -203,6 +211,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             if is_junk(market.get("title", "")):
                 logger.info("SKIP arb %s — junk market title", ticker)
                 results.skipped += 1
+                daily_stats.record_skip("junk_filter")
                 continue
 
             if src == "internal_arb":
@@ -218,6 +227,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     allowed, reason = risk.check_trade(
                         ticker + f"_{side}", scaler.current_size,
                         current_positions=[], portfolio_value=portfolio_val,
+                        daily_loss_override=daily_loss_db,
                         platform="kalshi",
                     )
                     if not allowed:
@@ -288,6 +298,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 allowed, reason = risk.check_trade(
                     ticker, scaler.current_size,
                     current_positions=[], portfolio_value=portfolio_val,
+                    daily_loss_override=daily_loss_db,
                     platform="kalshi",
                 )
                 if not allowed:
@@ -656,7 +667,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             top_live = await live_hunter.find_top_live(
                 live_markets   = all_live,
                 arb_signals    = all_signals,
-                min_confidence = _get_thresh(),  # auto-calibrated daily (default 65%)
+                min_confidence = max(_get_thresh(), settings.trading.min_ai_confidence),  # auto-calibrated daily (default 65%)
                 top_n          = 3,
                 ai_eval_n      = min(6, len(all_live)),
             )
@@ -907,7 +918,9 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     "Best opportunity WATCHING — %s closes in %.0fh (not today ET) — will bid on event day",
                     _best_market.get("ticker", "?"), _hours_out,
                 )
+                daily_stats.record_skip("watching_not_today")
                 best = None
+                daily_stats.record_skip("watching_not_today")
 
         # Live markets get one extra trade slot per cycle — they're time-sensitive
         live_bonus = 1 if (best and best.get("market", {}).get("is_live")) else 0
@@ -921,125 +934,128 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             net_ev   = decision.get("net_ev")
 
             # Confidence-tiered sizing:
-            #   60–69%  → minimum size (25% of base) — small exploratory bet
             #   70–79%  → half size  (50% of base) — medium conviction
             #   80–89%  → full size  (100% of base) — high conviction
             #   90–100% → max size   (150% of base, capped) — very high conviction
             confidence = float(decision.get("confidence", 0))
             base       = scaler.current_size
+            if confidence < settings.trading.min_ai_confidence:
+                logger.info("Best opportunity SKIPPED — confidence %.0f%% below min %.0f%%", confidence, settings.trading.min_ai_confidence)
+                daily_stats.record_skip(f"confidence_below_min:{confidence:.0f}%")
+                best = None
             if confidence >= 90:
                 size_multiplier = 1.5
                 size_tier       = "MAX (90%+ conf)"
             elif confidence >= 80:
                 size_multiplier = 1.0
                 size_tier       = "FULL (80–89% conf)"
-            elif confidence >= 70:
+            else:
                 size_multiplier = 0.5
                 size_tier       = "HALF (70–79% conf)"
+            if best is None:
+                planned_size_usd = 0
             else:
-                size_multiplier = 0.25
-                size_tier       = "MIN (60–69% conf)"
-            planned_size_usd = round(max(min_size, min(base * size_multiplier, max_size)), 2)
-            is_live_market   = bool(market.get("is_live"))
-            logger.info("Trade size: $%.2f [%s]%s", planned_size_usd, size_tier,
-                        " [LIVE]" if is_live_market else "")
-            contracts_est  = (planned_size_usd / (price / 100)) if price > 0 else 0
-            if net_ev is not None and net_ev > 0:
-                exp_profit_usd = contracts_est * (net_ev / 100)
-            else:
-                # No EV from AI — estimate from confidence: treat conf-65 as edge
-                edge = max(0.0, confidence - 65) * 0.002  # 70%→$0.01, 85%→$0.04
-                exp_profit_usd = planned_size_usd * edge if edge > 0 else None
-            roi_pct = (exp_profit_usd / planned_size_usd * 100) if (exp_profit_usd and planned_size_usd) else None
+                planned_size_usd = round(max(min_size, min(base * size_multiplier, max_size)), 2)
+            if best is not None:
+                is_live_market   = bool(market.get("is_live"))
+                logger.info("Trade size: $%.2f [%s]%s", planned_size_usd, size_tier,
+                            " [LIVE]" if is_live_market else "")
+                contracts_est  = (planned_size_usd / (price / 100)) if price > 0 else 0
+                if net_ev is not None and net_ev > 0:
+                    exp_profit_usd = contracts_est * (net_ev / 100)
+                else:
+                    # No EV from AI — estimate from confidence: treat conf-65 as edge
+                    edge = max(0.0, confidence - 65) * 0.002  # 70%→$0.01, 85%→$0.04
+                    exp_profit_usd = planned_size_usd * edge if edge > 0 else None
+                roi_pct = (exp_profit_usd / planned_size_usd * 100) if (exp_profit_usd and planned_size_usd) else None
 
-            # Use settings directly — no hardcoded floors overriding config
-            min_roi = settings.trading.min_profit_roi_pct
-            min_abs = settings.trading.min_profit_abs_usd
-            if is_live_market:
-                # Live markets resolve fast — relax gate by 60%
-                min_roi *= 0.4
-                min_abs *= 0.4
+                # Use settings directly — no hardcoded floors overriding config
+                min_roi = settings.trading.min_profit_roi_pct
+                min_abs = settings.trading.min_profit_abs_usd
+                if is_live_market:
+                    # Live markets resolve fast — relax gate by 60%
+                    min_roi *= 0.4
+                    min_abs *= 0.4
 
-            if exp_profit_usd is None or exp_profit_usd < min_abs or (roi_pct or 0) < min_roi:
-                skip_reason = (
-                    f"profit gate: {f'${exp_profit_usd:.2f}' if exp_profit_usd is not None else 'EV=null'} "
-                    f"({roi_pct or 0:.1f}% ROI) < min ${min_abs:.2f} / {min_roi:.1f}%"
-                )
-                logger.info("Best opportunity SKIPPED — %s", skip_reason)
-                results.skipped += 1
-                daily_stats.record_skip("profit_gate")
-                await auditor.log(
-                    db, "TRADE_SKIPPED", ticker=ticker, side=side,
-                    price_cents=price, size_usd=planned_size_usd,
-                    confidence=decision.get("confidence", 0), net_ev=net_ev,
-                    reason=skip_reason, result="SKIPPED",
-                )
-            else:
-                daily_loss_db = await risk.get_daily_loss_from_db()
-                _best_platform = best.get("platform", "kalshi")
-                allowed, reason = risk.check_trade(
-                    ticker, scaler.current_size,
-                    current_positions=[], portfolio_value=portfolio_val,
-                    daily_loss_override=daily_loss_db,
-                    platform=_best_platform,
-                )
-                if not allowed:
-                    logger.info("Best opportunity BLOCKED by risk gate: %s", reason)
+                if exp_profit_usd is None or exp_profit_usd < min_abs or (roi_pct or 0) < min_roi:
+                    skip_reason = (
+                        f"profit gate: {f'${exp_profit_usd:.2f}' if exp_profit_usd is not None else 'EV=null'} "
+                        f"({roi_pct or 0:.1f}% ROI) < min ${min_abs:.2f} / {min_roi:.1f}%"
+                    )
+                    logger.info("Best opportunity SKIPPED — %s", skip_reason)
                     results.skipped += 1
-                    daily_stats.record_skip(f"risk_gate:{reason}")
+                    daily_stats.record_skip("profit_gate")
                     await auditor.log(
                         db, "TRADE_SKIPPED", ticker=ticker, side=side,
                         price_cents=price, size_usd=planned_size_usd,
                         confidence=decision.get("confidence", 0), net_ev=net_ev,
-                        reason=f"risk_gate:{reason}", result="SKIPPED",
+                        reason=skip_reason, result="SKIPPED",
                     )
                 else:
-                    poly_str = ""
-                    if poly_comp:
-                        poly_str = (
-                            f" | Poly_YES={poly_comp.get('poly_yes', 0):.0f}¢"
-                            f" Poly_NO={poly_comp.get('poly_no', 0):.0f}¢"
-                        )
-                    logger.info(
-                        "TAKING BEST OPPORTUNITY: %s BUY %s @ %.0f¢ | "
-                        "score=%.3f conf=%d%% EV=%.1f¢ exp_profit=$%.2f%s",
-                        ticker, side.upper(), price,
-                        best["score"], decision.get("confidence", 0),
-                        net_ev or 0, exp_profit_usd or 0, poly_str,
+                    _best_platform = best.get("platform", "kalshi")
+                    allowed, reason = risk.check_trade(
+                        ticker, scaler.current_size,
+                        current_positions=[], portfolio_value=portfolio_val,
+                        daily_loss_override=daily_loss_db,
+                        platform=_best_platform,
                     )
-
-                    # Route to the correct platform's trader (single Discord alert comes from execute())
-                    platform = best.get("platform", "kalshi")
-                    active_trader = kalshi_trader if platform == "kalshi" else poly_trader
-
-                    rec = await active_trader.execute(
-                        ticker=ticker,
-                        action=decision["action"],
-                        side=side,
-                        price_cents=price,
-                        ai_confidence=decision["confidence"],
-                        ai_reasoning=decision["reasoning"],
-                        signal_source=decision.get("model", "ai"),
-                        net_ev=net_ev,
-                        true_prob=decision.get("true_prob"),
-                        market_title=market.get("title", ""),
-                        close_time=market.get("close_time", "") or market.get("expiration_time", ""),
-                        **({"poly_token_id": market.get("_yes_token") if side == "yes" else market.get("_no_token")}
-                           if platform == "polymarket" else {}),
-                    )
-                    if rec:
-                        trades_this_cycle += 1
-                        results.total_positions += 1
-                        results.total_capital_used += rec.get("total_cost", 0)
-                        results.ai_trades += 1
+                    if not allowed:
+                        logger.info("Best opportunity BLOCKED by risk gate: %s", reason)
+                        results.skipped += 1
+                        daily_stats.record_skip(f"risk_gate:{reason}")
                         await auditor.log(
-                            db, "TRADE_PLACED", ticker=ticker, platform=platform,
-                            side=side, price_cents=price,
-                            size_usd=rec.get("total_cost", 0),
-                            confidence=decision.get("confidence", 0),
-                            net_ev=net_ev,
-                            reason=decision.get("reasoning", "")[:200],
+                            db, "TRADE_SKIPPED", ticker=ticker, side=side,
+                            price_cents=price, size_usd=planned_size_usd,
+                            confidence=decision.get("confidence", 0), net_ev=net_ev,
+                            reason=f"risk_gate:{reason}", result="SKIPPED",
                         )
+                    else:
+                        poly_str = ""
+                        if poly_comp:
+                            poly_str = (
+                                f" | Poly_YES={poly_comp.get('poly_yes', 0):.0f}¢"
+                                f" Poly_NO={poly_comp.get('poly_no', 0):.0f}¢"
+                            )
+                        logger.info(
+                            "TAKING BEST OPPORTUNITY: %s BUY %s @ %.0f¢ | "
+                            "score=%.3f conf=%d%% EV=%.1f¢ exp_profit=$%.2f%s",
+                            ticker, side.upper(), price,
+                            best["score"], decision.get("confidence", 0),
+                            net_ev or 0, exp_profit_usd or 0, poly_str,
+                        )
+
+                        # Route to the correct platform's trader (single Discord alert comes from execute())
+                        platform = best.get("platform", "kalshi")
+                        active_trader = kalshi_trader if platform == "kalshi" else poly_trader
+
+                        rec = await active_trader.execute(
+                            ticker=ticker,
+                            action=decision["action"],
+                            side=side,
+                            price_cents=price,
+                            ai_confidence=decision["confidence"],
+                            ai_reasoning=decision["reasoning"],
+                            signal_source=decision.get("model", "ai"),
+                            net_ev=net_ev,
+                            true_prob=decision.get("true_prob"),
+                            market_title=market.get("title", ""),
+                            close_time=market.get("close_time", "") or market.get("expiration_time", ""),
+                            **({"poly_token_id": market.get("_yes_token") if side == "yes" else market.get("_no_token")}
+                               if platform == "polymarket" else {}),
+                        )
+                        if rec:
+                            trades_this_cycle += 1
+                            results.total_positions += 1
+                            results.total_capital_used += rec.get("total_cost", 0)
+                            results.ai_trades += 1
+                            await auditor.log(
+                                db, "TRADE_PLACED", ticker=ticker, platform=platform,
+                                side=side, price_cents=price,
+                                size_usd=rec.get("total_cost", 0),
+                                confidence=decision.get("confidence", 0),
+                                net_ev=net_ev,
+                                reason=decision.get("reasoning", "")[:200],
+                            )
 
     except Exception as e:
         logger.error("Trade job crashed: %s", e, exc_info=True)
