@@ -105,14 +105,36 @@ class DailyStats:
         self.all_evaluations.sort(key=lambda x: x["confidence"], reverse=True)
         self.all_evaluations = self.all_evaluations[:20]
 
+    def _active_evaluations(self) -> List[Dict]:
+        """Return evaluations that haven't expired yet (close_time still in future)."""
+        now = datetime.now(timezone.utc)
+        active = []
+        for e in self.all_evaluations:
+            ct = e.get("close_time", "")
+            if not ct:
+                active.append(e)
+                continue
+            try:
+                cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if cd.tzinfo is None:
+                    from datetime import timezone as _tz
+                    cd = cd.replace(tzinfo=_tz.utc)
+                if cd > now:
+                    active.append(e)
+            except Exception:
+                active.append(e)
+        return active
+
     def best_pick(self) -> Optional[Dict]:
-        """Return the highest-confidence evaluation of the day (any platform)."""
-        return self.all_evaluations[0] if self.all_evaluations else None
+        """Return the highest-confidence non-expired evaluation of the day."""
+        active = self._active_evaluations()
+        return active[0] if active else None
 
     def best_pick_by_platform(self) -> Dict[str, Optional[Dict]]:
-        """Return the best pick per platform — Kalshi and Polymarket each get a fair slot."""
-        kal  = next((e for e in self.all_evaluations if e.get("platform", "kalshi") == "kalshi"), None)
-        poly = next((e for e in self.all_evaluations if e.get("platform") == "polymarket"), None)
+        """Return the best non-expired pick per platform."""
+        active = self._active_evaluations()
+        kal  = next((e for e in active if e.get("platform", "kalshi") == "kalshi"), None)
+        poly = next((e for e in active if e.get("platform") == "polymarket"), None)
         return {"kalshi": kal, "polymarket": poly}
 
     def record_near_miss(

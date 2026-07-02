@@ -1063,7 +1063,8 @@ class TradingBot:
                             continue
                         hl = _hours_left(ev)
                         # hl == -1 means close_time unknown — don't skip, treat as ≤24h
-                        if hl != -1 and hl <= 0:
+                        # Skip if already closed or fewer than 15 min left (untradeable)
+                        if hl != -1 and hl <= 0.25:
                             continue
                         if hl == -1:
                             hl = 12  # assume same-day if close_time missing
