@@ -137,12 +137,15 @@ class LiveTrader:
         if self.db:
             record_id = await self.db.insert("trade_logs", record)
             record["id"] = record_id
+            size_usd = total_cost
+            close_time = kwargs.get("close_time", "")
             await self.db.execute("""
                 INSERT INTO positions (ticker, side, contracts, avg_price, current_price,
-                                       pnl, status, opened_at, platform, title)
-                VALUES (?,?,?,?,?,0,'open',?,?,?)
+                                       pnl, status, opened_at, platform, title,
+                                       size_usd, close_time)
+                VALUES (?,?,?,?,?,0,'open',?,?,?,?,?)
             """, (ticker, side, contracts, price_cents, price_cents, now,
-                  "kalshi", (market_title or "")[:200]))
+                  "kalshi", (market_title or "")[:200], size_usd, close_time))
 
         logger.warning(
             f"[LIVE ORDER] {action} {side.upper()} {ticker} | "

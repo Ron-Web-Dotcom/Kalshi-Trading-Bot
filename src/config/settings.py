@@ -169,5 +169,25 @@ class Settings:
     database:   DatabaseConfig   = field(default_factory=DatabaseConfig)
 
 
+def _warn_missing_env_vars() -> None:
+    """Log warnings for env vars required at runtime but not set."""
+    import logging
+    _log = logging.getLogger("trading.settings")
+    required = {
+        "KALSHI_API_KEY_ID": "Kalshi RSA auth — market data will fail",
+        "OPENAI_API_KEY":    "GPT-4o-mini AI decisions — rule-based fallback will be used",
+    }
+    optional_warned = {
+        "DISCORD_WEBHOOK_URL": "Discord alerts disabled — set to get trade notifications",
+    }
+    for var, note in required.items():
+        if not os.environ.get(var):
+            _log.warning("Missing env var %s: %s", var, note)
+    for var, note in optional_warned.items():
+        if not os.environ.get(var):
+            _log.info("Optional env var %s not set: %s", var, note)
+
+
 # Singleton
 settings = Settings()
+_warn_missing_env_vars()

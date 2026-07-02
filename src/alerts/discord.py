@@ -1124,8 +1124,8 @@ class DiscordAlerter:
                 "inline": False,
             },
             {
-                "name":   "📡 Markets Scanned",
-                "value":  f"🟦 {kalshi_count} Kalshi + 🟣 {poly_count} Polymarket = **{markets_scanned} total**",
+                "name":   "📡 Markets Evaluated",
+                "value":  f"🟦 {kalshi_count} Kalshi + 🟣 {poly_count} Polymarket = **{markets_scanned} evaluated**",
                 "inline": False,
             },
             {
