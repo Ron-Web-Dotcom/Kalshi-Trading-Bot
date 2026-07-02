@@ -31,8 +31,8 @@ class TestRiskManager:
         assert allowed is True
 
     def test_daily_loss_circuit_breaker(self):
-        # Record a large loss to trigger daily limit
-        self.risk.record_trade("LOSS-1", pnl=-150.0)  # 15% of 1000
+        # record_result tracks daily loss; record_trade only tracks cooldown
+        self.risk.record_result("LOSS-1", pnl=-150.0)  # 15% of $1000 portfolio
         allowed, reason = self.risk.check_trade("ANY-1", 5.0, [], 1000.0)
         assert allowed is False
         assert "Daily loss" in reason
@@ -63,7 +63,9 @@ class TestAutoScaler:
         assert self.scaler.scale_factor == 1.0
 
     def test_scale_up_on_profit_milestone(self):
-        self.scaler.update(60.0)  # crosses $50 milestone
+        # First call bootstraps _last_scale_pnl; second call triggers delta check
+        self.scaler.update(0.0)   # bootstrap
+        self.scaler.update(60.0)  # +$60 delta crosses $50 milestone
         assert self.scaler.scale_factor > 1.0
         assert self.scaler.current_size > 10.0
 
@@ -75,11 +77,13 @@ class TestAutoScaler:
         assert self.scaler.scale_factor < factor_after_gain
 
     def test_size_never_exceeds_max(self):
+        self.scaler.update(0.0)  # bootstrap _last_scale_pnl
         for _ in range(20):
             self.scaler.update(self.scaler._last_scale_pnl + 60)
         assert self.scaler.current_size <= 100.0  # MAX_TRADE_SIZE
 
     def test_size_never_goes_below_min(self):
+        self.scaler.update(0.0)  # bootstrap _last_scale_pnl
         for _ in range(20):
             self.scaler.update(self.scaler._last_scale_pnl - 30)
         assert self.scaler.current_size >= 1.0  # MIN_TRADE_SIZE

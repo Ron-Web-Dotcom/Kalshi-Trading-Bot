@@ -158,7 +158,7 @@ def score(
         true_prob = consensus
         edge      = (100 - consensus) - (100 - market_mid)  # NO edge
 
-    net_ev = edge * 0.98 / 100 * 100  # in cents, after 2% fee
+    net_ev = edge * 0.98  # in cents, after 2% fee
 
     # ── 7. Confidence ────────────────────────────────────────────────────────
     # Start from edge size

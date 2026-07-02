@@ -21,8 +21,8 @@ def test_live_mode_via_env(monkeypatch):
 def test_trade_size_defaults():
     s = Settings()
     assert s.trading.base_trade_size_dollars == 10.0
-    assert s.trading.max_trade_size_dollars == 20.0
-    assert s.trading.min_trade_size_dollars == 2.0
+    assert s.trading.max_trade_size_dollars == 100.0
+    assert s.trading.min_trade_size_dollars == 1.0
 
 
 def test_risk_defaults():
@@ -31,15 +31,15 @@ def test_risk_defaults():
     assert s.trading.max_drawdown_pct == 15.0
     assert s.trading.arbitrage_threshold_pct == 5.0
     assert s.trading.kelly_fraction == 0.25
-    assert s.trading.min_confidence_to_trade == 0.35
+    assert s.trading.min_confidence_to_trade == 0.7
 
 
 def test_ai_defaults():
     s = Settings()
-    assert s.ai.model == "claude-sonnet-4-6"
+    assert s.ai.model == "gpt-4o-mini"
     assert s.ai.max_tokens == 1024
     assert s.ai.temperature == 0.3
-    assert s.trading.min_ai_confidence == 75.0
+    assert s.trading.min_ai_confidence == 70.0
 
 
 def test_discord_disabled_without_webhook():

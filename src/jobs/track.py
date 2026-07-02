@@ -103,7 +103,24 @@ async def run_tracking(db_manager) -> None:
                             UPDATE positions SET status='closed', current_price=?,
                             pnl=?, closed_at=?, close_reason=? WHERE id=?
                         """, (final_price, pnl, now, close_reason, pos_id))
+                        pnl_sign = "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN")
+                        await db_manager.execute(
+                            "UPDATE trade_logs SET pnl=?, result=?, resolved_at=? WHERE ticker=? AND side=? AND (result IS NULL OR result='PENDING')",
+                            (pnl, pnl_sign, now, ticker, side)
+                        )
                         risk.record_result(ticker, pnl, platform)
+                        try:
+                            await discord.position_closed(
+                                ticker=ticker, side=side,
+                                contracts=int(contracts),
+                                avg_price=float(avg_price),
+                                close_price=float(final_price),
+                                pnl=float(pnl),
+                                reason=close_reason,
+                                platform="polymarket",
+                            )
+                        except Exception as _disc_err:
+                            logger.debug("Discord alert failed: %s", _disc_err)
                         closed += 1
                     elif stop_loss_pct > 0 and pct_change <= -stop_loss_pct:
                         close_reason = f"stop_loss:{pct_change:.1f}%"
@@ -111,7 +128,24 @@ async def run_tracking(db_manager) -> None:
                             UPDATE positions SET status='closed', current_price=?,
                             pnl=?, closed_at=?, close_reason=? WHERE id=?
                         """, (cur_price, pnl, now, close_reason, pos_id))
+                        pnl_sign = "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN")
+                        await db_manager.execute(
+                            "UPDATE trade_logs SET pnl=?, result=?, resolved_at=? WHERE ticker=? AND side=? AND (result IS NULL OR result='PENDING')",
+                            (pnl, pnl_sign, now, ticker, side)
+                        )
                         risk.record_result(ticker, pnl, platform)
+                        try:
+                            await discord.position_closed(
+                                ticker=ticker, side=side,
+                                contracts=int(contracts),
+                                avg_price=float(avg_price),
+                                close_price=float(cur_price),
+                                pnl=float(pnl),
+                                reason=close_reason,
+                                platform="polymarket",
+                            )
+                        except Exception as _disc_err:
+                            logger.debug("Discord alert failed: %s", _disc_err)
                         closed += 1
                     elif take_profit_pct > 0 and pct_change >= take_profit_pct:
                         close_reason = f"take_profit:{pct_change:.1f}%"
@@ -119,7 +153,24 @@ async def run_tracking(db_manager) -> None:
                             UPDATE positions SET status='closed', current_price=?,
                             pnl=?, closed_at=?, close_reason=? WHERE id=?
                         """, (cur_price, pnl, now, close_reason, pos_id))
+                        pnl_sign = "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN")
+                        await db_manager.execute(
+                            "UPDATE trade_logs SET pnl=?, result=?, resolved_at=? WHERE ticker=? AND side=? AND (result IS NULL OR result='PENDING')",
+                            (pnl, pnl_sign, now, ticker, side)
+                        )
                         risk.record_result(ticker, pnl, platform)
+                        try:
+                            await discord.position_closed(
+                                ticker=ticker, side=side,
+                                contracts=int(contracts),
+                                avg_price=float(avg_price),
+                                close_price=float(cur_price),
+                                pnl=float(pnl),
+                                reason=close_reason,
+                                platform="polymarket",
+                            )
+                        except Exception as _disc_err:
+                            logger.debug("Discord alert failed: %s", _disc_err)
                         closed += 1
                     else:
                         await db_manager.execute(

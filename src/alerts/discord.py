@@ -573,7 +573,7 @@ class DiscordAlerter:
             explanation   = ""
 
         fields = [
-            {"name": "Question",  "value": self._display_ticker(ticker, market_title)[:80], "inline": False},
+            {"name": "Question",  "value": self._display_ticker(ticker, market_title)[:200], "inline": False},
             {"name": "Your Bet",  "value": f"**{side.upper()}**",          "inline": True},
             {"name": "Contracts", "value": str(contracts),                 "inline": True},
             {"name": "Entry",     "value": f"{entry_cents:.0f}¢",          "inline": True},

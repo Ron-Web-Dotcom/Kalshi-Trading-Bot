@@ -379,7 +379,7 @@ class TradingBot:
 
                     # Unrealised PnL: read from positions.pnl which track.py updates each cycle
                     unrealised_row = await self.db.fetchone(
-                        "SELECT COALESCE(SUM(pnl), 0) as pnl FROM positions WHERE status='open' AND pnl IS NOT NULL"
+                        "SELECT COALESCE(SUM(CASE WHEN pnl IS NOT NULL THEN pnl ELSE (current_price - avg_price) * contracts / 100.0 END), 0) as pnl FROM positions WHERE status='open'"
                     )
                     unrealised_pnl = (unrealised_row or {}).get("pnl", 0.0) or 0.0
 
@@ -387,8 +387,9 @@ class TradingBot:
                     wl_row = await self.db.fetchone(
                         "SELECT "
                         "  COUNT(*) as total, "
-                        "  SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
-                        "  SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
+                        "  SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins, "
+                        "  SUM(CASE WHEN result='LOSS' THEN 1 ELSE 0 END) as losses, "
+                        "  SUM(CASE WHEN result='BREAK_EVEN' THEN 1 ELSE 0 END) as break_even, "
                         "  COALESCE(SUM(pnl), 0) as total_pnl "
                         "FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN')"
                     )
@@ -570,7 +571,7 @@ class TradingBot:
 
             last_summary_at = datetime.now(timezone.utc).isoformat()
 
-            _SUMMARY_HOURS = {0: "Midnight", 6: "Morning", 12: "Afternoon", 18: "Evening"}
+            _SUMMARY_HOURS = {6: "Morning", 12: "Afternoon", 18: "Evening"}  # midnight covered by daily_summary_loop
             _first_run = True
             while not self._shutdown.is_set():
                 et_now = now_et()
@@ -735,7 +736,7 @@ class TradingBot:
                         "FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN')"
                     ) or {}
                     # Today's (yesterday's) realized PnL — resolved during that day
-                    _next_day = (_et_now - _td(days=0)).date().isoformat()  # midnight = start of current day
+                    _next_day = _et_now.date().isoformat()
                     today_pnl_row = await self.db.fetchone(
                         "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
                         "WHERE resolved_at >= ? AND resolved_at < ? AND pnl IS NOT NULL AND paper_trade=?",
@@ -753,7 +754,7 @@ class TradingBot:
                         "SELECT COUNT(*) as n FROM positions WHERE status='open'"
                     ) or {}
                     unrealised_row = await self.db.fetchone(
-                        "SELECT COALESCE(SUM(pnl), 0) as pnl FROM positions WHERE status='open' AND pnl IS NOT NULL"
+                        "SELECT COALESCE(SUM(CASE WHEN pnl IS NOT NULL THEN pnl ELSE (current_price - avg_price) * contracts / 100.0 END), 0) as pnl FROM positions WHERE status='open'"
                     ) or {}
                     unrealised_pnl = float(unrealised_row.get("pnl", 0.0) or 0.0)
 
@@ -793,6 +794,16 @@ class TradingBot:
                 _next_mid = (_et_after + timedelta(days=1)).replace(hour=0, minute=0, second=30, microsecond=0)
                 await asyncio.sleep(max(0.0, (_next_mid - _et_after).total_seconds()))
 
+        async def eval_loop():
+            await asyncio.sleep(EVAL_INTERVAL)
+            while not self._shutdown.is_set():
+                try:
+                    from src.jobs.evaluate import run_evaluation
+                    await run_evaluation(self.db, scaler=self.scaler)
+                except Exception as e:
+                    logger.error("Eval loop error: %s", e)
+                await asyncio.sleep(EVAL_INTERVAL)
+
         loop = asyncio.get_event_loop()
 
         def _on_signal(signum, frame):
@@ -823,11 +834,25 @@ class TradingBot:
             from src.alerts.discord import DiscordAlerter
             from src.execution.paper_trader import PaperTrader
             from src.execution.poly_paper_trader import PolyPaperTrader
+            from src.utils.eastern_time import now_et
+            from datetime import timedelta
 
             await asyncio.sleep(60)   # let ingest and trade loops warm up first
             discord_lm = DiscordAlerter()
             logger.info("Live market manager started — scanning every %ds for in-play opportunities", SCAN_INTERVAL)
             while not self._shutdown.is_set():
+                # Respect kill switch and sleep mode
+                from src.utils.kill_switch import is_active as _lm_ks_active
+                if _lm_ks_active():
+                    await asyncio.sleep(SCAN_INTERVAL)
+                    continue
+                _lm_et = now_et()
+                if 3 <= _lm_et.hour < 5:
+                    _wake = _lm_et.replace(hour=5, minute=0, second=0, microsecond=0)
+                    if _wake <= _lm_et:
+                        _wake = _wake + timedelta(days=1)
+                    await asyncio.sleep(max(0.0, (_wake - _lm_et).total_seconds()))
+                    continue
                 try:
                     _k_trader = PaperTrader(db=self.db, discord=None, scaler=self.scaler, risk=self.risk)
                     _p_trader = PolyPaperTrader(db=self.db, discord=None, scaler=self.scaler, risk=self.risk)
@@ -1734,6 +1759,7 @@ class TradingBot:
             asyncio.create_task(daily_summary_loop(),         name="daily_summary"),
             asyncio.create_task(bot_alert_loop(),             name="bot_alert"),
             asyncio.create_task(live_miss_scan_loop(),        name="live_miss_scan"),
+            asyncio.create_task(eval_loop(),                   name="eval"),
             # asyncio.create_task(discord_command_loop(),      name="discord_commands"),  # enable when Discord bot token is set up
             asyncio.create_task(live_market_manager_loop(),    name="live_market_manager"),
             asyncio.create_task(manual_trade_monitor_loop(),  name="manual_trade_monitor"),

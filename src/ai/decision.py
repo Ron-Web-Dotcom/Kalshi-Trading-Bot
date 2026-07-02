@@ -55,10 +55,10 @@ class AIDecisionEngine:
                 try:
                     wl = await self.db.fetchone(
                         "SELECT COUNT(*) as total, "
-                        "SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
-                        "SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
+                        "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins, "
+                        "SUM(CASE WHEN result='LOSS' THEN 1 ELSE 0 END) as losses, "
                         "COALESCE(SUM(pnl),0) as total_pnl "
-                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL"
+                        "FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN')"
                     ) or {}
                     total_closed = wl.get("total", 0) or 0
                     wins         = wl.get("wins",  0) or 0
@@ -73,18 +73,18 @@ class AIDecisionEngine:
 
                     # Recent last 5 closed trades
                     recent = await self.db.fetchall(
-                        "SELECT ticker, side, pnl, close_reason, avg_price, current_price "
-                        "FROM positions WHERE status='closed' AND pnl IS NOT NULL "
-                        "ORDER BY closed_at DESC LIMIT 5"
+                        "SELECT ticker, side, pnl, result, avg_price, close_price "
+                        "FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN') "
+                        "ORDER BY resolved_at DESC LIMIT 5"
                     ) or []
                     if recent:
                         lines.append("Last 5 closed trades:")
                         for r in recent:
-                            outcome = "WIN" if (r.get("pnl") or 0) > 0 else "LOSS"
+                            outcome = r.get("result", "LOSS")
                             lines.append(
                                 f"  {outcome} | {r.get('ticker','')} {(r.get('side') or '').upper()} "
-                                f"| entry={r.get('avg_price',0):.0f}¢ exit={r.get('current_price',0):.0f}¢ "
-                                f"| PnL=${r.get('pnl',0):+.2f} | reason={r.get('close_reason','')}"
+                                f"| entry={r.get('avg_price',0):.0f}¢ exit={r.get('close_price',0):.0f}¢ "
+                                f"| PnL=${r.get('pnl',0):+.2f} | result={outcome}"
                             )
 
                     # Current open positions
