@@ -128,19 +128,31 @@ class MarketDataFetcher:
     async def get_cached_markets(self, min_volume: float = 0,
                                   max_age_minutes: int = 15,
                                   limit: int = 200) -> List[Dict]:
-        """Return markets from DB. Prices in cents. Hard-capped to avoid OOM."""
-        query  = "SELECT * FROM markets WHERE status='open' OR status=''"
-        params: tuple = ()
-        if min_volume > 0:
-            query  += " AND volume >= ?"
-            params += (min_volume,)
-        query += f" ORDER BY volume DESC LIMIT {int(limit)}"
-        rows = await self.db.fetchall(query, params)
+        """Return markets from DB. Prices in cents.
+
+        Fetches Kalshi and Polymarket separately so high-volume Polymarket
+        markets never crowd out Kalshi (which reports volume in cents, not USD).
+        """
+        base = "SELECT * FROM markets WHERE status='open' OR status=''"
+        vol_clause = " AND volume >= ?" if min_volume > 0 else ""
+        vol_params: tuple = (min_volume,) if min_volume > 0 else ()
+
+        kalshi_q  = base + " AND (platform='kalshi' OR platform IS NULL)" + vol_clause
+        kalshi_q += f" ORDER BY volume DESC LIMIT {int(limit)}"
+        poly_q    = base + " AND platform='polymarket'" + vol_clause
+        poly_q   += f" ORDER BY volume DESC LIMIT {int(limit)}"
+
+        kalshi_rows = await self.db.fetchall(kalshi_q, vol_params) or []
+        poly_rows   = await self.db.fetchall(poly_q,   vol_params) or []
+        rows = kalshi_rows + poly_rows
 
         if not rows:
             logger.warning("No markets in cache — DB may be empty on first startup")
 
-        logger.info("get_cached_markets: %d rows (min_vol=%g, cap=%d)", len(rows), min_volume, limit)
+        logger.info(
+            "get_cached_markets: %d Kalshi + %d Polymarket = %d total (min_vol=%g)",
+            len(kalshi_rows), len(poly_rows), len(rows), min_volume,
+        )
         return rows
 
     async def run_continuous(self, interval_seconds: int = 300):
