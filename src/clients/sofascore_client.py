@@ -9,12 +9,16 @@ No API key required.
 """
 
 import asyncio
+import datetime
 import logging
 import re
 import time
 from typing import Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import httpx
+
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.sofascore")
 
@@ -309,8 +313,7 @@ class SofaScoreClient:
                 ts = ev.get("startTimestamp")
                 date_str = ""
                 if ts:
-                    import datetime
-                    date_str = datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+                    date_str = datetime.datetime.fromtimestamp(ts, tz=_ET).strftime("%Y-%m-%d")
 
                 out.append({
                     "date": date_str,
@@ -361,8 +364,7 @@ class SofaScoreClient:
                 ts = ev.get("startTimestamp")
                 date_str = ""
                 if ts:
-                    import datetime
-                    date_str = datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+                    date_str = datetime.datetime.fromtimestamp(ts, tz=_ET).strftime("%Y-%m-%d")
 
                 out.append({
                     "date": date_str,
