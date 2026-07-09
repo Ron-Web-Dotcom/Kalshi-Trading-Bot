@@ -39,7 +39,7 @@ async def run_ingestion(db_manager, market_queue: Optional[asyncio.Queue] = None
         poly = PolymarketTradingClient()
         try:
             logger.info("━━━ POLYMARKET INGEST START ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            raw_poly = await poly.get_markets(limit=100)
+            raw_poly = await poly.get_markets(limit=500)
             now_ts   = datetime.now(timezone.utc).isoformat()
             rows = []
             for pm in raw_poly:
