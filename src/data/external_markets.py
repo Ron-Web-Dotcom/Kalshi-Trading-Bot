@@ -138,8 +138,23 @@ class ExternalMarketComparator:
 
     async def _ensure_poly(self):
         import time
+        import httpx as _httpx
         if not self._poly_cache or (time.time() - self._poly_cache_time) > 1800:
-            self._poly_cache = await self.polymarket.get_markets(limit=100)
+            try:
+                async with _httpx.AsyncClient(
+                    timeout=15,
+                    headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"},
+                    trust_env=False,
+                ) as c:
+                    r = await c.get(f"{GAMMA_API}/markets",
+                                    params={"active": "true", "closed": "false", "limit": 100})
+                    r.raise_for_status()
+                    raw = r.json()
+                    self._poly_cache = raw if isinstance(raw, list) else raw.get("data", [])
+            except Exception as e:
+                logger.warning("Polymarket cache refresh failed: %s", e)
+                if not self._poly_cache:
+                    self._poly_cache = []
             self._poly_cache_time = time.time()
 
     async def compare_and_log(self, kalshi_markets: List[Dict]) -> List[Dict]:

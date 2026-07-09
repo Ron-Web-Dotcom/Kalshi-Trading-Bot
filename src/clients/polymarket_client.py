@@ -119,10 +119,16 @@ class PolymarketTradingClient:
         """
         logger.info("Polymarket: fetching markets from Gamma API (limit=%d)...", limit)
         try:
-            r = await self._client().get(
-                f"{GAMMA_BASE}/markets",
-                params={"active": "true", "closed": "false", "limit": limit},
-            )
+            # Use a fresh client per fetch — avoids stale proxy config / 407 errors
+            async with httpx.AsyncClient(
+                timeout=_TIMEOUT,
+                headers={"User-Agent": random.choice(_USER_AGENTS), "Accept": "application/json"},
+                trust_env=False,
+            ) as _c:
+                r = await _c.get(
+                    f"{GAMMA_BASE}/markets",
+                    params={"active": "true", "closed": "false", "limit": limit},
+                )
             if r.status_code != 200:
                 logger.warning(
                     "Polymarket Gamma API HTTP %d — %s",
