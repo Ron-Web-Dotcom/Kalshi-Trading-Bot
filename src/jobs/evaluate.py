@@ -7,11 +7,12 @@ logger = logging.getLogger("trading.jobs.evaluate")
 
 
 _last_discord_trade_bucket: int = -1
+_bucket_loaded: bool = False
 
 
 async def run_evaluation(db=None, scaler=None) -> None:
     """Compute and store a performance snapshot, log a clean summary table."""
-    global _last_discord_trade_bucket
+    global _last_discord_trade_bucket, _bucket_loaded
     from src.utils.database import DatabaseManager
     from src.alerts.discord import DiscordAlerter
     from src.risk.scaling import AutoScaler
@@ -112,6 +113,12 @@ async def run_evaluation(db=None, scaler=None) -> None:
                             t["action"], t["side"],
                             t["price"], pnl_str, src)
         logger.info("╚══════════════════════════════════════════════╝")
+
+        # On first run after restart, seed bucket from current trade count so we
+        # don't fire immediately — only send when 50 NEW trades have happened.
+        if not _bucket_loaded:
+            _last_discord_trade_bucket = total // 50
+            _bucket_loaded = True
 
         # Discord summary only when trade count has increased by ≥50 since last send
         if total > 0 and total // 50 > _last_discord_trade_bucket:
