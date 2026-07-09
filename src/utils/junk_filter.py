@@ -4,6 +4,15 @@ Import is_junk() anywhere a market title needs checking.
 """
 
 JUNK_PHRASES = [
+    # Weather / temperature markets — too unpredictable, low edge
+    "highest temperature", "lowest temperature", "temperature in",
+    "will it rain", "will it snow", "rainfall", "snowfall",
+    "hurricane", "tornado", "wind speed", "precipitation",
+    # Esports / gaming — low data, hard to model outcomes
+    "honor of kings", "league of legends", "valorant game",
+    "dota 2", "counter-strike", "cs2 match", "bo3 match", "bo5 match",
+    "first blood", "first dragon", "first baron", "first tower",
+    "esports championship", "gaming tournament",
     # Long-term political futures
     "gavin newsom", "2028 democratic", "2028 president", "2028 us presidential",
     "win the 2028", "win the 2032",

@@ -196,6 +196,9 @@ class OpportunityHunter:
 
         poly_by_ticker = {c["kalshi_ticker"]: c for c in poly_comps if "kalshi_ticker" in c}
 
+        # Clear stale rejections at start of each cycle so markets get a fresh look
+        self.__class__._load_rejections()
+
         logger.info(
             "── Opportunity Hunt (%d Kalshi + %d Polymarket = %d total) ──",
             len(markets), len(poly_markets) if poly_markets else 0, len(all_candidates),
@@ -252,13 +255,46 @@ class OpportunityHunter:
                 logger.debug("AI skip (cached rejection): %s", ticker[:40])
                 continue
 
+            # ── Market quality guard ──────────────────────────────────────────
+            title_lower = (market.get("title", "") or "").lower()
+            volume      = float(market.get("volume") or 0)
+            yes_ask     = float(market.get("yes_ask") or market.get("last_price") or 0)
+
+            # Weather markets: highly unpredictable, need strong data + high conf
+            is_weather = any(w in title_lower for w in (
+                "temperature", "rainfall", "rain", "snow", "hurricane",
+                "tornado", "wind speed", "precipitation", "weather",
+            ))
+            # Esports / gaming: low liquidity on Kalshi, outcomes hard to model
+            is_esports = any(w in title_lower for w in (
+                "honor of kings", "league of legends", "valorant", "dota",
+                "counter-strike", "cs2", "esport", "e-sport", "gaming",
+                "bo3", "bo5", "map ", "round ", "first blood",
+            ))
+            # Minimum volume floor — avoid no-liquidity traps
+            if volume < 50:
+                logger.debug("SKIP low-volume %s vol=%.0f", ticker[:40], volume)
+                continue
+            # High-price markets (>55¢) — buying expensive side needs 88%+ confidence
+            high_price_market = yes_ask > 55
+            # Set per-market minimum confidence
+            if is_weather or is_esports:
+                market_min_conf = 88.0  # weather and esports need near-certainty
+            elif high_price_market:
+                market_min_conf = 85.0  # expensive YES side needs strong conviction
+            else:
+                market_min_conf = None  # use global setting
+
             enriched = dict(market)
             if poly_comp:
                 enriched["poly_yes"]      = poly_comp["poly_yes"]
                 enriched["poly_no"]       = poly_comp["poly_no"]
                 enriched["poly_question"] = poly_comp["poly_question"]
 
-            decision = await make_decision_for_market(enriched, arb_signals, db=self.db)
+            decision = await make_decision_for_market(
+                enriched, arb_signals, db=self.db,
+                min_confidence=market_min_conf,
+            )
             if not decision:
                 continue
 

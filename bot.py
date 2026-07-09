@@ -367,29 +367,11 @@ class TradingBot:
                     open_n = sum((r.get("n") or 0) for r in (open_rows or []))
                     open_by_platform = {(r.get("platform") or "kalshi"): r.get("n", 0) for r in (open_rows or [])}
                     # In-play: open positions whose market closes TODAY in Eastern Time
-                    # Fetch all open positions with close_time, filter in Python using ET
-                    _inplay_rows = await self.db.fetchall(
-                        "SELECT p.ticker, m.close_time FROM positions p "
-                        "LEFT JOIN markets m ON m.ticker = p.ticker "
-                        "WHERE p.status='open'"
+                    # Count all open positions — in-play = any open bet already placed
+                    _inplay_row = await self.db.fetchone(
+                        "SELECT COUNT(*) as n FROM positions WHERE status='open'"
                     )
-                    _et_today    = _now_et().date()
-                    _et_midnight = _now_et()
-                    live_open_n  = 0
-                    for _ir in (_inplay_rows or []):
-                        _ct = (_ir.get("close_time") or "").strip()
-                        if not _ct:
-                            continue
-                        try:
-                            _cd = datetime.fromisoformat(_ct.replace("Z", "+00:00"))
-                            if _cd.tzinfo is None:
-                                from datetime import timezone as _tz_ip
-                                _cd = _cd.replace(tzinfo=_tz_ip.utc)
-                            _cd_et = _cd.astimezone(_ET)
-                            if _cd_et.date() == _et_today and _cd_et > _et_midnight:
-                                live_open_n += 1
-                        except Exception:
-                            pass
+                    live_open_n = int((_inplay_row or {}).get("n", 0))
                     # Also grab live slot manager count for the live_slots param
                     from src.jobs.live_market_manager import _live_slots as _hb_ls
                     live_tickers = set(_hb_ls.keys())

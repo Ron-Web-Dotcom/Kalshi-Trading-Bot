@@ -1116,9 +1116,9 @@ class DiscordAlerter:
             pnl_lines.append(f"{u_emoji} **On paper:** ${paper_s}{unrealised_pnl:.2f} ← _what we'd pocket if we cashed out NOW_")
 
         if todays_inplay > 0:
-            inplay_str = f"⚡ **{todays_inplay}/{open_positions}** in-play — live events closing today"
+            inplay_str = f"⚡ **{todays_inplay}** bets active — tracking live"
         else:
-            inplay_str = f"⚡ **0/{open_positions}** in-play — no live events today" if open_positions > 0 else "⚡ No open bets"
+            inplay_str = "⚡ No open bets"
 
         positions_parts = [pos_line, *pnl_lines, inplay_str]
         positions_val = "\n".join(positions_parts)
