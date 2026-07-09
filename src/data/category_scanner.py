@@ -117,7 +117,7 @@ async def _fetch_poly_tag(tag: str, limit: int = 30) -> List[Dict]:
             raw = r.json()
         items = raw if isinstance(raw, list) else (raw.get("data") or raw.get("markets") or [])
     except Exception as e:
-        logger.debug("Poly tag '%s' failed: %s", tag, e)
+        logger.warning("Poly tag '%s' failed: %s", tag, e)
         return []
 
     markets = []
@@ -148,7 +148,7 @@ async def _fetch_poly_bulk(limit: int = 500) -> List[Dict]:
             raw = r.json()
         items = raw if isinstance(raw, list) else (raw.get("data") or [])
     except Exception as e:
-        logger.debug("Poly bulk fetch failed: %s", e)
+        logger.warning("Poly bulk fetch failed: %s", e)
         return []
 
     return [m for m in [_parse_poly_market(i, "") for i in items] if m]
@@ -498,7 +498,7 @@ class CategoryScanner:
                         merged.append(d)
                         seen.add(t)
             except Exception as e:
-                logger.debug("Kalshi category '%s' DB query error: %s", category, e)
+                logger.warning("Kalshi category '%s' DB query error: %s", category, e)
 
         for m in merged:
             m["_pre_score"] = _pre_score(m)

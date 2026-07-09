@@ -84,7 +84,7 @@ async def get_crypto_price(coin_keyword: str) -> Optional[Dict]:
                     "source":     "coingecko",
                 }
         except Exception as e:
-            logger.debug("CoinGecko fetch failed for %s (attempt %d): %s", coin_keyword, attempt + 1, e)
+            logger.warning("CoinGecko fetch failed for %s (attempt %d): %s", coin_keyword, attempt + 1, e)
             if attempt == 0:
                 await asyncio.sleep(1)
     return None
@@ -119,7 +119,7 @@ async def get_equity_price(symbol_keyword: str) -> Optional[Dict]:
                 "source":     "yahoo_finance",
             }
     except Exception as e:
-        logger.debug("Yahoo Finance fetch failed for %s: %s", symbol_keyword, e)
+        logger.warning("Yahoo Finance fetch failed for %s: %s", symbol_keyword, e)
         return None
 
 

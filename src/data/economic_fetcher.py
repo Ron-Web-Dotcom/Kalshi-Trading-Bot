@@ -63,7 +63,7 @@ async def fetch_bls_series(series_id: str) -> Optional[Dict]:
         points = series_data.get("data", [])[:3]
         return {"series_id": series_id, "points": points}
     except Exception as e:
-        logger.debug("BLS fetch failed for %s: %s", series_id, e)
+        logger.warning("BLS fetch failed for %s: %s", series_id, e)
         return None
 
 
@@ -89,7 +89,7 @@ async def fetch_treasury_rates() -> Optional[Dict]:
             }
         return None
     except Exception as e:
-        logger.debug("Fed funds rate fetch failed: %s", e)
+        logger.warning("Fed funds rate fetch failed: %s", e)
         return None
 
 
@@ -115,7 +115,7 @@ async def fetch_10y_yield() -> Optional[Dict]:
             }
         return None
     except Exception as e:
-        logger.debug("10y yield fetch failed: %s", e)
+        logger.warning("10y yield fetch failed: %s", e)
         return None
 
 

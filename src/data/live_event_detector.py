@@ -455,5 +455,5 @@ async def is_event_live_now(title: str) -> bool:
         logger.debug("is_event_live_now timed out: %s", title[:60])
         return False
     except Exception as e:
-        logger.debug("is_event_live_now error: %s", e)
+        logger.warning("is_event_live_now error: %s", e)
         return False

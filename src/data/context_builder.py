@@ -227,7 +227,7 @@ async def build_market_context(
         logger.warning("Context fetch timed out for %s — proceeding without context", ticker)
         return ""
     except Exception as e:
-        logger.debug("Context fetch error for %s: %s", ticker, e)
+        logger.warning("Context fetch error for %s: %s", ticker, e)
         return ""
 
     # ── Assemble context blocks ───────────────────────────────────────────────
@@ -245,7 +245,7 @@ async def build_market_context(
     if isinstance(sports, str) and sports:
         blocks.append(sports)
     elif isinstance(sports, Exception):
-        logger.debug("Sports fetch error: %s", sports)
+        logger.warning("Sports fetch error: %s", sports)
 
     sofa_deep = results.get("sofa_deep")
     if isinstance(sofa_deep, str) and sofa_deep:

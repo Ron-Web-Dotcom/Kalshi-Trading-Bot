@@ -124,7 +124,7 @@ def _extract_video_ids(html: str, max_ids: int = 8) -> List[Tuple[str, str, str,
             if len(videos) >= max_ids:
                 break
     except Exception as e:
-        logger.debug("ytInitialData parse error: %s", e)
+        logger.warning("ytInitialData parse error: %s", e)
 
     return videos
 
@@ -162,7 +162,7 @@ async def _get_transcript(video_id: str, max_chars: int = 1200) -> Optional[str]
         logger.debug("youtube-transcript-api not installed")
         return None
     except Exception as e:
-        logger.debug("Transcript fetch error for %s: %s", video_id, e)
+        logger.warning("Transcript fetch error for %s: %s", video_id, e)
         return None
 
 
@@ -195,7 +195,7 @@ async def _get_video_description(video_id: str) -> Optional[str]:
         if m2:
             return m2.group(1)[:600]
     except Exception as e:
-        logger.debug("Description fetch error for %s: %s", video_id, e)
+        logger.warning("Description fetch error for %s: %s", video_id, e)
     return None
 
 
@@ -265,7 +265,7 @@ async def deep_youtube_research(
             r = await c.get(search_url)
             raw_videos = _extract_video_ids(r.text, max_ids=12)
     except Exception as e:
-        logger.debug("YouTube search fetch failed: %s", e)
+        logger.warning("YouTube search fetch failed: %s", e)
         return ""
 
     if not raw_videos:

@@ -158,7 +158,7 @@ async def fetch_weather(city_query: str) -> Optional[Dict]:
             "forecast":   forecasts,
         }
     except Exception as e:
-        logger.debug("Weather fetch failed for %s: %s", city_query, e)
+        logger.warning("Weather fetch failed for %s: %s", city_query, e)
         return None
 
 

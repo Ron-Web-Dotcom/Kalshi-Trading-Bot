@@ -88,7 +88,7 @@ async def _get(url: str, params: dict = None, as_json: bool = False):
             r.raise_for_status()
             return r.json() if as_json else r.text
     except Exception as e:
-        logger.debug("GET %s failed: %s", url[:80], e)
+        logger.warning("GET failed [%s]: %s", url[:80], e)
         return None
 
 
@@ -184,7 +184,7 @@ async def _manifold_markets(q: str) -> Optional[str]:
                 )
         return "\n".join(lines) if lines else None
     except Exception as e:
-        logger.debug("Manifold failed: %s", e)
+        logger.warning("Manifold failed: %s", e)
         return None
 
 
@@ -210,7 +210,7 @@ async def _metaculus(q: str) -> Optional[str]:
                 )
         return "\n".join(lines) if lines else None
     except Exception as e:
-        logger.debug("Metaculus failed: %s", e)
+        logger.warning("Metaculus failed: %s", e)
         return None
 
 
@@ -232,7 +232,7 @@ async def _wikipedia(entity: str) -> Optional[str]:
             return f"Wikipedia — {title}: {extract[:400]}"
         return None
     except Exception as e:
-        logger.debug("Wikipedia failed for '%s': %s", entity, e)
+        logger.warning("Wikipedia failed for '%s': %s", entity, e)
         return None
 
 
@@ -256,7 +256,7 @@ async def _ddg_instant(q: str) -> Optional[str]:
                 return text[:250]
         return None
     except Exception as e:
-        logger.debug("DDG failed: %s", e)
+        logger.warning("DDG failed: %s", e)
         return None
 
 
@@ -279,7 +279,7 @@ async def _reddit_search(q: str) -> List[str]:
                 posts.append(f"r/{sub} ({score:,} upvotes): {title}")
         return posts
     except Exception as e:
-        logger.debug("Reddit search failed: %s", e)
+        logger.warning("Reddit search failed: %s", e)
         return []
 
 
@@ -289,7 +289,7 @@ async def _youtube_deep(q: str, timeout: float) -> Optional[str]:
         from src.data.youtube_research import deep_youtube_research
         return await deep_youtube_research(q, timeout=min(timeout - 2, 16.0))
     except Exception as e:
-        logger.debug("YouTube deep research error: %s", e)
+        logger.warning("YouTube deep research failed: %s", e)
         return None
 
 
@@ -406,7 +406,7 @@ async def _youtube_search(q: str) -> List[str]:
         return videos
 
     except Exception as e:
-        logger.debug("YouTube search failed: %s", e)
+        logger.warning("YouTube search failed: %s", e)
         return []
 
 
@@ -457,7 +457,7 @@ async def _polymarket_price(title: str) -> Optional[str]:
             f"  (independent prediction market — gaps vs Kalshi signal mispricing)"
         )
     except Exception as e:
-        logger.debug("Polymarket price fetch failed: %s", e)
+        logger.warning("Polymarket price fetch failed: %s", e)
         return None
 
 
@@ -499,7 +499,7 @@ async def _predictit_price(title: str) -> Optional[str]:
             lines.append(f"  {c.get('name','')[:60]}: {yes_p:.0f}%")
         return "\n".join(lines)
     except Exception as e:
-        logger.debug("PredictIt fetch failed: %s", e)
+        logger.warning("PredictIt fetch failed: %s", e)
         return None
 
 
@@ -655,19 +655,28 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
             bool(all_headlines), bool(wiki_text), bool(ddg),
             bool(reddit_h), bool(youtube_deep or youtube_h), bool(pm_lines),
         ])
+        def _hit(v) -> str:
+            return "✅" if v else "❌"
+
         pm_sources = "+".join(filter(None, [
-            "Manifold" if isinstance(manifold, str) and manifold else "",
-            "Metaculus" if isinstance(metaculus, str) and metaculus else "",
+            "Manifold"   if isinstance(manifold,   str) and manifold   else "",
+            "Metaculus"  if isinstance(metaculus,  str) and metaculus  else "",
             "Polymarket" if isinstance(poly_price, str) and poly_price else "",
-            "PredictIt" if isinstance(predictit, str) and predictit else "",
+            "PredictIt"  if isinstance(predictit,  str) and predictit  else "",
         ])) or "none"
+
         logger.info(
-            "Web search: %d headlines | %d wiki | reddit=%s | youtube_deep=%s | pred_markets=%s | query='%s'",
-            len(all_headlines), len(wiki_text),
-            "yes" if reddit_h else "no",
-            "yes" if youtube_deep else f"{len(youtube_h)} titles",
-            pm_sources,
+            "Context sources for '%s':\n"
+            "  News:       %s Google  %s Yahoo  %s Bing  %s Guardian  %s AlJazeera  %s AP  %s Reuters  %s BBC\n"
+            "  Knowledge:  %s Wikipedia(%d)  %s DDG  %s Reddit  %s YouTube\n"
+            "  Pred mkts:  %s Manifold  %s Metaculus  %s Polymarket  %s PredictIt\n"
+            "  Total: %d headlines | %d wiki blocks | pred_markets=%s",
             q[:60],
+            _hit(google_h),   _hit(yahoo_h),  _hit(bing_h), _hit(guardian_h),
+            _hit(alj_h),      _hit(ap_h),     _hit(reuters_h), _hit(bbc_h),
+            _hit(wiki_text),  len(wiki_text), _hit(ddg),    _hit(reddit_h), _hit(youtube_deep or youtube_h),
+            _hit(manifold),   _hit(metaculus), _hit(poly_price), _hit(predictit),
+            len(all_headlines), len(wiki_text), pm_sources,
         )
         return "\n\n".join(blocks)
 

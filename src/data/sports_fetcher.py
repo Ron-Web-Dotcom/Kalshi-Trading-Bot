@@ -361,7 +361,7 @@ async def fetch_scoreboard(league: str) -> List[Dict]:
             })
         return games
     except Exception as e:
-        logger.debug("Scoreboard fetch failed for %s: %s", league, e)
+        logger.warning("Scoreboard fetch failed for %s: %s", league, e)
         return []
 
 
@@ -387,7 +387,7 @@ async def fetch_standings(league: str) -> List[Dict]:
                     entries.append({"team": team, "stats": stats})
         return entries[:16]
     except Exception as e:
-        logger.debug("Standings fetch failed for %s: %s", league, e)
+        logger.warning("Standings fetch failed for %s: %s", league, e)
         return []
 
 
@@ -415,7 +415,7 @@ async def fetch_sofa_live(sport_slug: str) -> List[Dict]:
                 })
         return results
     except Exception as e:
-        logger.debug("SofaScore live fetch failed for %s: %s", sport_slug, e)
+        logger.warning("SofaScore live fetch failed for %s: %s", sport_slug, e)
         return []
 
 
@@ -451,7 +451,7 @@ async def fetch_sofa_search(query: str) -> List[Dict]:
                 })
         return results
     except Exception as e:
-        logger.debug("SofaScore search failed for '%s': %s", query, e)
+        logger.warning("SofaScore search failed for '%s': %s", query, e)
         return []
 
 
@@ -896,7 +896,7 @@ async def fetch_statmuse(query: str, sport: str = "") -> Optional[str]:
 
         return None
     except Exception as e:
-        logger.debug("StatMuse fetch failed for '%s': %s", query, e)
+        logger.warning("StatMuse fetch failed for '%s': %s", query, e)
         return None
 
 

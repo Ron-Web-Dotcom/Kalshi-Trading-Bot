@@ -77,7 +77,7 @@ async def _fetch_feed(client: httpx.AsyncClient, name: str, url: str) -> List[Di
                 })
         return items[:20]   # cap per feed
     except Exception as e:
-        logger.debug("RSS feed %s failed: %s", name, e)
+        logger.warning("RSS feed %s failed: %s", name, e)
         return []
 
 
@@ -166,7 +166,7 @@ async def fetch_community_prediction(market_title: str) -> Optional[str]:
                 lines.append(f"Metaculus: '{title}' → {pred*100:.0f}% community estimate")
         return "\n".join(lines) if lines else None
     except Exception as e:
-        logger.debug("Metaculus fetch failed: %s", e)
+        logger.warning("Metaculus fetch failed: %s", e)
         return None
 
 
