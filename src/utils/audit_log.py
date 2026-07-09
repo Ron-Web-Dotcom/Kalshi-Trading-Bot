@@ -1,7 +1,7 @@
 """Append-only audit log for every trade action."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo

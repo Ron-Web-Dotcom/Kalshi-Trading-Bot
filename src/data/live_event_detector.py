@@ -24,7 +24,7 @@ Returns False on any error — never false-positive an alert.
 import asyncio
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 import httpx

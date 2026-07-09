@@ -1,7 +1,7 @@
 """In-memory daily stats accumulator — resets at midnight UTC."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 _ET = ZoneInfo("America/New_York")
@@ -24,7 +24,7 @@ def _build_eval_entry(
     evaluated_at: str = "",
 ) -> dict:
     """Single source of truth for evaluation entry shape. All fields always present."""
-    from datetime import datetime, timezone
+    from datetime import datetime
     return {
         "ticker":      ticker,
         "title":       title,

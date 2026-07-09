@@ -1,7 +1,7 @@
 """Phase 7 — risk management: size limits, daily loss, cooldown, exposure."""
 
 import logging
-from datetime import datetime, timedelta, timezone, date
+from datetime import datetime, timedelta, date
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 _ET = ZoneInfo("America/New_York")

@@ -339,7 +339,7 @@ class PolymarketTradingClient:
         Fetch active Polymarket markets with valid prices (used for expiring pool).
         """
         try:
-            from datetime import datetime, timezone, timedelta
+            from datetime import datetime, timedelta
             all_markets = await self.get_markets(limit=100)
             if not all_markets:
                 logger.warning("Polymarket live markets: get_markets returned 0 — API may be down")

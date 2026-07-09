@@ -1,7 +1,7 @@
 """Phase 6 — paper trade execution: simulate orders, track PnL and history."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 _ET = ZoneInfo("America/New_York")

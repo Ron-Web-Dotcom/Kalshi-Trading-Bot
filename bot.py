@@ -15,6 +15,9 @@ import gc
 import signal
 import sys
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+_ET = ZoneInfo("America/New_York")
 
 from src.utils.logging_setup import setup_logging, get_trading_logger
 from src.utils.database import DatabaseManager
@@ -1839,7 +1842,6 @@ class TradingBot:
             while not self._shutdown.is_set():
                 try:
                     from zoneinfo import ZoneInfo
-_ET = ZoneInfo("America/New_York")
                     _et = ZoneInfo("America/New_York")
                     now_et = datetime.now(_et)
                     # Wait until next Sunday 03:00 ET

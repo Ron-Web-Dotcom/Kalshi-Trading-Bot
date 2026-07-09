@@ -1,7 +1,7 @@
 """Phase 5 — arbitrage signal detection with overtrading prevention."""
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from typing import Dict, List
 from zoneinfo import ZoneInfo
 _ET = ZoneInfo("America/New_York")

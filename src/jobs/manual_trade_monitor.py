@@ -10,7 +10,7 @@ Each cycle:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 _ET = ZoneInfo("America/New_York")

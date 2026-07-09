@@ -1,7 +1,7 @@
 """Job: evaluate performance and update metrics."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 _ET = ZoneInfo("America/New_York")
 

@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from src.utils.junk_filter import is_junk
 from typing import Dict, List
 

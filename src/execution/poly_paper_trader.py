@@ -12,7 +12,7 @@ Polymarket fee model:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Dict, Optional
 from zoneinfo import ZoneInfo
 _ET = ZoneInfo("America/New_York")

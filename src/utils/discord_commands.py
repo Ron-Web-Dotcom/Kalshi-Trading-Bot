@@ -14,7 +14,7 @@ Get a bot token at: https://discord.com/developers/applications
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 import httpx

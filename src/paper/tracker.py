@@ -1,7 +1,7 @@
 """Paper trading tracker — signal logging and settlement."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Dict, List
 from zoneinfo import ZoneInfo
 _ET = ZoneInfo("America/New_York")
