@@ -144,6 +144,7 @@ class OpportunityHunter:
         for market in all_candidates:
             yes_ask = float(market.get("yes_ask") or market.get("last_price") or 0)
             title   = market.get("title", "")
+            volume  = float(market.get("volume") or 0)
 
             if yes_ask < 2 or yes_ask > 98:    # hard boundary only — near-resolved markets
                 continue
@@ -151,6 +152,24 @@ class OpportunityHunter:
                 continue
             if is_junk(title):
                 continue
+
+            # Apply quality guards here so guaranteed slots are always valid markets
+            if volume < 50 and volume > 0:
+                continue
+            if yes_ask < 15:  # long-shot — near-impossible bets
+                continue
+            # Skip markets closing in < 30 min
+            ct = market.get("close_time") or market.get("expiration_time") or ""
+            if ct:
+                try:
+                    _cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                    if _cd.tzinfo is None:
+                        _cd = _cd.replace(tzinfo=timezone.utc).astimezone(_ET)
+                    mins_left = (_cd - datetime.now(_ET)).total_seconds() / 60
+                    if 0 < mins_left < 30:
+                        continue
+                except Exception:
+                    pass
 
             poly_comp  = poly_by_ticker.get(market.get("ticker", ""))
             pre        = _pre_score(market, poly_comp)
@@ -185,35 +204,25 @@ class OpportunityHunter:
         for pre_score, market, poly_comp in top_candidates:
             ticker = market.get("ticker", "")
 
-            # ── Market quality guard ──────────────────────────────────────────
+            # ── Per-market confidence override ────────────────────────────────
             title_lower = (market.get("title", "") or "").lower()
-            volume      = float(market.get("volume") or 0)
             yes_ask     = float(market.get("yes_ask") or market.get("last_price") or 0)
 
-            # Weather markets: highly unpredictable, need strong data + high conf
             is_weather = any(w in title_lower for w in (
                 "temperature", "rainfall", "rain", "snow", "hurricane",
                 "tornado", "wind speed", "precipitation", "weather",
             ))
-            # Esports / gaming: low liquidity on Kalshi, outcomes hard to model
             is_esports = any(w in title_lower for w in (
                 "honor of kings", "league of legends", "valorant", "dota",
                 "counter-strike", "cs2", "esport", "e-sport", "gaming",
                 "bo3", "bo5", "map ", "round ", "first blood",
             ))
-            # Minimum volume floor — avoid no-liquidity traps
-            if volume < 50:
-                logger.debug("SKIP low-volume %s vol=%.0f", ticker[:40], volume)
-                continue
-            # High-price markets (>55¢) — buying expensive side needs 88%+ confidence
-            high_price_market = yes_ask > 55
-            # Set per-market minimum confidence
             if is_weather or is_esports:
-                market_min_conf = 88.0  # weather and esports need near-certainty
-            elif high_price_market:
-                market_min_conf = 85.0  # expensive YES side needs strong conviction
+                market_min_conf = 88.0
+            elif yes_ask > 55:
+                market_min_conf = 85.0
             else:
-                market_min_conf = None  # use global setting
+                market_min_conf = None
 
             enriched = dict(market)
             if poly_comp:
