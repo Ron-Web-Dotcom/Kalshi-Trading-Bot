@@ -656,17 +656,21 @@ class TradingBot:
                     )
                     new_pos = [dict(r) for r in (new_pos or [])]
 
-                    # Positions that SETTLED (closed) since last check-in — TODAY only
-                    # Never carry yesterday's results into today's check-ins
-                    closed_since = await self.db.fetchall(
-                        "SELECT * FROM positions WHERE status='closed' "
-                        "AND closed_at >= ? AND closed_at >= ? "
-                        "AND pnl IS NOT NULL AND pnl != 0 "
-                        "AND (close_reason IS NULL OR close_reason NOT LIKE 'cleanup:%') "
-                        "ORDER BY closed_at DESC",
+                    # Positions settled since last check-in — pull from trade_logs
+                    # (source of truth for resolved results) rather than positions table
+                    closed_since_rows = await self.db.fetchall(
+                        "SELECT tl.ticker, tl.side, tl.pnl, tl.result, tl.resolved_at, "
+                        "       tl.platform, m.title, p.avg_price, p.contracts, p.close_reason "
+                        "FROM trade_logs tl "
+                        "LEFT JOIN markets m ON m.ticker = tl.ticker "
+                        "LEFT JOIN positions p ON p.ticker = tl.ticker AND p.side = tl.side "
+                        "WHERE tl.resolved_at >= ? AND tl.resolved_at >= ? "
+                        "AND tl.pnl IS NOT NULL "
+                        "AND tl.result IN ('WIN','LOSS','BREAK_EVEN') "
+                        "ORDER BY tl.resolved_at DESC",
                         (last_summary_at, pnl_date + "T00:00:00")
                     )
-                    closed_since = [dict(r) for r in (closed_since or [])]
+                    closed_since = [dict(r) for r in (closed_since_rows or [])]
 
                     pnl_row = await self.db.fetchone(
                         "SELECT COALESCE(SUM(pnl),0) as pnl FROM trade_logs "
