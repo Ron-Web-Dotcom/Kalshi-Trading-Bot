@@ -1226,6 +1226,8 @@ async def _resolve_expired_positions(db, live_mode: bool = False, risk=None) -> 
 
     resolved_wins   = []
     resolved_losses = []
+    resolved_exits  = []
+    _seen_tickers: set = set()
 
     for pos in expired:
         ticker        = pos.get("ticker", "")
@@ -1359,20 +1361,57 @@ async def _resolve_expired_positions(db, live_mode: bool = False, risk=None) -> 
             resolved_wins.append(item)
         else:
             resolved_losses.append(item)
+        _seen_tickers.add(ticker)
+
+    # Sweep positions closed by track.py in the last 5 minutes so wins and
+    # opt-outs that track.py resolves first also appear in LIVE BID RESULTS.
+    try:
+        recent_track_closes = await db.fetchall(
+            "SELECT ticker, title, platform, side, avg_price, pnl, contracts, close_reason "
+            "FROM positions "
+            "WHERE status='closed' AND closed_at >= datetime('now', '-5 minutes') "
+            "AND close_reason IS NOT NULL"
+        )
+        for _rc in (recent_track_closes or []):
+            _rt = _rc.get("ticker", "")
+            if _rt in _seen_tickers:
+                continue  # already handled above
+            _seen_tickers.add(_rt)
+            _reason  = _rc.get("close_reason", "")
+            _pnl_rc  = float(_rc.get("pnl") or 0)
+            _item_rc = {
+                "title":     (_rc.get("title") or _rt)[:50],
+                "ticker":    _rt,
+                "side":      (_rc.get("side") or "YES").upper(),
+                "platform":  _rc.get("platform", "kalshi"),
+                "entry":     float(_rc.get("avg_price") or 0),
+                "exit":      0,
+                "pnl":       _pnl_rc,
+                "contracts": int(_rc.get("contracts") or 1),
+                "reason":    _reason,
+            }
+            if _reason.startswith("ai_reeval"):
+                resolved_exits.append(_item_rc)
+            elif _pnl_rc >= 0:
+                resolved_wins.append(_item_rc)
+            else:
+                resolved_losses.append(_item_rc)
+    except Exception as _sweep_err:
+        logger.debug("Track-close sweep error: %s", _sweep_err)
 
     # Immediate Discord W/L notification
-    if discord and (resolved_wins or resolved_losses):
+    if discord and (resolved_wins or resolved_losses or resolved_exits):
         try:
             await discord.live_results_summary(
                 wins=resolved_wins,
                 losses=resolved_losses,
-                exits=[],
+                exits=resolved_exits,
                 mode=mode,
             )
         except Exception as _da:
             logger.debug("Discord result alert: %s", _da)
 
     logger.info(
-        "Real-time resolve: %dW / %dL — cleared from board, W/L updated",
-        len(resolved_wins), len(resolved_losses)
+        "Real-time resolve: %dW / %dL / %d exits — cleared from board, W/L updated",
+        len(resolved_wins), len(resolved_losses), len(resolved_exits)
     )

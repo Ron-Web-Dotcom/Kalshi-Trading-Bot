@@ -77,16 +77,56 @@ async def run_tracking(db_manager, risk=None) -> None:
                     close_reason     = ""   # must initialize before any conditional sets it
                     close_price_used = 0.0
                     mkt_row = await db_manager.fetchone(
-                        "SELECT yes_ask, no_ask, status FROM markets WHERE ticker=?", (ticker,)
+                        "SELECT yes_ask, no_ask, status, close_time FROM markets WHERE ticker=?", (ticker,)
                     )
                     if not mkt_row:
                         # Ticker mismatch — fallback to title match
                         pos_title = (pos.get("title") or "").strip()
                         if pos_title:
                             mkt_row = await db_manager.fetchone(
-                                "SELECT yes_ask, no_ask, status FROM markets WHERE platform='polymarket' AND title=?",
+                                "SELECT yes_ask, no_ask, status, close_time FROM markets WHERE platform='polymarket' AND title=?",
                                 (pos_title,)
                             )
+
+                    # If close_time has passed, hit the live API directly — resolved markets
+                    # disappear from the active feed so the DB cache never updates to "resolved"
+                    ct_str = (mkt_row or {}).get("close_time", "") or pos.get("close_time", "")
+                    _past_close = False
+                    if ct_str:
+                        try:
+                            from datetime import timezone as _tz
+                            _ct = datetime.fromisoformat(str(ct_str).replace("Z", "+00:00"))
+                            if _ct.tzinfo is None:
+                                _ct = _ct.replace(tzinfo=_tz.utc).astimezone(_ET)
+                            _past_close = datetime.now(_ET) > _ct
+                        except Exception:
+                            pass
+
+                    if _past_close:
+                        # Market close_time passed — check live API for real resolution
+                        try:
+                            from src.clients.polymarket_client import PolymarketTradingClient as _PTC
+                            _pc = _PTC()
+                            yes_token = pos.get("poly_yes_token") or pos.get("_yes_token") or ticker
+                            live_mkt = await _pc.get_market_by_token(yes_token)
+                            await _pc.close()
+                            if live_mkt:
+                                # Merge live data into mkt_row
+                                mkt_row = dict(mkt_row or {})
+                                mkt_row["yes_ask"] = live_mkt.get("yes_ask", mkt_row.get("yes_ask", 0))
+                                mkt_row["no_ask"]  = live_mkt.get("no_ask",  mkt_row.get("no_ask",  0))
+                                if live_mkt.get("status") in ("resolved", "settled", "finalized", "closed"):
+                                    mkt_row["status"] = live_mkt["status"]
+                                    # Update DB so we don't re-fetch next cycle
+                                    await db_manager.execute(
+                                        "UPDATE markets SET status=?, yes_ask=?, no_ask=? WHERE ticker=?",
+                                        (live_mkt["status"], mkt_row["yes_ask"], mkt_row["no_ask"], ticker)
+                                    )
+                                logger.info("POLY LIVE CHECK %s → status=%s yes=%.0f¢",
+                                            ticker[:40], mkt_row.get("status","?"), mkt_row.get("yes_ask",0))
+                        except Exception as _live_err:
+                            logger.debug("Poly live check failed for %s: %s", ticker, _live_err)
+
                     if not mkt_row:
                         logger.debug("TRACK SKIP Polymarket %s — not in markets cache (ticker mismatch?)", ticker)
                         continue
@@ -106,7 +146,7 @@ async def run_tracking(db_manager, risk=None) -> None:
                     pnl = (cur_price - avg_price) * contracts / 100
                     pct_change = ((cur_price - avg_price) / avg_price * 100) if avg_price else 0
                     mkt_status = mkt_row.get("status", "open")
-                    if mkt_status in ("resolved", "settled", "finalized"):
+                    if mkt_status in ("resolved", "settled", "finalized", "closed"):
                         close_reason = f"resolved:{mkt_status}"
                         # Our side wins when that side's price → 100 at resolution
                         # (yes_ask→100 = YES won; no_ask→100 = NO won)
