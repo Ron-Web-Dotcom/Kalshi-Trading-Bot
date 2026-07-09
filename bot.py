@@ -236,17 +236,19 @@ class TradingBot:
         _sleep_mode_notified = False  # track if we've sent the sleep Discord msg
 
         async def _sleep_mode_wait() -> bool:
-            """If in quiet hours (3–5am ET), notify Discord once, sleep until 5am, return True."""
+            """If in quiet hours (2:45–5:00 AM ET), notify Discord once, sleep until 5am, return True."""
             nonlocal _sleep_mode_notified
             from src.utils.eastern_time import now_et as _net
             et = _net()
-            if 3 <= et.hour < 5:
+            # Start wind-down at 2:45 AM so no new bets open right before sleep
+            in_sleep = (et.hour == 2 and et.minute >= 45) or (3 <= et.hour < 5)
+            if in_sleep:
                 if not _sleep_mode_notified:
                     _sleep_mode_notified = True  # set before send to prevent retry loop on failure
                     try:
                         from src.alerts.discord import DiscordAlerter as _DA
                         await _DA().send_message(
-                            "😴 **Sleep Mode Activated — 3:00 AM ET**\n"
+                            "😴 **Sleep Mode Activated — 2:45 AM ET**\n"
                             "Bot pausing all scanning & alerts until 5:00 AM ET.\n"
                             "Existing positions are safe — no changes during sleep. 💤"
                         )
@@ -260,7 +262,7 @@ class TradingBot:
                         pass
                 wake = et.replace(hour=5, minute=0, second=0, microsecond=0)
                 secs = (wake - et).total_seconds()
-                logger.info("😴 Sleep mode: quiet hours 3–5am ET — resuming at 5:00am (%.0f min)", secs / 60)
+                logger.info("😴 Sleep mode: quiet hours 2:45–5am ET — resuming at 5:00am (%.0f min)", secs / 60)
                 try:
                     await asyncio.sleep(max(0.0, secs))
                 except asyncio.CancelledError:
