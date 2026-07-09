@@ -1188,8 +1188,12 @@ class DiscordAlerter:
                 conf   = p.get("confidence", 0)
                 ev     = p.get("net_ev")
                 ev_str = f" | EV **{ev:+.1f}¢**" if ev is not None else ""
-                action = p.get("action", "HOLD")
-                act_s  = "🟢 Bot would BUY" if action == "BUY" else "⏸ Bot is watching (HOLD)"
+                if conf >= 88:
+                    act_s = "🔥 BID MAX"
+                elif conf >= 80:
+                    act_s = "🟢 BID"
+                else:
+                    act_s = "👁 WATCH"
                 reason = (p.get("reasoning") or "")[:120]
                 pick_lines.append(
                     f"{p_icon} **{p_label}** — {title}\n"

@@ -136,13 +136,13 @@ class DailyStats:
         return active
 
     def best_pick(self) -> Optional[Dict]:
-        """Return the highest-confidence non-expired evaluation of the day."""
-        active = self._active_evaluations()
+        """Return the highest-confidence non-expired BUY evaluation of the day."""
+        active = [e for e in self._active_evaluations() if e.get("action", "").upper() == "BUY"]
         return active[0] if active else None
 
     def best_pick_by_platform(self) -> Dict[str, Optional[Dict]]:
-        """Return the best non-expired pick per platform."""
-        active = self._active_evaluations()
+        """Return the best non-expired BUY pick per platform. HOLDs are never surfaced."""
+        active = [e for e in self._active_evaluations() if e.get("action", "").upper() == "BUY"]
         kal  = next((e for e in active if e.get("platform", "kalshi") == "kalshi"), None)
         poly = next((e for e in active if e.get("platform") == "polymarket"), None)
         return {"kalshi": kal, "polymarket": poly}

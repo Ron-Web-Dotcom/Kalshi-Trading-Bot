@@ -230,6 +230,7 @@ async def make_decision_for_market(
         async def _ai_task():
             try:
                 decision = await engine.decide(market, signals, prebuilt_context=context)
+                # Always return the full dict — confidence gate applied later
                 return {
                     "ticker":     ticker,
                     "action":     decision.action,
@@ -239,7 +240,7 @@ async def make_decision_for_market(
                     "model":      decision.model,
                     "true_prob":  decision.true_prob,
                     "net_ev":     decision.net_ev,
-                } if engine.should_trade(decision) else None
+                }
             except Exception as _api_err:
                 err = str(_api_err)
                 if "credit balance" in err or "insufficient" in err.lower() or "402" in err:
@@ -304,16 +305,6 @@ async def make_decision_for_market(
 
 
 def _log_hold(market: Dict, context: str, min_conf: float, signals: List[Dict], confidence: float = 0) -> None:
-    """Log a HOLD — also records near-misses for the daily digest."""
+    """Log a HOLD — skipped silently, never surfaces in best pick."""
     ticker = market.get("ticker", "?")
-    try:
-        from src.utils.daily_stats import stats as daily_stats
-        daily_stats.record_evaluation(
-            ticker=ticker, action="HOLD", side="yes", confidence=confidence,
-            net_ev=None, true_prob=None, reasoning="both engines: HOLD",
-            title=market.get("title", ""), platform=market.get("platform", "kalshi"),
-            close_time=market.get("close_time", "") or market.get("expiration_time", ""),
-        )
-    except Exception as e:
-        logger.debug("daily_stats record error: %s", e)
-    logger.debug("⬜ HOLD  %s  (both engines below threshold)", ticker)
+    logger.debug("⬜ SKIP  %s  conf=%.0f%% (below %.0f%% threshold)", ticker, confidence, min_conf)
