@@ -1,7 +1,7 @@
 """Phase 7 — risk management: size limits, daily loss, cooldown, exposure."""
 
 import logging
-from datetime import datetime, timezone, date
+from datetime import datetime, timedelta, timezone, date
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger("trading.risk")
@@ -103,7 +103,11 @@ class RiskManager:
 
     def record_trade(self, ticker: str, pnl: float = 0.0, platform: str = "kalshi"):
         """Record a completed trade for cooldown tracking."""
-        self._last_trade_time[(ticker, platform)] = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        self._last_trade_time[(ticker, platform)] = now
+        # Prune stale entries to prevent unbounded growth over thousands of tickers
+        cutoff = now - timedelta(seconds=self.cfg.cooldown_between_trades_seconds * 2)
+        self._last_trade_time = {k: v for k, v in self._last_trade_time.items() if v > cutoff}
 
     def record_result(self, ticker: str, pnl: float, platform: str = "kalshi"):
         """Record a resolved trade result for daily loss circuit breaker."""

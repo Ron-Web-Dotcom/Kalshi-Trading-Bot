@@ -24,9 +24,12 @@ class DatabaseManager:
             async with aiosqlite.connect(self.db_path) as db:
                 # WAL mode: allows concurrent readers while writer is active
                 await db.execute("PRAGMA journal_mode=WAL")
-                await db.execute("PRAGMA busy_timeout=5000")  # wait up to 5s on lock
-                await db.execute("PRAGMA synchronous=NORMAL")  # safe + faster than FULL
+                await db.execute("PRAGMA busy_timeout=5000")    # wait up to 5s on lock
+                await db.execute("PRAGMA synchronous=NORMAL")   # safe + faster than FULL
                 await db.execute("PRAGMA wal_autocheckpoint=1000")  # checkpoint every 1000 pages
+                await db.execute("PRAGMA cache_size=-8000")     # 8 MB page cache (negative = KB)
+                await db.execute("PRAGMA mmap_size=67108864")   # 64 MB memory-mapped I/O
+                await db.execute("PRAGMA temp_store=MEMORY")    # temp tables in RAM not disk
                 await db.executescript("""
                     CREATE TABLE IF NOT EXISTS markets (
                         ticker TEXT PRIMARY KEY,
@@ -209,6 +212,41 @@ class DatabaseManager:
             (today + "%",)
         )
         return row.get("total") or 0.0 if row else 0.0
+
+    async def cleanup_old_rows(self, days: int = 90) -> None:
+        """
+        Prune rows older than `days` from high-growth tables.
+        Keeps trade_logs forever (permanent record).
+        Runs VACUUM after to reclaim freed pages back to the OS.
+        Call once on startup and once weekly.
+        """
+        cutoff = f"datetime('now', '-{days} days')"
+        pruned = {}
+        async with aiosqlite.connect(self.db_path) as db:
+            for table, col in [
+                ("ai_decisions",      "decided_at"),
+                ("paper_signals",     "created_at"),
+                ("performance_metrics","recorded_at"),
+                ("audit_log",         "logged_at"),
+            ]:
+                try:
+                    cur = await db.execute(
+                        f"DELETE FROM {table} WHERE {col} < {cutoff}"
+                    )
+                    pruned[table] = cur.rowcount
+                except Exception as e:
+                    logger.warning("cleanup_old_rows %s: %s", table, e)
+            await db.commit()
+        total = sum(pruned.values())
+        if total:
+            logger.info("DB cleanup: removed %d old rows %s", total, pruned)
+            # VACUUM reclaims freed pages — only worth doing when rows were actually deleted
+            try:
+                async with aiosqlite.connect(self.db_path) as db:
+                    await db.execute("VACUUM")
+                logger.info("DB VACUUM complete")
+            except Exception as e:
+                logger.warning("DB VACUUM failed: %s", e)
 
     async def insert(self, table: str, data: Dict[str, Any]) -> int:
         cols = ", ".join(data.keys())

@@ -133,10 +133,13 @@ class ExternalMarketComparator:
         self.polymarket = PolymarketClient()
         self.db         = db
         self._poly_cache: List[Dict] = []
+        self._poly_cache_time: float = 0.0
 
     async def _ensure_poly(self):
-        if not self._poly_cache:
+        import time
+        if not self._poly_cache or (time.time() - self._poly_cache_time) > 1800:
             self._poly_cache = await self.polymarket.get_markets(limit=100)
+            self._poly_cache_time = time.time()
 
     async def compare_and_log(self, kalshi_markets: List[Dict]) -> List[Dict]:
         """

@@ -93,6 +93,7 @@ class TradingBot:
         self._print_startup_banner()
         logger.info("Initializing database...")
         await self.db.initialize()
+        await self.db.cleanup_old_rows(days=90)
         logger.info("Running initial market ingestion...")
         try:
             count = await run_ingestion(self.db)
