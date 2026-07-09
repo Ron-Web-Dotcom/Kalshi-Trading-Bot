@@ -54,6 +54,14 @@ POLY_TAG_SLUGS = [
     "breaking", "mentions", "news",
     # Sports — major leagues
     "nfl", "nba", "mlb", "nhl", "ufc", "soccer", "tennis", "golf",
+    # Sports — player props & team props
+    "player-props", "team-props", "props",
+    "nfl-player-props", "nba-player-props", "mlb-player-props",
+    "nhl-player-props", "nfl-team-props", "nba-team-props",
+    "passing-yards", "rushing-yards", "receiving-yards", "touchdowns",
+    "points-scored", "rebounds", "assists", "strikeouts", "home-runs",
+    "anytime-touchdown", "first-touchdown", "spread", "over-under",
+    "moneyline", "first-basket", "double-double", "triple-double",
     # Sports — soccer sub-categories
     "world-cup", "champions-league", "premier-league", "la-liga",
     "bundesliga", "serie-a", "ligue-1", "mls", "copa-america",
@@ -106,6 +114,13 @@ KALSHI_CATEGORY_PATTERNS = [
     "boxing", "wrestling", "rugby", "cricket", "wnba", "pga",
     "college", "ncaa", "esports", "olympics", "world cup", "champions",
     "premier league", "la liga", "bundesliga", "serie a",
+    # Player props & team props
+    "passing yards", "rushing yards", "receiving yards", "touchdowns",
+    "points scored", "rebounds", "assists", "strikeouts", "home run",
+    "anytime touchdown", "first touchdown", "first basket", "spread",
+    "over/under", "moneyline", "double double", "triple double",
+    "player prop", "team prop", "will score", "total points",
+    "will hit", "will throw", "will record",
     # Crypto sub-categories
     "bitcoin", "ethereum", "solana", "defi", "nft", "altcoin",
     # Economics / Finance sub-categories
