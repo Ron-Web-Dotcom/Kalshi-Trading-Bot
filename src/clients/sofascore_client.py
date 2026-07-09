@@ -439,7 +439,278 @@ class SofaScoreClient:
             logger.debug("SofaScore get_player_stats error: %s", exc)
             return {}
 
-    # ── 7. Master context builder ─────────────────────────────────────────────
+    # ── 7. Team form statistics ───────────────────────────────────────────────
+
+    async def get_team_form_stats(self, team_id: int) -> Dict:
+        """
+        Compute advanced form statistics from a team's last 10 events.
+
+        Fetches GET /team/{team_id}/events/last/0 and parses each event to
+        produce:
+          - over_2_5_goals_pct: % of games with 3+ total goals
+          - first_to_score_pct: % of games where this team scored first
+          - first_half_winner_pct: % of games this team won the first half
+          - clean_sheet_pct: % of games with no goals conceded
+          - avg_goals_scored: average goals scored per game
+          - avg_goals_conceded: average goals conceded per game
+          - current_win_streak: consecutive wins ending at the most recent game
+          - current_unbeaten_streak: consecutive non-losses ending at the most recent game
+
+        Returns empty dict on any error.
+        """
+        try:
+            data = await self._get(f"/team/{team_id}/events/last/0")
+            if not data:
+                return {}
+
+            events = (data.get("events") or [])[-10:]
+            if not events:
+                return {}
+
+            over_2_5 = 0
+            first_to_score = 0
+            first_half_wins = 0
+            clean_sheets = 0
+            goals_scored_total = 0
+            goals_conceded_total = 0
+            n = len(events)
+
+            # Streaks — process from most-recent (last element) backwards
+            current_win_streak = 0
+            current_unbeaten_streak = 0
+
+            results_newest_first: List[str] = []  # "W", "D", "L"
+
+            for ev in events:
+                home = ev.get("homeTeam") or {}
+                away = ev.get("awayTeam") or {}
+                h_score_obj = ev.get("homeScore") or {}
+                a_score_obj = ev.get("awayScore") or {}
+                h_score = h_score_obj.get("current") or 0
+                a_score = a_score_obj.get("current") or 0
+
+                is_home = home.get("id") == team_id
+                our_score = h_score if is_home else a_score
+                their_score = a_score if is_home else h_score
+
+                total_goals = h_score + a_score
+                if total_goals >= 3:
+                    over_2_5 += 1
+
+                if their_score == 0:
+                    clean_sheets += 1
+
+                goals_scored_total += our_score
+                goals_conceded_total += their_score
+
+                # First half winner (period scores)
+                h1_h = (h_score_obj.get("period1") or 0)
+                h1_a = (a_score_obj.get("period1") or 0)
+                our_h1 = h1_h if is_home else h1_a
+                their_h1 = h1_a if is_home else h1_h
+                if our_h1 > their_h1:
+                    first_half_wins += 1
+
+                # First to score — incident data would be ideal but we use
+                # period1 score as a proxy: if period1 > 0 for this team and
+                # period1 == 0 for opponent we scored first; otherwise skip
+                if our_h1 > 0 and their_h1 == 0:
+                    first_to_score += 1
+                elif our_h1 == 0 and their_h1 > 0:
+                    pass  # opponent scored first; no increment
+                # both scored or neither — ambiguous; skip
+
+                winner = ev.get("winnerCode")
+                if winner == 3:
+                    result = "D"
+                elif (winner == 1 and is_home) or (winner == 2 and not is_home):
+                    result = "W"
+                else:
+                    result = "L"
+                results_newest_first.append(result)
+
+            # results_newest_first[-1] is the most-recent game because events
+            # comes sorted oldest-first from the API
+            results_newest_first.reverse()  # now index 0 = most-recent
+
+            for r in results_newest_first:
+                if r == "W":
+                    current_win_streak += 1
+                    current_unbeaten_streak += 1
+                elif r == "D":
+                    current_win_streak = 0  # streak broken for wins
+                    current_unbeaten_streak += 1
+                else:
+                    break  # loss ends both streaks
+
+            # first_to_score denominator: only games where period1 was decisive
+            fts_denom = sum(
+                1 for ev in events
+                if (
+                    (ev.get("homeScore") or {}).get("period1") or 0
+                ) != (
+                    (ev.get("awayScore") or {}).get("period1") or 0
+                )
+            )
+
+            def _pct(num: int, denom: int) -> float:
+                return round(100.0 * num / denom, 1) if denom else 0.0
+
+            return {
+                "games_analyzed": n,
+                "over_2_5_goals_pct": _pct(over_2_5, n),
+                "first_to_score_pct": _pct(first_to_score, fts_denom) if fts_denom else None,
+                "first_half_winner_pct": _pct(first_half_wins, n),
+                "clean_sheet_pct": _pct(clean_sheets, n),
+                "avg_goals_scored": round(goals_scored_total / n, 2),
+                "avg_goals_conceded": round(goals_conceded_total / n, 2),
+                "current_win_streak": current_win_streak,
+                "current_unbeaten_streak": current_unbeaten_streak,
+            }
+        except Exception as exc:
+            logger.debug("SofaScore get_team_form_stats error: %s", exc)
+            return {}
+
+    # ── 8. H2H aggregated stats ───────────────────────────────────────────────
+
+    async def get_h2h_stats(self, event_id: int) -> Dict:
+        """
+        Fetch and aggregate head-to-head statistics for an event's two teams.
+
+        Calls GET /event/{event_id}/h2h and parses teamDuel stats (win counts,
+        draws). Also scans the last-10 h2h events to compute:
+          - home_wins: wins for the home team of the *current* event
+          - away_wins: wins for the away team of the *current* event
+          - draws
+          - avg_goals_per_game
+          - both_teams_scored_pct: % of h2h games where both teams scored
+
+        Returns empty dict on any error.
+        """
+        try:
+            data = await self._get(f"/event/{event_id}/h2h")
+            if not data:
+                return {}
+
+            # teamDuel block gives aggregate win/draw counts from SofaScore
+            team_duel = data.get("teamDuel") or {}
+            home_wins_td = team_duel.get("homeWins") or 0
+            away_wins_td = team_duel.get("awayWins") or 0
+            draws_td = team_duel.get("draws") or 0
+
+            # Also inspect the events list for finer stats
+            events = (data.get("events") or [])[:10]
+            total_goals = 0
+            bts_count = 0  # both teams scored
+
+            for ev in events:
+                h = (ev.get("homeScore") or {}).get("current") or 0
+                a = (ev.get("awayScore") or {}).get("current") or 0
+                total_goals += h + a
+                if h > 0 and a > 0:
+                    bts_count += 1
+
+            n = len(events)
+            avg_goals = round(total_goals / n, 2) if n else 0.0
+
+            def _pct(num: int, denom: int) -> float:
+                return round(100.0 * num / denom, 1) if denom else 0.0
+
+            return {
+                "home_wins": home_wins_td,
+                "away_wins": away_wins_td,
+                "draws": draws_td,
+                "avg_goals_per_game": avg_goals,
+                "both_teams_scored_pct": _pct(bts_count, n),
+                "games_analyzed": n,
+            }
+        except Exception as exc:
+            logger.debug("SofaScore get_h2h_stats error: %s", exc)
+            return {}
+
+    # ── 9. Goal distribution ─────────────────────────────────────────────────
+
+    async def get_goal_distribution(self, team_id: int) -> Dict:
+        """
+        Compute when a team typically scores across their last 10 events.
+
+        Fetches incident data (GET /event/{event_id}/incidents) for each of
+        the team's last 10 events and buckets goals by match minute:
+          - early (0-30 min)
+          - mid (31-60 min)
+          - late (61-90 min)
+
+        Returns empty dict on any error.
+        """
+        try:
+            data = await self._get(f"/team/{team_id}/events/last/0")
+            if not data:
+                return {}
+
+            events = (data.get("events") or [])[-10:]
+            if not events:
+                return {}
+
+            early = mid = late = 0
+
+            async def _fetch_incidents(ev: Dict) -> None:
+                nonlocal early, mid, late
+                ev_id = ev.get("id")
+                if not ev_id:
+                    return
+                inc_data = await self._get(f"/event/{ev_id}/incidents")
+                if not inc_data:
+                    return
+
+                home = ev.get("homeTeam") or {}
+                is_home = home.get("id") == team_id
+
+                incidents = inc_data.get("incidents") or []
+                for inc in incidents:
+                    # Only goal incidents for this team
+                    if inc.get("incidentType") not in ("goal", "penalty"):
+                        continue
+                    # SofaScore: isHome True if the scoring team is home
+                    inc_is_home = inc.get("isHome", None)
+                    if inc_is_home is None:
+                        # Fallback: check team field
+                        team = (inc.get("team") or {})
+                        inc_is_home = team.get("id") == home.get("id")
+                    if inc_is_home != is_home:
+                        continue  # not our team's goal
+
+                    minute = inc.get("time") or 0
+                    if minute <= 30:
+                        early += 1
+                    elif minute <= 60:
+                        mid += 1
+                    else:
+                        late += 1
+
+            await asyncio.gather(
+                *[_fetch_incidents(ev) for ev in events],
+                return_exceptions=True,
+            )
+
+            total = early + mid + late
+
+            def _pct(num: int) -> float:
+                return round(100.0 * num / total, 1) if total else 0.0
+
+            return {
+                "early_goals_0_30": early,
+                "mid_goals_31_60": mid,
+                "late_goals_61_90": late,
+                "total_goals": total,
+                "early_pct": _pct(early),
+                "mid_pct": _pct(mid),
+                "late_pct": _pct(late),
+            }
+        except Exception as exc:
+            logger.debug("SofaScore get_goal_distribution error: %s", exc)
+            return {}
+
+    # ── 10. Master context builder ────────────────────────────────────────────
 
     async def build_match_context(self, home_team: str, away_team: str) -> str:
         """
@@ -465,16 +736,26 @@ class SofaScoreClient:
             period = event.get("period", "")
             tournament = event.get("tournament", "")
 
-            # Fetch stats and H2H in parallel
-            stats, h2h = await asyncio.gather(
+            home_id = event.get("homeTeamId")
+            away_id = event.get("awayTeamId")
+
+            async def _empty_dict() -> Dict:
+                return {}
+
+            # Fetch everything in parallel
+            gather_results = await asyncio.gather(
                 self.get_event_stats(event_id),
                 self.get_h2h(event_id),
+                self.get_h2h_stats(event_id),
+                self.get_team_form_stats(home_id) if home_id else _empty_dict(),
+                self.get_team_form_stats(away_id) if away_id else _empty_dict(),
                 return_exceptions=True,
             )
-            if isinstance(stats, Exception):
-                stats = {}
-            if isinstance(h2h, Exception):
-                h2h = []
+            stats = gather_results[0] if not isinstance(gather_results[0], Exception) else {}
+            h2h = gather_results[1] if not isinstance(gather_results[1], Exception) else []
+            h2h_stats = gather_results[2] if not isinstance(gather_results[2], Exception) else {}
+            home_form = gather_results[3] if not isinstance(gather_results[3], Exception) else {}
+            away_form = gather_results[4] if not isinstance(gather_results[4], Exception) else {}
 
             # Header line
             time_part = f"{game_time} | " if game_time else ""
@@ -518,8 +799,20 @@ class SofaScoreClient:
                 if extras:
                     lines.append(" | ".join(extras))
 
-            # H2H block
-            if h2h:
+            # H2H block — qualitative record line using h2h_stats (teamDuel aggregates)
+            # plus recent score breakdown from h2h event list
+            if h2h_stats:
+                hw = h2h_stats.get("home_wins", 0)
+                aw = h2h_stats.get("away_wins", 0)
+                dr = h2h_stats.get("draws", 0)
+                n_h2h = hw + aw + dr
+                avg_g = h2h_stats.get("avg_goals_per_game", 0)
+                bts = h2h_stats.get("both_teams_scored_pct", 0)
+                lines.append(
+                    f"H2H record (last {n_h2h}): {home_name} {hw}-{dr}-{aw} vs {away_name}"
+                    f" (W-D-L) | avg {avg_g} goals/game | both scored {bts}%"
+                )
+            elif h2h:
                 home_wins = sum(1 for m in h2h if m["winner"] == "home")
                 away_wins = sum(1 for m in h2h if m["winner"] == "away")
                 draws = sum(1 for m in h2h if m["winner"] == "draw")
@@ -529,6 +822,7 @@ class SofaScoreClient:
                     f" {away_name} won {away_wins}, Draw {draws}"
                 )
 
+            if h2h:
                 # Recent scores — last 5
                 score_strs = []
                 for m in h2h[:5]:
@@ -541,7 +835,90 @@ class SofaScoreClient:
                     if hs is not None and as_ is not None:
                         score_strs.append(f"{mh} {hs}-{as_} {ma} ({year})")
                 if score_strs:
-                    lines.append("Recent scores: " + ", ".join(score_strs))
+                    lines.append("Recent H2H scores: " + ", ".join(score_strs))
+
+            # Team form stats
+            def _fmt_form(name: str, form: Dict) -> Optional[str]:
+                if not form:
+                    return None
+                parts = []
+                o25 = form.get("over_2_5_goals_pct")
+                fts = form.get("first_to_score_pct")
+                h1w = form.get("first_half_winner_pct")
+                cs = form.get("clean_sheet_pct")
+                avg_s = form.get("avg_goals_scored")
+                avg_c = form.get("avg_goals_conceded")
+                n = form.get("games_analyzed", 10)
+                if o25 is not None:
+                    parts.append(f"over 2.5G {o25}%")
+                if fts is not None:
+                    parts.append(f"scored 1st {fts}%")
+                if h1w is not None:
+                    parts.append(f"1H wins {h1w}%")
+                if cs is not None:
+                    parts.append(f"clean sheets {cs}%")
+                if avg_s is not None and avg_c is not None:
+                    parts.append(f"avg {avg_s} scored / {avg_c} conceded")
+                return f"{name} (last {n}): " + ", ".join(parts) if parts else None
+
+            home_form_line = _fmt_form(home_name, home_form)
+            away_form_line = _fmt_form(away_name, away_form)
+            if home_form_line:
+                lines.append(home_form_line)
+            if away_form_line:
+                lines.append(away_form_line)
+
+            # Streaks
+            streak_parts = []
+            if home_form:
+                ws = home_form.get("current_win_streak", 0)
+                ubs = home_form.get("current_unbeaten_streak", 0)
+                if ws >= 3:
+                    streak_parts.append(f"{home_name}: {ws}W win streak")
+                elif ubs >= 3:
+                    streak_parts.append(f"{home_name}: {ubs}-game unbeaten run")
+            if away_form:
+                ws = away_form.get("current_win_streak", 0)
+                ubs = away_form.get("current_unbeaten_streak", 0)
+                if ws >= 3:
+                    streak_parts.append(f"{away_name}: {ws}W win streak")
+                elif ubs >= 3:
+                    streak_parts.append(f"{away_name}: {ubs}-game unbeaten run")
+            if streak_parts:
+                lines.append("Streaks: " + " | ".join(streak_parts))
+
+            # Betting insight line — surface the strongest edges
+            insights: List[str] = []
+            # Over/under 2.5 edge
+            h_o25 = home_form.get("over_2_5_goals_pct") if home_form else None
+            a_o25 = away_form.get("over_2_5_goals_pct") if away_form else None
+            if h2h_stats and h2h_stats.get("avg_goals_per_game", 0) >= 3.0:
+                insights.append(
+                    f"H2H avg {h2h_stats['avg_goals_per_game']} goals — Over 2.5 edge"
+                )
+            elif h_o25 is not None and a_o25 is not None:
+                combined_o25 = (h_o25 + a_o25) / 2
+                if combined_o25 >= 70:
+                    insights.append(f"Both teams over 2.5G rate {combined_o25:.0f}% — Over 2.5 edge")
+                elif combined_o25 <= 30:
+                    insights.append(f"Both teams over 2.5G rate {combined_o25:.0f}% — Under 2.5 edge")
+            # Clean sheet / BTTS edge
+            if h2h_stats:
+                bts_pct = h2h_stats.get("both_teams_scored_pct", 0)
+                if bts_pct >= 70:
+                    insights.append(f"Both teams scored in {bts_pct}% of H2H — BTTS Yes edge")
+                elif bts_pct <= 25:
+                    insights.append(f"Both teams scored in only {bts_pct}% of H2H — BTTS No edge")
+            # First-to-score domination
+            h_fts = home_form.get("first_to_score_pct") if home_form else None
+            if h_fts is not None and h_fts >= 80:
+                insights.append(f"{home_name} opens scoring in {h_fts}% of games")
+            a_fts = away_form.get("first_to_score_pct") if away_form else None
+            if a_fts is not None and a_fts >= 80:
+                insights.append(f"{away_name} opens scoring in {a_fts}% of games")
+
+            if insights:
+                lines.append("Betting edge: " + " | ".join(insights))
 
             return "\n".join(lines)
 
