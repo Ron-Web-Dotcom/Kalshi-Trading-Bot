@@ -183,11 +183,17 @@ class RiskManager:
             logger.warning("check_daily_loss_lockout: error checking daily loss: %s", e)
 
         # Check 2: consecutive loss streak
+        # Streak resets at 3am ET (bot sleep/rest period) — fresh start each morning
         try:
+            now_et = datetime.now(_ET)
+            today_3am = now_et.replace(hour=3, minute=0, second=0, microsecond=0)
+            # Only count losses that happened AFTER today's 3am reset window
+            streak_since = today_3am.isoformat()
             rows = await db.fetchall(
                 "SELECT result FROM trade_logs WHERE result IN ('WIN','LOSS') "
+                "AND resolved_at >= ? "
                 "ORDER BY resolved_at DESC LIMIT ?",
-                (max_streak,),
+                (streak_since, max_streak),
             )
             if rows and len(rows) >= max_streak:
                 all_losses = all(r.get("result") == 'LOSS' for r in rows)
