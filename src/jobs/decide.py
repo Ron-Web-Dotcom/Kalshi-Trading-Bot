@@ -207,6 +207,11 @@ async def make_decision_for_market(
         logger.debug("SKIP low-volume %s vol=%.0f", market.get("ticker","?")[:40], volume)
         return None
 
+    # Long-shot guard — prices below 15¢ are near-impossible bets, skip them
+    if yes_ask > 0 and yes_ask < 15:
+        logger.debug("SKIP long-shot %s yes_ask=%.0f¢", market.get("ticker","?")[:40], yes_ask)
+        return None
+
     # Override min_confidence for risky market types
     if min_confidence is None:
         if is_weather or is_esports:
