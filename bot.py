@@ -627,7 +627,6 @@ class TradingBot:
                         "SELECT p.* FROM positions p "
                         "LEFT JOIN markets m ON m.ticker = p.ticker "
                         "WHERE p.status='open' "
-                        "AND (m.close_time IS NULL OR m.close_time > datetime('now')) "
                         "ORDER BY p.opened_at DESC"
                     )
                     open_pos = [dict(r) for r in (open_pos or [])]
@@ -644,15 +643,13 @@ class TradingBot:
                     )
                     unrealised_pnl = float((_unreal_row or {}).get("pnl", 0.0) or 0.0)
 
-                    # Only show bids for markets closing TODAY (ET) — no future-day or stale entries
-                    _et_today_sum = _now_et_sum().date().isoformat()
+                    # Bets placed since last check-in — all open positions opened in this period
                     new_pos = await self.db.fetchall(
                         "SELECT p.* FROM positions p "
                         "LEFT JOIN markets m ON m.ticker = p.ticker "
                         "WHERE p.status='open' AND p.opened_at >= ? "
-                        "AND date(m.close_time) = ? "
                         "ORDER BY p.opened_at DESC",
-                        (last_summary_at, _et_today_sum)
+                        (last_summary_at,)
                     )
                     new_pos = [dict(r) for r in (new_pos or [])]
 
