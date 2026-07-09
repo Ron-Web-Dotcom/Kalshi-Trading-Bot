@@ -1120,6 +1120,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                                 confidence=float(decision.get("confidence", 0)),
                                 net_ev=net_ev, score=best.get("_pre_score", 0),
                                 reasoning=(decision.get("reasoning") or "")[:200],
+                                title=market.get("title", "") or ticker,
                             )
                             # Mark this traded market as a live event in the heartbeat
                             _traded_market = dict(market)

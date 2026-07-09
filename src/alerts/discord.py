@@ -1286,9 +1286,10 @@ class DiscordAlerter:
         if top_opps:
             lines = []
             for i, o in enumerate(top_opps[:3], 1):
-                ev_str = f" EV={o['net_ev']:+.1f}¢" if o.get("net_ev") is not None else ""
+                ev_str  = f" EV={o['net_ev']:+.1f}¢" if o.get("net_ev") is not None else ""
+                label   = self._display_ticker(o.get("ticker", ""), o.get("title", "") or "")[:80]
                 lines.append(
-                    f"{i}. `{o['ticker']}` {(o.get('side') or '').upper()} — "
+                    f"{i}. **{label}** {(o.get('side') or '').upper()} — "
                     f"conf={o.get('confidence',0):.0f}%{ev_str}\n"
                     f"   _{(o.get('reasoning') or '')[:100]}_"
                 )

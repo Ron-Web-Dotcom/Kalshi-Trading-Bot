@@ -366,14 +366,23 @@ class TradingBot:
                     )
                     open_n = sum((r.get("n") or 0) for r in (open_rows or []))
                     open_by_platform = {(r.get("platform") or "kalshi"): r.get("n", 0) for r in (open_rows or [])}
-                    # In-play: open positions whose market closes today (ET)
-                    _et_today_str = _now_et().strftime("%Y-%m-%d")
+                    # In-play: open positions whose market closes today ET
+                    # close_time in DB is UTC ISO — compare against tonight's ET midnight as UTC
+                    _tonight_et_utc = (
+                        _now_et().replace(hour=23, minute=59, second=59, microsecond=0)
+                        .astimezone(__import__("datetime").timezone.utc)
+                        .strftime("%Y-%m-%dT%H:%M:%S")
+                    )
+                    _now_utc_str = (
+                        __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+                        .strftime("%Y-%m-%dT%H:%M:%S")
+                    )
                     inplay_row = await self.db.fetchone(
                         "SELECT COUNT(*) as n FROM positions p "
-                        "JOIN markets m ON m.ticker = p.ticker "
+                        "LEFT JOIN markets m ON m.ticker = p.ticker "
                         "WHERE p.status='open' "
-                        "AND date(m.close_time) = ?",
-                        (_et_today_str,)
+                        "AND (m.close_time IS NULL OR (m.close_time > ? AND m.close_time <= ?))",
+                        (_now_utc_str, _tonight_et_utc)
                     )
                     live_open_n = (inplay_row or {}).get("n") or 0
                     # Also grab live slot manager count for the live_slots param

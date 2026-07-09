@@ -197,11 +197,13 @@ class DailyStats:
         net_ev: Optional[float],
         score: float,
         reasoning: str,
+        title: str = "",
     ) -> None:
         """Increment trades_executed and maintain top 5 opportunities by score."""
         self.trades_executed += 1
         entry = {
             "ticker":     ticker,
+            "title":      title,
             "score":      score,
             "confidence": confidence,
             "net_ev":     net_ev,
