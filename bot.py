@@ -366,25 +366,30 @@ class TradingBot:
                     )
                     open_n = sum((r.get("n") or 0) for r in (open_rows or []))
                     open_by_platform = {(r.get("platform") or "kalshi"): r.get("n", 0) for r in (open_rows or [])}
-                    # In-play: open positions whose market closes today ET
-                    # close_time in DB is UTC ISO — compare against tonight's ET midnight as UTC
-                    _tonight_et_utc = (
-                        _now_et().replace(hour=23, minute=59, second=59, microsecond=0)
-                        .astimezone(__import__("datetime").timezone.utc)
-                        .strftime("%Y-%m-%dT%H:%M:%S")
-                    )
-                    _now_utc_str = (
-                        __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
-                        .strftime("%Y-%m-%dT%H:%M:%S")
-                    )
-                    inplay_row = await self.db.fetchone(
-                        "SELECT COUNT(*) as n FROM positions p "
+                    # In-play: open positions whose market closes TODAY in Eastern Time
+                    # Fetch all open positions with close_time, filter in Python using ET
+                    _inplay_rows = await self.db.fetchall(
+                        "SELECT p.ticker, m.close_time FROM positions p "
                         "LEFT JOIN markets m ON m.ticker = p.ticker "
-                        "WHERE p.status='open' "
-                        "AND (m.close_time IS NULL OR (m.close_time > ? AND m.close_time <= ?))",
-                        (_now_utc_str, _tonight_et_utc)
+                        "WHERE p.status='open'"
                     )
-                    live_open_n = (inplay_row or {}).get("n") or 0
+                    _et_today    = _now_et().date()
+                    _et_midnight = _now_et()
+                    live_open_n  = 0
+                    for _ir in (_inplay_rows or []):
+                        _ct = (_ir.get("close_time") or "").strip()
+                        if not _ct:
+                            continue
+                        try:
+                            _cd = datetime.fromisoformat(_ct.replace("Z", "+00:00"))
+                            if _cd.tzinfo is None:
+                                from datetime import timezone as _tz_ip
+                                _cd = _cd.replace(tzinfo=_tz_ip.utc)
+                            _cd_et = _cd.astimezone(_ET)
+                            if _cd_et.date() == _et_today and _cd_et > _et_midnight:
+                                live_open_n += 1
+                        except Exception:
+                            pass
                     # Also grab live slot manager count for the live_slots param
                     from src.jobs.live_market_manager import _live_slots as _hb_ls
                     live_tickers = set(_hb_ls.keys())
