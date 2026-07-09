@@ -1358,8 +1358,14 @@ class TradingBot:
                             yes_ask    = float(row.get("yes_ask") or row.get("last_price") or 0)
                             close_time = row.get("close_time")
                             # Price heuristic (near 0 or 100) only applied after market has closed
-                            _now_utc = datetime.utcnow().isoformat()
-                            _market_closed = close_time and close_time <= _now_utc
+                            try:
+                                from datetime import timezone as _tz
+                                _ct = close_time and datetime.fromisoformat(str(close_time).replace("Z", "+00:00"))
+                                if _ct and _ct.tzinfo is None:
+                                    _ct = _ct.replace(tzinfo=_tz.utc)
+                                _market_closed = bool(_ct and _ct <= datetime.now(_tz.utc))
+                            except Exception:
+                                _market_closed = False
                             if status == "closed" or (_market_closed and (yes_ask <= 5 or yes_ask >= 95)):
                                 actual = "yes" if yes_ask >= 95 else "no" if yes_ask <= 5 else None
                                 if actual:

@@ -492,10 +492,6 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     # Build all coroutines — wiki lookups for each entity name
     wiki_coros = [_wikipedia(e) for e in entities[:2]]
 
-    async def _skip(name: str, fallback):
-        """Return fallback immediately if source is disabled by health check."""
-        return fallback
-
     async def _guarded(name, coro_factory, fallback):
         if name in DISABLED_SOURCES:
             return fallback
