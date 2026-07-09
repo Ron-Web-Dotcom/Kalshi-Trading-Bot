@@ -10,6 +10,8 @@ _ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.jobs.trade")
 
+_lockout_last_alerted: float = 0.0  # module-level — survives across cycles
+
 
 @dataclass
 class TradingResults:
@@ -99,14 +101,17 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         logger.warning("RISK LOCKOUT: %s", lockout_reason)
         # Only alert once per lockout — not every 60s cycle
         import time as _time
-        _lockout_cache = getattr(run_trading_cycle, "_lockout_alerted", 0)
-        if _time.time() - _lockout_cache > 1800:  # re-alert at most every 30 min
-            await discord.send_message(
-                f"🛡️ **Cooling Down — Risk Protection Active**\n"
-                f"{lockout_reason}\n"
-                f"_Bot will resume scanning when the lockout clears. No bets placed during this period._"
-            )
-            run_trading_cycle._lockout_alerted = _time.time()
+        global _lockout_last_alerted
+        if _time.time() - _lockout_last_alerted > 1800:  # re-alert at most every 30 min
+            try:
+                await discord.send_message(
+                    f"🛡️ **Cooling Down — Risk Protection Active**\n"
+                    f"{lockout_reason}\n"
+                    f"_Bot will resume scanning when the lockout clears. No bets placed during this period._"
+                )
+            except Exception:
+                pass
+            _lockout_last_alerted = _time.time()
         await auditor.log(db, "LOCKOUT", reason=lockout_reason)
         await kalshi.close()
         await poly_client.close()
