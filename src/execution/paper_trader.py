@@ -149,6 +149,23 @@ class PaperTrader:
         if self.discord:
             try:
                 exp_profit = (contracts * net_ev / 100) if net_ev is not None else None
+                # BOT ALERT fires first — user sees the signal before the confirmation
+                _bot_pick = {
+                    "ticker":     ticker,
+                    "title":      market_title or ticker,
+                    "platform":   "kalshi",
+                    "side":       side,
+                    "confidence": ai_confidence,
+                    "net_ev":     net_ev,
+                    "action":     "BUY",
+                    "close_time": close_time or "",
+                    "yes_ask":    price_cents if side == "yes" else (100 - price_cents),
+                    "reasoning":  (ai_reasoning or "")[:120],
+                }
+                try:
+                    await self.discord.bot_alert([_bot_pick], mode="📝 PAPER")
+                except Exception:
+                    pass
                 await self.discord.trade_executed(
                     ticker=ticker, action=action, side=side,
                     price=price_cents, contracts=contracts,

@@ -181,11 +181,29 @@ class PolyPaperTrader:
         if self.discord:
             try:
                 exp_profit = (contracts * net_ev / 100) if net_ev is not None else None
+                is_paper = not self.poly_cfg.live_trading_enabled
+                # BOT ALERT fires first — user sees the signal before the confirmation
+                _bot_pick = {
+                    "ticker":     ticker,
+                    "title":      market_title or ticker,
+                    "platform":   "polymarket",
+                    "side":       side,
+                    "confidence": ai_confidence,
+                    "net_ev":     net_ev,
+                    "action":     "BUY",
+                    "close_time": close_time or "",
+                    "yes_ask":    price_cents if side == "yes" else (100 - price_cents),
+                    "reasoning":  (ai_reasoning or "")[:120],
+                }
+                try:
+                    await self.discord.bot_alert([_bot_pick], mode="📝 PAPER" if is_paper else "💰 LIVE")
+                except Exception:
+                    pass
                 await self.discord.trade_executed(
                     ticker=ticker, action=action, side=side,
                     price=price_cents, contracts=contracts,
                     size_dollars=total_cost, pnl=None,
-                    ai_confidence=ai_confidence, paper=not self.poly_cfg.live_trading_enabled,
+                    ai_confidence=ai_confidence, paper=is_paper,
                     signal_source=f"poly:{signal_source}",
                     reasoning=ai_reasoning,
                     net_ev=net_ev,
