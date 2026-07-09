@@ -47,7 +47,7 @@ class HealthChecker:
         url = "https://gamma-api.polymarket.com/markets?limit=1"
         t0 = time.monotonic()
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
                 resp = await client.get(url)
             latency_ms = (time.monotonic() - t0) * 1000
             if resp.status_code == 200:

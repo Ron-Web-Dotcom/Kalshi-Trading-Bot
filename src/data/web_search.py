@@ -400,11 +400,14 @@ async def _polymarket_price(title: str) -> Optional[str]:
     """
     try:
         q = " ".join(title.split()[:7])
-        data = await _get(
-            "https://gamma-api.polymarket.com/markets",
-            params={"search": q, "active": "true", "closed": "false", "limit": 8},
-            as_json=True,
-        )
+        async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS,
+                                     follow_redirects=True, trust_env=False) as _pc:
+            _pr = await _pc.get(
+                "https://gamma-api.polymarket.com/markets",
+                params={"search": q, "active": "true", "closed": "false", "limit": 8},
+            )
+            _pr.raise_for_status()
+            data = _pr.json()
         if not data:
             return None
         raw = data if isinstance(data, list) else data.get("data", [])

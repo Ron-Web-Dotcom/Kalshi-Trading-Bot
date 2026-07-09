@@ -100,7 +100,7 @@ async def _fetch_poly_tag(tag: str, limit: int = 30) -> List[Dict]:
     """Fetch active Polymarket markets for a single tag slug. Returns [] on any error."""
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS,
-                                     follow_redirects=True) as client:
+                                     follow_redirects=True, trust_env=False) as client:
             r = await client.get(
                 f"{_GAMMA_BASE}/markets",
                 params={
@@ -132,7 +132,7 @@ async def _fetch_poly_bulk(limit: int = 500) -> List[Dict]:
     """Bulk fetch without tag filter — catches markets not tagged with a slug."""
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS,
-                                     follow_redirects=True) as client:
+                                     follow_redirects=True, trust_env=False) as client:
             r = await client.get(
                 f"{_GAMMA_BASE}/markets",
                 params={
