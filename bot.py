@@ -1037,6 +1037,7 @@ class TradingBot:
                             _alerted[ticker] = {
                                 "band": int(conf / 10) * 10, "pick": pick,
                                 "alerted_at": now_utc, "result_sent": False,
+                                "hl": _hours_left(pick),
                             }
 
                     # 2. ALL BUY evaluations across every category — sports, crypto,
@@ -1079,17 +1080,24 @@ class TradingBot:
                             min_c = 85                # 85% — further out
                         if conf < min_c:
                             continue
-                        # Re-alert only if not seen today OR price moved ≥5¢
+                        # Re-alert if: never seen, price moved ≥5¢, or timing bucket changed
+                        # (e.g. market moved from "future" → "tomorrow" → "today")
+                        def _hl_bucket(h: float) -> str:
+                            if h <= 24: return "today"
+                            if h <= 48: return "tomorrow"
+                            return "future"
                         prev = _alerted.get(ticker, {})
                         prev_price = float(prev.get("pick", {}).get("price_cents") or prev.get("pick", {}).get("yes_ask") or 0)
                         cur_price  = float(ev.get("price_cents") or ev.get("yes_ask") or 0)
-                        price_moved = cur_price > 0 and prev_price > 0 and abs(cur_price - prev_price) >= 5
-                        if ticker not in _alerted or price_moved:
+                        price_moved    = cur_price > 0 and prev_price > 0 and abs(cur_price - prev_price) >= 5
+                        timing_changed = _hl_bucket(hl) != _hl_bucket(float(prev.get("hl", float("inf"))))
+                        if ticker not in _alerted or price_moved or timing_changed:
                             pick = {**ev, "is_live": hl <= 24}
                             new_picks.append(pick)
                             _alerted[ticker] = {
                                 "band": int(conf / 10) * 10, "pick": pick,
                                 "alerted_at": now_utc, "result_sent": False,
+                                "hl": hl,
                             }
 
                     # Mark picks with open positions as _in_bet so Discord shows "BIDS ACTIVE"
