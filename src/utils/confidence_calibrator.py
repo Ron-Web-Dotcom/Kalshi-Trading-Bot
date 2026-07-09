@@ -20,9 +20,9 @@ import os
 logger = logging.getLogger("trading.calibrator")
 
 _THRESHOLD_FILE  = os.path.join(os.path.dirname(__file__), "..", "..", "data", "conf_threshold.json")
-_DEFAULT         = 65.0
-_FLOOR_CONF      = 60.0
-_CEIL_CONF       = 75.0
+_DEFAULT         = 77.0
+_FLOOR_CONF      = 77.0
+_CEIL_CONF       = 85.0
 _MIN_TRADES      = 20
 _MIN_BAND_TRADES = 5
 _WIN_RATE_HIGH   = 0.60

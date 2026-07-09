@@ -898,8 +898,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             )
         elif best:
             # Enforce tiered confidence by time-to-close:
-            #   today (≤24h)  → 60% min  (rule engine trades ok, time-sensitive)
-            #   2–7 days      → 75% min  (need higher conviction for further-out markets)
+            #   today (≤24h)  → 77% min
+            #   2–7 days      → 77% min  (same bar — no lowering for time-sensitive markets)
             _best_market = best.get("market", {})
             _best_conf   = float(best.get("decision", {}).get("confidence", 0))
             _best_ct     = _best_market.get("close_time", "")
