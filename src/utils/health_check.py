@@ -203,7 +203,7 @@ async def run_health_check(db) -> bool:
     # Kalshi credentials
     async def _kalshi():
         import os
-        return bool(os.environ.get("KALSHI_API_KEY") or os.environ.get("KALSHI_EMAIL"))
+        return bool(os.environ.get("KALSHI_API_KEY_ID") and os.environ.get("KALSHI_PRIVATE_KEY_PATH"))
     await check("Kalshi: credentials present", _kalshi())
 
     # Evaluation record shape — verify price_cents makes it into record_evaluation output

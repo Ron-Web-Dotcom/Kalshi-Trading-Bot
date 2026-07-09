@@ -85,7 +85,6 @@ class PolymarketTradingClient:
             if _PROXY_BASE:
                 # Rotate through ports 10001-10007 — each is a different exit IP
                 port = random.choice(_PROXY_PORTS)
-                # Replace port in proxy URL: swap out whatever port was set
                 import re
                 proxy = re.sub(r':\d+(/?)$', f':{port}\\1', _PROXY_BASE)
                 logger.debug("Polymarket: proxy exit port %d", port)
@@ -94,6 +93,8 @@ class PolymarketTradingClient:
                 timeout=_TIMEOUT,
                 headers={"User-Agent": ua, "Accept": "application/json"},
                 proxy=proxy,
+                # Bypass any system-level proxy (causes 407 on some VPS configs)
+                trust_env=False,
             )
         return self._http
 

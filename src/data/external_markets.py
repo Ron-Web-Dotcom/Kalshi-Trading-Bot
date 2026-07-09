@@ -44,6 +44,7 @@ class PolymarketClient:
                 base_url=GAMMA_API,
                 timeout=15,
                 headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"},
+                trust_env=False,  # bypass system proxy — causes 407 on some VPS configs
             )
         return self._client
 
