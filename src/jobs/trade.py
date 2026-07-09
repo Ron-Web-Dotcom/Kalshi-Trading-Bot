@@ -1099,6 +1099,12 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                             results.total_positions += 1
                             results.total_capital_used += rec.get("total_cost", 0)
                             results.ai_trades += 1
+                            daily_stats.record_trade(
+                                ticker=ticker, side=side,
+                                confidence=float(decision.get("confidence", 0)),
+                                net_ev=net_ev, score=best.get("_pre_score", 0),
+                                reasoning=(decision.get("reasoning") or "")[:200],
+                            )
                             # Mark this traded market as a live event in the heartbeat
                             _traded_market = dict(market)
                             _traded_market["_just_traded"] = True

@@ -146,7 +146,7 @@ class ExternalMarketComparator:
                     trust_env=False,
                 ) as c:
                     r = await c.get(f"{GAMMA_API}/markets",
-                                    params={"active": "true", "closed": "false", "limit": 100})
+                                    params={"active": "true", "closed": "false", "limit": 500})
                     r.raise_for_status()
                     raw = r.json()
                     items = raw if isinstance(raw, list) else raw.get("data", [])
@@ -298,10 +298,10 @@ class ExternalMarketComparator:
         best, best_jaccard, best_overlap = None, 0.0, 0
         for pm in poly_markets:
             overlap, jaccard = _keyword_overlap(kalshi_title, pm["question"])
-            if overlap >= 3 and jaccard > best_jaccard:
+            if overlap >= 2 and jaccard > best_jaccard:
                 best, best_jaccard, best_overlap = pm, jaccard, overlap
-        # Require at least 20% Jaccard similarity to avoid spurious matches
-        if best_jaccard < 0.20:
+        # Require at least 15% Jaccard similarity to avoid spurious matches
+        if best_jaccard < 0.15:
             return None, best_jaccard, best_overlap
         return best, best_jaccard, best_overlap
 

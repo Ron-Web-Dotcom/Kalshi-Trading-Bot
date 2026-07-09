@@ -305,11 +305,13 @@ def _pre_score(market: Dict) -> float:
             if close_dt.tzinfo is None:
                 close_dt = close_dt.replace(tzinfo=timezone.utc)
             hours = (close_dt - datetime.now(_ET)).total_seconds() / 3600
-            if 0.1 < hours <= 1:      time_bonus = 1.6  # very soon
-            elif 1 < hours <= 6:      time_bonus = 2.0  # sweet spot — live/near-live
-            elif 6 < hours <= 24:     time_bonus = 1.5  # today
-            elif 24 < hours <= 72:    time_bonus = 1.2  # this week
-            elif hours <= 0:          time_bonus = 0.0  # already closed
+            if hours <= 0:            time_bonus = 0.0   # already closed — skip
+            elif 0 < hours <= 1:      time_bonus = 2.5   # happening NOW / imminent
+            elif 1 < hours <= 6:      time_bonus = 2.2   # live/near-live today
+            elif 6 < hours <= 24:     time_bonus = 1.8   # today
+            elif 24 < hours <= 72:    time_bonus = 1.1   # next 3 days
+            elif 72 < hours <= 120:   time_bonus = 0.6   # 3-5 days out — deprioritize
+            else:                     time_bonus = 0.3   # >5 days — far future, lowest priority
         except Exception:
             pass
 
