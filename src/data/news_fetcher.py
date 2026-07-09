@@ -19,39 +19,35 @@ _TIMEOUT = httpx.Timeout(8.0)
 
 # Free public RSS feeds — no auth needed
 RSS_FEEDS: Dict[str, str] = {
-    "ap_top":       "https://feeds.apnews.com/rss/apf-topnews",
-    "ap_politics":  "https://feeds.apnews.com/rss/apf-politics",
-    "ap_finance":   "https://feeds.apnews.com/rss/apf-finance",
-    "ap_sports":    "https://feeds.apnews.com/rss/apf-sports",
-    "ap_tech":      "https://feeds.apnews.com/rss/apf-technology",
-    "reuters_top":  "https://feeds.reuters.com/reuters/topNews",
-    "reuters_biz":  "https://feeds.reuters.com/reuters/businessNews",
+    # General news — verified working
     "bbc_world":    "https://feeds.bbci.co.uk/news/world/rss.xml",
     "bbc_biz":      "https://feeds.bbci.co.uk/news/business/rss.xml",
     "bbc_sport":    "https://feeds.bbci.co.uk/sport/rss.xml",
     "bbc_football": "https://feeds.bbci.co.uk/sport/football/rss.xml",
-    "politico":     "https://www.politico.com/rss/politicopicks.xml",
+    "npr_top":      "https://feeds.npr.org/1001/rss.xml",
+    "yahoo_news":   "https://news.yahoo.com/rss/",
+    "google_news":  "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
+    "aljaz":        "https://www.aljazeera.com/xml/rss/all.xml",
+    # Finance / crypto
     "coindesk":     "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    "wsj_markets":  "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
-    # Soccer-specific feeds
-    "the_athletic_soccer": "https://theathletic.com/rss-feed/soccer/",
+    "bing_biz":     "https://www.bing.com/news/search?q=finance&format=rss",
+    # Sports
     "espn_soccer":  "https://www.espn.com/espn/rss/soccer/news",
-    "sky_sports":   "https://www.skysports.com/rss/12040",       # Sky Sports football
-    "goal_com":     "https://www.goal.com/feeds/en/news",
+    "sky_sports":   "https://www.skysports.com/rss/12040",
 }
 
 # Category → feed names to query
 CATEGORY_FEEDS: Dict[str, List[str]] = {
-    "politics":    ["ap_politics", "politico", "bbc_world", "reuters_top"],
-    "economics":   ["ap_finance", "reuters_biz", "wsj_markets", "bbc_biz"],
-    "finance":     ["ap_finance", "reuters_biz", "wsj_markets"],
-    "crypto":      ["coindesk", "ap_finance", "reuters_biz"],
-    "sports":      ["ap_sports", "bbc_sport", "espn_soccer"],
-    "soccer":      ["bbc_football", "espn_soccer", "sky_sports", "goal_com", "ap_sports"],
-    "technology":  ["ap_tech", "reuters_top"],
-    "health":      ["ap_top", "bbc_world"],
-    "weather":     ["ap_top"],
-    "default":     ["ap_top", "reuters_top"],
+    "politics":    ["bbc_world", "npr_top", "yahoo_news", "google_news"],
+    "economics":   ["bbc_biz", "coindesk", "bing_biz", "yahoo_news"],
+    "finance":     ["bbc_biz", "coindesk", "bing_biz"],
+    "crypto":      ["coindesk", "bbc_biz", "yahoo_news"],
+    "sports":      ["bbc_sport", "espn_soccer", "sky_sports"],
+    "soccer":      ["bbc_football", "espn_soccer", "sky_sports"],
+    "technology":  ["bbc_world", "google_news", "yahoo_news"],
+    "health":      ["bbc_world", "npr_top"],
+    "weather":     ["bbc_world", "npr_top"],
+    "default":     ["bbc_world", "yahoo_news", "google_news"],
 }
 
 
@@ -140,34 +136,8 @@ async def fetch_headlines(
 
 
 async def fetch_community_prediction(market_title: str) -> Optional[str]:
-    """
-    Check Metaculus for community prediction on similar questions.
-    Returns a one-line summary or None.
-    """
-    try:
-        url = "https://www.metaculus.com/api2/questions/"
-        params = {
-            "search":   market_title[:80],
-            "status":   "open",
-            "order_by": "-activity",
-            "limit":    3,
-        }
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            r = await client.get(url, params=params)
-            r.raise_for_status()
-            results = r.json().get("results", [])
-
-        lines = []
-        for q in results[:2]:
-            title = (q.get("title") or "")[:70]
-            cp    = q.get("community_prediction", {})
-            pred  = cp.get("full", {}).get("q2") if cp else None
-            if pred is not None:
-                lines.append(f"Metaculus: '{title}' → {pred*100:.0f}% community estimate")
-        return "\n".join(lines) if lines else None
-    except Exception as e:
-        logger.warning("Metaculus fetch failed: %s", e)
-        return None
+    """Metaculus removed (403 Forbidden) — returns None immediately."""
+    return None
 
 
 def format_headlines(headlines: List[str]) -> str:
