@@ -50,7 +50,7 @@ PRICE_ALERT_INTERVAL   = 600   # seconds — check at most every 10 min
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _now_utc() -> datetime:
+def _now_et() -> datetime:
     return datetime.now(_ET)
 
 
@@ -68,7 +68,7 @@ def _hours_left(close_time: str) -> Optional[float]:
     dt = _parse_dt(close_time)
     if not dt:
         return None
-    return (dt - _now_utc()).total_seconds() / 3600
+    return (dt - _now_et()).total_seconds() / 3600
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ async def _load_live_positions(db) -> List[Dict]:
 async def _close_position(db, ticker: str, reason: str, slot: Optional[Dict] = None, exit_price: Optional[float] = None) -> None:
     """Mark a position closed in the DB, writing final pnl if we have price data."""
     try:
-        now = _now_utc().isoformat()
+        now = _now_et().isoformat()
         if slot is not None and exit_price is not None:
             pnl, _, _ = _calc_pnl(slot, exit_price)
             await db.execute("""
@@ -559,7 +559,7 @@ async def _send_resolution_alert(discord, slot: Dict, final_price: Optional[floa
                     {"name": "🎰 Max Payout",  "value": f"${max_payout:.2f}", "inline": True},
                     {"name": "🤖 AI Conf",     "value": f"{conf:.0f}%",     "inline": True},
                 ],
-                "timestamp": _now_utc().isoformat(),
+                "timestamp": _now_et().isoformat(),
                 "footer": {"text": f"Opted in — held to resolution • {et_time} • Scanning for next opportunity…"},
             }]
         }
@@ -606,7 +606,7 @@ async def _send_stopout_alert(discord, slot: Dict, current_price: float, loss_pc
                     {"name": "🛑 Stop Trigger", "value": f"{loss_pct:.1f}% drop (limit: {STOP_LOSS_PCT:.0f}%)", "inline": True},
                     {"name": "🤖 AI Conf Was",  "value": f"{conf:.0f}%",        "inline": True},
                 ],
-                "timestamp": _now_utc().isoformat(),
+                "timestamp": _now_et().isoformat(),
                 "footer": {"text": f"Opted out — stop-loss exit • {et_time} • Scanning for replacement…"},
             }]
         }
@@ -689,7 +689,7 @@ async def _send_live_positions_update(discord, slots: Dict) -> None:
                     + f"\n\n**Total Live PnL: ${total_sign}{total_pnl:.2f}**"
                 ),
                 "color": 0x00BFFF,
-                "timestamp": _now_utc().isoformat(),
+                "timestamp": _now_et().isoformat(),
                 "footer": {"text": f"Live monitor • {et_time} • Updates when price moves >{PRICE_CHANGE_THRESHOLD:.0f}%"},
             }]
         }
@@ -793,14 +793,14 @@ async def run_live_manager_cycle(db, discord, settings, kalshi_trader, poly_trad
         # 4. Live position update — at most every 10 min, only if significant move
         if _live_slots:
             global _last_price_alert_time
-            now_utc = _now_utc()
-            elapsed = (now_utc - _last_price_alert_time).total_seconds() if _last_price_alert_time else PRICE_ALERT_INTERVAL + 1
+            now_et_cycle = _now_et()
+            elapsed = (now_et_cycle - _last_price_alert_time).total_seconds() if _last_price_alert_time else PRICE_ALERT_INTERVAL + 1
             if elapsed >= PRICE_ALERT_INTERVAL:
                 try:
                     sent = await _send_live_positions_update(discord, _live_slots)
                 except Exception:
                     sent = False
-                _last_price_alert_time = now_utc  # always update to avoid retry-every-5min loop
+                _last_price_alert_time = now_et_cycle  # always update to avoid retry-every-5min loop
 
     except Exception as e:
         logger.error("Live manager cycle error: %s", e, exc_info=True)
