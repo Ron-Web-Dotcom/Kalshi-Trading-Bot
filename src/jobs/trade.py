@@ -648,6 +648,14 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         else:
             logger.info("── No confirmed live events this cycle ─")
 
+        # Feed live markets into daily_stats so Discord heartbeat shows them
+        from src.utils.daily_stats import stats as _ds
+        _all_live = live_kalshi + live_poly
+        _ds.update_scan_state(
+            live_markets=_all_live,
+            regular_top=list(getattr(_ds, "last_regular_scan_top", [])),
+        )
+
         expiring_n = len(expiring_kalshi_raw) + len(expiring_poly_raw)
         if expiring_n:
             logger.info(
@@ -886,6 +894,13 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             poly_comps   = ext_comps,
             min_score    = 0.01,   # paper mode: low bar to see the bot in action
             poly_markets = poly_markets,
+        )
+
+        # Update regular scan top picks for Discord heartbeat
+        _top_regular = kalshi_candidates[:6] + poly_markets[:6]
+        _ds.update_scan_state(
+            live_markets=list(getattr(_ds, "last_live_scan_markets", [])),
+            regular_top=_top_regular,
         )
 
         if not best:
