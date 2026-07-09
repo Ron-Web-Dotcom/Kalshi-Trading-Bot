@@ -213,9 +213,8 @@ async def build_market_context(
     from src.data.web_search import fetch_live_context
     tasks["web_search"] = fetch_live_context(title, timeout=max(timeout_seconds - 2, 1.0))
 
-    # Metaculus: optional community prediction (web_search already covers Manifold+Metaculus)
-    if include_community:
-        tasks["community"] = fetch_community_prediction(title)
+    # Metaculus: always fetch — gives rule engine a probability anchor and raises AI confidence
+    tasks["community"] = fetch_community_prediction(title)
 
     # ── Execute all fetches in parallel with hard timeout ─────────────────────
     try:

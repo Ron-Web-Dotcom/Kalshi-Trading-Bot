@@ -16,6 +16,7 @@ Confidence formula:
   - Boost: multiple sources agree on direction
   - Penalty: sources conflict, thin context
   - Floor: 0 / Ceiling: 88 (AI can reach 95, rule engine caps at 88)
+  - Minimum to trade: 77% — requires probability sources (Manifold/Metaculus) + corroborating data
 """
 
 from __future__ import annotations
@@ -161,43 +162,43 @@ def score(
     net_ev = edge * 0.98  # in cents, after 2% fee
 
     # ── 7. Confidence ────────────────────────────────────────────────────────
-    # Start from edge size
+    # Start from edge size — shifted up so real edges clear the 77% floor
     if abs(edge) >= 20:
-        base_conf = 82.0
+        base_conf = 85.0
     elif abs(edge) >= 15:
-        base_conf = 76.0
+        base_conf = 80.0
     elif abs(edge) >= 10:
-        base_conf = 70.0
+        base_conf = 74.0
     elif abs(edge) >= 7:
-        base_conf = 64.0
+        base_conf = 66.0
     else:
         base_conf = 50.0
 
     # Boost: more agreeing sources = higher confidence
     n_prob_sources = len(prob_estimates)
     if n_prob_sources >= 2 and max(prob_estimates) - min(prob_estimates) <= 10:
-        base_conf = min(base_conf + 6, 88.0)   # tight agreement = big boost
+        base_conf = min(base_conf + 7, 88.0)   # tight agreement = big boost
     elif n_prob_sources >= 1:
-        base_conf = min(base_conf + 3, 88.0)
+        base_conf = min(base_conf + 4, 88.0)
 
     # Boost: sentiment aligns with probability edge
     if (side == "yes" and yes_sent > no_sent + 0.2) or (side == "no" and no_sent > yes_sent + 0.2):
         base_conf = min(base_conf + 4, 88.0)
 
-    # Penalty: no probability sources at all
+    # Penalty: no probability sources at all — cannot reach 77 on sentiment alone
     if n_prob_sources == 0:
-        base_conf = min(base_conf, 60.0)
+        base_conf = min(base_conf, 65.0)
 
     # Penalty: conflicting probability sources
     if n_prob_sources >= 2 and max(prob_estimates) - min(prob_estimates) > 20:
-        base_conf -= 10.0
+        base_conf -= 12.0
 
     confidence = max(0.0, min(base_conf, 88.0))
 
     # ── 8. Action gate ───────────────────────────────────────────────────────
     from src.config.settings import settings
-    min_conf = settings.trading.min_ai_confidence  # 70
-    min_ev   = 2.0 if confidence < 75 else 1.0 if confidence < 85 else 0.5
+    min_conf = settings.trading.min_ai_confidence  # 77
+    min_ev   = 2.0 if confidence < 77 else 1.0 if confidence < 85 else 0.5
 
     if confidence >= min_conf and net_ev >= min_ev:
         action = "BUY"

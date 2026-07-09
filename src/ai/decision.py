@@ -187,11 +187,11 @@ class AIDecisionEngine:
 
         # Dynamic confidence ceiling based on how much context we have
         if has_rich_context and has_news and (has_pred_markets or has_wiki):
-            conf_ceiling = "You have rich multi-source context — confidence up to 95% justified when multiple independent sources agree. 70% is your FLOOR to trade, 85%+ for high conviction."
-        elif has_news or has_wiki:
-            conf_ceiling = "You have some context — confidence up to 80% is justified when evidence is consistent. Need 70%+ to trade; do NOT hit 70 without at least 3 agreeing sources."
+            conf_ceiling = "You have rich multi-source context — confidence up to 95% justified when multiple independent sources agree. 77% is your FLOOR to trade, 85%+ for high conviction."
+        elif has_news or has_wiki or has_pred_markets:
+            conf_ceiling = "You have solid context — confidence up to 88% justified when evidence is consistent and sources agree. Need 77%+ to trade; cite at least 2 independent sources to reach 77."
         else:
-            conf_ceiling = "Context is limited — cap confidence at 60% and HOLD. 70%+ requires real evidence you do not have here."
+            conf_ceiling = "Context is thin — default confidence to ≤ 65% and HOLD. Reaching 77%+ requires Manifold/Metaculus probability data AND corroborating news. Do NOT guess."
 
         from src.utils.eastern_time import now_et as _now_et
         _et_now   = _now_et()
@@ -223,11 +223,13 @@ BUY NO  @ {no_ask:.0f}¢ → profit {no_ev_if_true:.1f}¢ if NO resolves   |  lo
 {arb_text}{context_block}{bot_block}{no_context_warning}
 
 === HOW TO SCORE CONFIDENCE (based on evidence quality) ===
-90–100% → Multiple independent sources (news + community + prediction markets) all clearly agree
-75–89%  → Strong evidence from 2+ sources pointing the same direction
-60–74%  → Good evidence from at least 1 reliable source with reasonable certainty
-50–59%  → Weak or conflicting signals — lean HOLD
+90–100% → Multiple independent sources (news + Manifold/Metaculus + prediction markets) all clearly agree
+77–89%  → Strong evidence from 2+ independent sources pointing the same direction — this is the TRADE ZONE
+65–76%  → Some evidence but not enough independent agreement — HOLD, keep gathering
+50–64%  → Weak or conflicting signals — always HOLD
 < 50%   → No real evidence — always HOLD
+
+IMPORTANT: Manifold/Metaculus probability estimates count as ONE strong source. You need at least ONE more (news headline, Reddit report, sports score, or price data) to justify 77%+.
 
 === HOW TO USE THE CONTEXT ===
 • Wikipedia/DDG background → use for base rate and historical context
@@ -241,9 +243,9 @@ Step 1 — Read ALL context sections. Extract every specific fact relevant to th
 Step 2 — Check Manifold/Metaculus predictions — if they differ from market price by >10%, that IS an edge.
 Step 3 — Estimate TRUE P(YES) based on combined evidence. More agreeing sources = higher confidence.
 Step 4 — Compute net EV = (true_prob/100 - market_price/100) × 98¢ for the better side.
-Step 5 — BUY if: confidence ≥ {self.trading_cfg.min_ai_confidence:.0f}% AND net_ev > 0¢ AND you can cite SPECIFIC verifiable facts.
-         (Higher confidence = lower EV bar: conf≥85% needs only 0.5¢, conf≥75% needs 1¢, conf≥70% needs 2¢)
-         DO NOT reach 70%+ without multiple agreeing independent sources. Deep research required.
+Step 5 — BUY if: confidence ≥ {self.trading_cfg.min_ai_confidence:.0f}% AND net_ev > 0¢ AND you can cite SPECIFIC verifiable facts from at least 2 independent sources.
+         (Higher confidence = lower EV bar: conf≥85% needs only 0.5¢, conf≥77% needs 1¢)
+         DO NOT reach 77%+ without Manifold/Metaculus data PLUS at least one corroborating source (news/Reddit/price). Deep research required.
 Step 6 — HOLD only if: truly no evidence, strongly conflicting data, or net_ev ≤ 0.
 
 Respond ONLY with this exact JSON (no markdown):
@@ -257,11 +259,12 @@ Respond ONLY with this exact JSON (no markdown):
 }}
 
 HARD RULES:
-- No context at all = confidence ≤ 50, action = HOLD
-- With rich multi-source context, confidence 65-85% is appropriate when evidence is clear
+- No context at all = confidence ≤ 55, action = HOLD
+- Manifold/Metaculus only (no news) = max confidence 72%, action = HOLD
+- Manifold/Metaculus + corroborating news/data = confidence can reach 77–88%
 - net_ev must be > 0¢ to BUY (the more confident you are, the lower the EV bar)
-- confidence ≥ {self.trading_cfg.min_ai_confidence:.0f} required to BUY
-- If true_prob differs from market price: that gap IS the edge — compute EV from it"""
+- confidence ≥ {self.trading_cfg.min_ai_confidence:.0f} required to BUY — 77 is the floor, not the target
+- If true_prob differs from market price by >10¢: that gap IS the edge — compute EV from it"""
 
     async def decide(self, market: Dict, signals: List[Dict] = None, prebuilt_context: str = "") -> AIDecision:
         if signals is None:
