@@ -1007,7 +1007,7 @@ class TradingBot:
 
                     discord   = DiscordAlerter()
                     mode      = "PAPER" if not settings.trading.live_trading_enabled else "LIVE"
-                    now_utc   = datetime.now(_ET)
+                    now_et    = datetime.now(_ET)
                     MIN_CONF  = _get_min_conf()  # refresh each cycle (default 65%)
                     new_picks: list = []
 
@@ -1019,8 +1019,8 @@ class TradingBot:
                         try:
                             cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
                             if cd.tzinfo is None:
-                                cd = cd.replace(tzinfo=timezone.utc)
-                            return (cd - now_utc).total_seconds() / 3600
+                                cd = cd.replace(tzinfo=timezone.utc).astimezone(_ET)
+                            return (cd - now_et).total_seconds() / 3600
                         except Exception:
                             return -1
 
@@ -1066,7 +1066,7 @@ class TradingBot:
                             new_picks.append(pick)
                             _alerted[ticker] = {
                                 "band": int(conf / 10) * 10, "pick": pick,
-                                "alerted_at": now_utc, "result_sent": False,
+                                "alerted_at": now_et, "result_sent": False,
                                 "hl": _hours_left(pick),
                             }
 
@@ -1123,7 +1123,7 @@ class TradingBot:
                             new_picks.append(pick)
                             _alerted[ticker] = {
                                 "band": int(conf / 10) * 10, "pick": pick,
-                                "alerted_at": now_utc, "result_sent": False,
+                                "alerted_at": now_et, "result_sent": False,
                                 "hl": hl,
                             }
 
@@ -1364,8 +1364,8 @@ class TradingBot:
                                 from datetime import timezone as _tz
                                 _ct = close_time and datetime.fromisoformat(str(close_time).replace("Z", "+00:00"))
                                 if _ct and _ct.tzinfo is None:
-                                    _ct = _ct.replace(tzinfo=_tz.utc)
-                                _market_closed = bool(_ct and _ct <= datetime.now(_tz.utc))
+                                    _ct = _ct.replace(tzinfo=_tz.utc).astimezone(_ET)
+                                _market_closed = bool(_ct and _ct <= datetime.now(_ET))
                             except Exception:
                                 _market_closed = False
                             if status == "closed" or (_market_closed and (yes_ask <= 5 or yes_ask >= 95)):
@@ -1477,16 +1477,9 @@ class TradingBot:
                     #      Kalshi/Poly close_time IS the source of truth — no ESPN needed
                     #   3. to_check: closes in 1-7 days → try is_event_live_now() fallback
                     from datetime import datetime as _dt2, timezone as _tz2
-                    _now2 = _dt2.now(_tz2.utc)
-                    # Tonight's midnight ET in UTC
-                    try:
-                        from src.utils.eastern_time import now_et as _net2
-                        _et2 = _net2()
-                    except Exception:
-                        import pytz as _pyz2
-                        _et2 = _dt2.now(_pyz2.timezone("America/New_York"))
-                    _tonight_et  = _et2.replace(hour=23, minute=59, second=59, microsecond=0)
-                    _tonight_utc = _tonight_et.astimezone(_tz2.utc)
+                    from src.utils.eastern_time import now_et as _net2
+                    _now2       = _net2()
+                    _tonight_et = _now2.replace(hour=23, minute=59, second=59, microsecond=0)
 
                     _LIVE_KEYWORDS = {
                         # Sports
@@ -1526,8 +1519,8 @@ class TradingBot:
                         try:
                             cd = _dt2.fromisoformat(ct.replace("Z", "+00:00"))
                             if cd.tzinfo is None:
-                                cd = cd.replace(tzinfo=_tz2.utc)
-                            return _now2 < cd <= _tonight_utc
+                                cd = cd.replace(tzinfo=_tz2.utc).astimezone(_ET)
+                            return _now2 < cd <= _tonight_et
                         except Exception:
                             return False
 

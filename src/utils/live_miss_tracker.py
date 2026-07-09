@@ -157,7 +157,7 @@ class LiveMissTracker:
             try:
                 resolved_at = datetime.fromisoformat(resolved_at_str)
                 if resolved_at.tzinfo is None:
-                    resolved_at = resolved_at.replace(tzinfo=timezone.utc)
+                    resolved_at = resolved_at.replace(tzinfo=timezone.utc).astimezone(_ET)
                 if resolved_at < cutoff:
                     continue
             except Exception:

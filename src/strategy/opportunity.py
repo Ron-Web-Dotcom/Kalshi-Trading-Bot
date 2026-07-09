@@ -49,7 +49,7 @@ def _pre_score(market: Dict, poly_comp: Optional[Dict] = None) -> float:
         try:
             close_dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
             if close_dt.tzinfo is None:
-                close_dt = close_dt.replace(tzinfo=timezone.utc)
+                close_dt = close_dt.replace(tzinfo=timezone.utc).astimezone(_ET)
             hours = (close_dt - datetime.now(_ET)).total_seconds() / 3600
             if 0 < hours <= 6:
                 time_bonus = 1.5
@@ -95,7 +95,7 @@ def score_opportunity(
         try:
             close_dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
             if close_dt.tzinfo is None:
-                close_dt = close_dt.replace(tzinfo=timezone.utc)
+                close_dt = close_dt.replace(tzinfo=timezone.utc).astimezone(_ET)
             hours = (close_dt - datetime.now(_ET)).total_seconds() / 3600
             if 0 < hours <= 6:
                 time_bonus = 1.5

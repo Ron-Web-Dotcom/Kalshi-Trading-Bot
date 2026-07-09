@@ -2,8 +2,11 @@
 
 import logging
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo
 
 from src.utils.junk_filter import is_junk
+
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.jobs.trade")
 
@@ -111,7 +114,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
     # Block same question across platforms — but only for long-duration positions (open > 1 hour)
     # Short-duration trades (5min/10min/hourly) resolve fast so re-entry on a new cycle is fine
     from datetime import datetime as _now_dt, timezone as _now_tz, timedelta as _now_td
-    _now = _now_dt.now(_now_tz.utc)
+    _now_et = _now_dt.now(_ET)
     open_titles = set()
     for p in open_positions_rows:
         if not p.get("title"):
@@ -119,8 +122,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         try:
             opened = _now_dt.fromisoformat((p.get("opened_at") or "").replace("Z", "+00:00"))
             if opened.tzinfo is None:
-                opened = opened.replace(tzinfo=_now_tz.utc)
-            if (_now - opened) > _now_td(hours=1):
+                opened = opened.replace(tzinfo=_now_tz.utc).astimezone(_ET)
+            if (_now_et - opened) > _now_td(hours=1):
                 open_titles.add(p["title"].strip().lower())
         except Exception:
             pass
@@ -361,7 +364,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         def _et_now_str() -> str:
             return _dt.now(_ET_tz).strftime("%Y-%m-%dT%H:%M:%S")
         arb_tickers = {s["ticker"] for s in all_signals}
-        now_utc = _dt.now(_tz.utc)
+        now_et = _dt.now(_ET)
 
         try:
             from src.utils.eastern_time import now_et as _get_et
@@ -370,12 +373,9 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             import pytz as _pytz
             _et_now = _dt.now(_pytz.timezone("America/New_York"))
         _today_midnight_et   = _et_now.replace(hour=0, minute=0, second=0, microsecond=0)
-        _tonight_midnight_et = _today_midnight_et + _td(days=1)
+        _tonight_et    = _today_midnight_et + _td(days=1)
         _tomorrow_end_et     = _today_midnight_et + _td(days=2)   # end of tomorrow ET
         _week_end_et         = _today_midnight_et + _td(days=7)
-        _tonight_utc    = _tonight_midnight_et.astimezone(_tz.utc)
-        _tomorrow_end_utc = _tomorrow_end_et.astimezone(_tz.utc)
-        _week_end_utc = _week_end_et.astimezone(_tz.utc)
 
         def _closes_today(m):
             """True if market closes before tonight's midnight ET (today only)."""
@@ -385,8 +385,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             try:
                 close_dt = _dt.fromisoformat(str(ct).replace("Z", "+00:00"))
                 if close_dt.tzinfo is None:
-                    close_dt = close_dt.replace(tzinfo=_tz.utc)
-                return now_utc < close_dt <= _tonight_utc
+                    close_dt = close_dt.replace(tzinfo=_tz.utc).astimezone(_ET)
+                return now_et < close_dt <= _tonight_et
             except Exception:
                 return False
 
@@ -398,8 +398,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             try:
                 close_dt = _dt.fromisoformat(str(ct).replace("Z", "+00:00"))
                 if close_dt.tzinfo is None:
-                    close_dt = close_dt.replace(tzinfo=_tz.utc)
-                return _tonight_utc < close_dt <= _tomorrow_end_utc
+                    close_dt = close_dt.replace(tzinfo=_tz.utc).astimezone(_ET)
+                return _tonight_et < close_dt <= _tomorrow_end_et
             except Exception:
                 return False
 
@@ -411,8 +411,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             try:
                 close_dt = _dt.fromisoformat(str(ct).replace("Z", "+00:00"))
                 if close_dt.tzinfo is None:
-                    close_dt = close_dt.replace(tzinfo=_tz.utc)
-                return now_utc < close_dt <= _week_end_utc
+                    close_dt = close_dt.replace(tzinfo=_tz.utc).astimezone(_ET)
+                return now_et < close_dt <= _week_end_et
             except Exception:
                 return False
 
@@ -423,8 +423,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             try:
                 close_dt = _dt.fromisoformat(str(ct).replace("Z", "+00:00"))
                 if close_dt.tzinfo is None:
-                    close_dt = close_dt.replace(tzinfo=_tz.utc)
-                return 0 < (close_dt - now_utc).total_seconds() / 3600 <= hours
+                    close_dt = close_dt.replace(tzinfo=_tz.utc).astimezone(_ET)
+                return 0 < (close_dt - now_et).total_seconds() / 3600 <= hours
             except Exception:
                 return False
 
@@ -949,8 +949,8 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             try:
                 _close_dt = _dt.fromisoformat(str(_best_ct).replace("Z", "+00:00"))
                 if _close_dt.tzinfo is None:
-                    _close_dt = _close_dt.replace(tzinfo=_tz.utc)
-                _hours_out = (_close_dt - now_utc).total_seconds() / 3600
+                    _close_dt = _close_dt.replace(tzinfo=_tz.utc).astimezone(_ET)
+                _hours_out = (_close_dt - now_et).total_seconds() / 3600
             except Exception:
                 pass
             # Bid on markets closing within 48h — not just today

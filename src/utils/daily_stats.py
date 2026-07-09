@@ -128,7 +128,7 @@ class DailyStats:
                 cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
                 if cd.tzinfo is None:
                     from datetime import timezone as _tz
-                    cd = cd.replace(tzinfo=_tz.utc)
+                    cd = cd.replace(tzinfo=_tz.utc).astimezone(_ET)
                 if cd > now:
                     active.append(e)
             except Exception:

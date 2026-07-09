@@ -314,7 +314,7 @@ def _pre_score(market: Dict) -> float:
         try:
             close_dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
             if close_dt.tzinfo is None:
-                close_dt = close_dt.replace(tzinfo=timezone.utc)
+                close_dt = close_dt.replace(tzinfo=timezone.utc).astimezone(_ET)
             hours = (close_dt - datetime.now(_ET)).total_seconds() / 3600
             if hours <= 0:            time_bonus = 0.0   # already closed — skip
             elif 0 < hours <= 1:      time_bonus = 2.5   # happening NOW / imminent

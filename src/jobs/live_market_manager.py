@@ -59,7 +59,7 @@ def _parse_dt(s: str) -> Optional[datetime]:
         return None
     try:
         dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc).astimezone(_ET)
     except Exception:
         return None
 
@@ -303,9 +303,8 @@ async def _fill_slots(
         from src.utils.eastern_time import now_et as _lm_now_et
         _et_now = _lm_now_et()
         _tonight_et = _et_now.replace(hour=23, minute=59, second=59, microsecond=0)
-        _tonight_utc = _tonight_et.astimezone(timezone.utc)
     except Exception:
-        _tonight_utc = datetime.now(_ET).replace(hour=23, minute=59, second=59, microsecond=0)
+        _tonight_et = datetime.now(_ET).replace(hour=23, minute=59, second=59, microsecond=0)
 
     def _closes_today(m: Dict) -> bool:
         ct = m.get("close_time") or ""
@@ -314,9 +313,9 @@ async def _fill_slots(
         try:
             cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
             if cd.tzinfo is None:
-                cd = cd.replace(tzinfo=timezone.utc)
+                cd = cd.replace(tzinfo=timezone.utc).astimezone(_ET)
             now = datetime.now(_ET)
-            return now < cd <= _tonight_utc
+            return now < cd <= _tonight_et
         except Exception:
             return False
 

@@ -195,7 +195,7 @@ class KalshiClient:
                     try:
                         cdt = datetime.fromisoformat(str(event_close).replace("Z", "+00:00"))
                         if cdt.tzinfo is None:
-                            cdt = cdt.replace(tzinfo=timezone.utc)
+                            cdt = cdt.replace(tzinfo=timezone.utc).astimezone(_ET)
                         hours_away = (cdt - now).total_seconds() / 3600
                     except Exception:
                         pass
@@ -209,7 +209,7 @@ class KalshiClient:
                         try:
                             cdt = datetime.fromisoformat(str(m_close).replace("Z", "+00:00"))
                             if cdt.tzinfo is None:
-                                cdt = cdt.replace(tzinfo=timezone.utc)
+                                cdt = cdt.replace(tzinfo=timezone.utc).astimezone(_ET)
                             market_hours_away = (cdt - now).total_seconds() / 3600
                         except Exception:
                             pass
@@ -294,7 +294,7 @@ class KalshiClient:
                 try:
                     close_dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
                     if close_dt.tzinfo is None:
-                        close_dt = close_dt.replace(tzinfo=timezone.utc)
+                        close_dt = close_dt.replace(tzinfo=timezone.utc).astimezone(_ET)
                     hours_left = (close_dt - now).total_seconds() / 3600
                     if hours_left <= 0:
                         continue
@@ -357,10 +357,10 @@ class KalshiClient:
                 try:
                     dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
                     if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
+                        dt = dt.replace(tzinfo=timezone.utc).astimezone(_ET)
                     return dt
                 except Exception:
-                    return datetime.max.replace(tzinfo=timezone.utc)
+                    return datetime.max.replace(tzinfo=timezone.utc).astimezone(_ET)
             now = datetime.now(_ET)
             # Only include markets that haven't closed yet
             markets = [m for m in markets if _close_key(m) > now]
@@ -414,7 +414,7 @@ class KalshiClient:
                     try:
                         close_dt = datetime.fromisoformat(str(m["close_time"]).replace("Z", "+00:00"))
                         if close_dt.tzinfo is None:
-                            close_dt = close_dt.replace(tzinfo=timezone.utc)
+                            close_dt = close_dt.replace(tzinfo=timezone.utc).astimezone(_ET)
                         hours_left = (close_dt - now).total_seconds() / 3600
                     except Exception:
                         hours_left = 0
@@ -438,7 +438,7 @@ class KalshiClient:
                 try:
                     close_dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
                     if close_dt.tzinfo is None:
-                        close_dt = close_dt.replace(tzinfo=timezone.utc)
+                        close_dt = close_dt.replace(tzinfo=timezone.utc).astimezone(_ET)
                     hours_left = (close_dt - now).total_seconds() / 3600
                     if not (0 < hours_left <= max_hours):
                         continue
