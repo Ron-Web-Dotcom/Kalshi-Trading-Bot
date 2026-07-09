@@ -605,6 +605,11 @@ class TradingBot:
                 if self._shutdown.is_set():
                     break
 
+                # 30s grace period so the trade loop finishes its current cycle
+                await asyncio.sleep(30)
+                if self._shutdown.is_set():
+                    break
+
                 try:
                     from datetime import timedelta as _td2
                     discord      = DiscordAlerter()
@@ -627,9 +632,27 @@ class TradingBot:
                     )
                     open_pos = [dict(r) for r in (open_pos or [])]
 
+                    # Unrealised PnL — use yes_ask from markets when current_price is NULL
+                    _unreal_row = await self.db.fetchone(
+                        "SELECT COALESCE(SUM("
+                        "  (COALESCE(p.current_price, m.yes_ask, p.avg_price) - p.avg_price)"
+                        "  * p.contracts / 100.0"
+                        "), 0) AS pnl "
+                        "FROM positions p "
+                        "LEFT JOIN markets m ON m.ticker = p.ticker "
+                        "WHERE p.status = 'open'"
+                    )
+                    unrealised_pnl = float((_unreal_row or {}).get("pnl", 0.0) or 0.0)
+
+                    # Only show bids for markets closing TODAY (ET) — no future-day or stale entries
+                    _et_today_sum = _now_et_sum().date().isoformat()
                     new_pos = await self.db.fetchall(
-                        "SELECT * FROM positions WHERE status='open' AND opened_at >= ? ORDER BY opened_at DESC",
-                        (last_summary_at,)
+                        "SELECT p.* FROM positions p "
+                        "LEFT JOIN markets m ON m.ticker = p.ticker "
+                        "WHERE p.status='open' AND p.opened_at >= ? "
+                        "AND date(m.close_time) = ? "
+                        "ORDER BY p.opened_at DESC",
+                        (last_summary_at, _et_today_sum)
                     )
                     new_pos = [dict(r) for r in (new_pos or [])]
 
@@ -697,6 +720,7 @@ class TradingBot:
                         best_buys=list(_ds_sum.all_evaluations),
                         live_positions=live_pos_list,
                         alltime_pnl=alltime_pnl,
+                        unrealised_pnl=unrealised_pnl,
                     )
                     # near_miss and position data are embedded in the daytime_summary message above
                 except Exception as e:

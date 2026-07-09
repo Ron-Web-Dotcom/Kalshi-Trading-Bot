@@ -1346,6 +1346,7 @@ class DiscordAlerter:
         best_buys: Optional[List[Dict]] = None,           # top AI BUY picks this cycle
         alltime_pnl: float = 0.0,
         live_positions: Optional[List[Dict]] = None,      # in-play live slots
+        unrealised_pnl: float = 0.0,                      # pre-computed open position PnL
     ) -> None:
         """Scheduled digest at 12am/6am/12pm/6pm ET — narrative of what the bot did."""
         from src.utils.eastern_time import format_et, et_label
@@ -1480,33 +1481,27 @@ class DiscordAlerter:
             olines = []
             total_capital = 0.0
             total_payout  = 0.0
-            total_unreal  = 0.0
             for p in deduped_open[:8]:
                 plat      = "🟣" if p.get("platform") == "polymarket" else "🟦"
                 side      = (p.get("side") or "yes").upper()
                 avg_price = float(p.get("avg_price") or 0)
-                cur_price = float(p.get("current_price") or avg_price)
                 contracts = int(p.get("contracts") or 0)
                 size_usd  = float(p.get("size_usd") or 0) or round(avg_price * contracts / 100, 2)
-                # Profit if this bet wins = contracts × (100 − entry_price) / 100
-                # regardless of side (you always paid avg_price and win (100-avg_price))
                 profit_if_win = contracts * (100 - avg_price) / 100
                 total_capital += size_usd
                 total_payout  += profit_if_win
-                pnl       = (cur_price - avg_price) * contracts / 100
-                total_unreal  += pnl
                 label = self._display_ticker(p.get("ticker","?"), p.get("title","") or "")[:120]
                 olines.append(
                     f"{plat} **{label}**\n"
                     f"   {side} | {contracts}x @ {avg_price:.0f}¢ | in **${size_usd:.2f}** → profit **+${profit_if_win:.2f}**"
                 )
             all_s = "+" if alltime_pnl >= 0 else ""
-            tu_s  = "+" if total_unreal >= 0 else ""
+            tu_s  = "+" if unrealised_pnl >= 0 else ""
             summary = (
                 f"💰 **All-time banked: ${all_s}{alltime_pnl:.2f}**\n"
                 f"📤 Paper money in: **${total_capital:.2f}**\n"
                 f"📥 If all win, profit: **+${total_payout:.2f}**\n"
-                + (f"📊 Current move: **${tu_s}{total_unreal:.2f}**\n" if total_unreal != 0 else "")
+                + (f"📊 Unrealised PnL: **${tu_s}{unrealised_pnl:.2f}**\n" if unrealised_pnl != 0.0 else "")
                 + "\n"
             )
             fields.append({
