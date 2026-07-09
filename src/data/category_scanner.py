@@ -47,27 +47,43 @@ _HEADERS    = {
 POLY_TAG_SLUGS = [
     # Politics — US + global
     "politics", "us-politics", "elections", "trump", "congress", "senate",
-    "supreme-court", "2024-us-elections", "geopolitics", "middle-east",
-    "russia-ukraine", "china", "iran",
+    "house", "supreme-court", "2024-us-elections", "2026-elections",
+    "geopolitics", "middle-east", "russia-ukraine", "china", "iran",
+    "north-korea", "taiwan", "nato", "europe", "uk", "india", "brazil",
+    # Breaking / Mentions
+    "breaking", "mentions", "news",
     # Sports — major leagues
     "nfl", "nba", "mlb", "nhl", "ufc", "soccer", "tennis", "golf",
+    # Sports — soccer sub-categories
+    "world-cup", "champions-league", "premier-league", "la-liga",
+    "bundesliga", "serie-a", "ligue-1", "mls", "copa-america",
+    "euros", "fifa",
     # Sports — more
     "mma", "boxing", "college-football", "college-basketball", "f1",
-    "nascar", "esports", "olympics", "wrestling",
+    "nascar", "esports", "olympics", "wrestling", "rugby", "cricket",
+    "wnba", "pga", "atp", "wta",
+    # Esports sub-categories
+    "league-of-legends", "cs2", "dota2", "valorant", "overwatch",
     # Crypto — broad
     "crypto", "bitcoin", "ethereum", "solana", "defi", "nft",
+    "altcoins", "stablecoins", "crypto-etf",
     # Finance / Economy
     "finance", "stocks", "fed", "economy", "interest-rates", "inflation",
-    "commodities", "oil", "gold",
+    "commodities", "oil", "gold", "silver", "forex", "sp500", "nasdaq",
+    "jobs", "gdp", "recession",
     # Entertainment / Culture
     "entertainment", "pop-culture", "music", "movies", "awards", "celebrity",
-    "tv", "gaming",
+    "tv", "gaming", "oscars", "grammys", "emmys",
     # Science / Tech
-    "science", "technology", "ai", "space", "spacex",
-    # World / Weather
-    "world", "weather", "climate", "natural-disasters",
-    # Misc high-volume
-    "business", "health", "pandemic", "media",
+    "science", "technology", "ai", "space", "spacex", "openai", "apple",
+    "google", "meta", "microsoft",
+    # World / Weather / Geopolitics
+    "world", "weather", "climate", "natural-disasters", "hurricane",
+    "earthquake", "wildfire",
+    # Health
+    "health", "pandemic", "fda", "vaccines",
+    # Business / Media / Misc
+    "business", "media", "companies",
 ]
 
 # Remove duplicates while preserving order
@@ -80,19 +96,33 @@ POLY_TAG_SLUGS = [
 # ── Kalshi category keywords for DB search ───────────────────────────────────
 
 KALSHI_CATEGORY_PATTERNS = [
-    # Main categories
+    # Main categories (match Kalshi's own category field)
     "elections", "politics", "sports", "crypto", "finance", "economics",
     "climate", "weather", "tech", "science", "culture", "health", "world",
-    "commodities", "entertainment", "mentions",
-    # Sub-categories / keywords in titles
+    "commodities", "entertainment", "mentions", "geopolitics", "companies",
+    # Sports sub-categories
     "nfl", "nba", "mlb", "nhl", "soccer", "football", "basketball",
-    "baseball", "hockey", "ufc", "tennis", "golf",
-    "bitcoin", "ethereum", "solana", "defi",
-    "inflation", "fed", "interest", "cpi", "gdp", "jobs",
-    "hurricane", "tornado", "earthquake", "wildfire",
-    "spacex", "nasa", "ai", "election", "senate", "house",
-    "president", "trump", "iran", "russia", "china",
-    "oscar", "grammy", "emmy", "movie", "music",
+    "baseball", "hockey", "ufc", "mma", "tennis", "golf", "f1", "nascar",
+    "boxing", "wrestling", "rugby", "cricket", "wnba", "pga",
+    "college", "ncaa", "esports", "olympics", "world cup", "champions",
+    "premier league", "la liga", "bundesliga", "serie a",
+    # Crypto sub-categories
+    "bitcoin", "ethereum", "solana", "defi", "nft", "altcoin",
+    # Economics / Finance sub-categories
+    "inflation", "fed", "interest", "cpi", "gdp", "jobs", "unemployment",
+    "recession", "stock", "nasdaq", "sp500", "oil", "gold", "silver",
+    # Geopolitics
+    "iran", "russia", "china", "ukraine", "taiwan", "north korea",
+    "middle east", "nato", "india", "israel",
+    # Weather / Climate
+    "hurricane", "tornado", "earthquake", "wildfire", "flood", "storm",
+    # Tech / Science
+    "spacex", "nasa", "ai", "openai", "apple", "google", "meta",
+    # Politics sub-categories
+    "election", "senate", "house", "president", "trump", "congress",
+    "supreme court", "governor",
+    # Culture / Entertainment
+    "oscar", "grammy", "emmy", "movie", "music", "celebrity", "award",
 ]
 
 
@@ -342,7 +372,7 @@ class CategoryScanner:
                 "AND (platform='kalshi' OR platform IS NULL) "
                 "AND (yes_ask > 0 OR last_price > 0) "
                 "AND title IS NOT NULL AND title != '' "
-                "ORDER BY volume DESC LIMIT 200"
+                "ORDER BY volume DESC LIMIT 500"
             ) or []
 
             def _norm_price(v):
