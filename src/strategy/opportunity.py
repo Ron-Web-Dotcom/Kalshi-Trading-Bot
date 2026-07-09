@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from src.utils.junk_filter import is_junk
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.opportunity")
 
@@ -48,7 +50,7 @@ def _pre_score(market: Dict, poly_comp: Optional[Dict] = None) -> float:
             close_dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
             if close_dt.tzinfo is None:
                 close_dt = close_dt.replace(tzinfo=timezone.utc)
-            hours = (close_dt - datetime.now(timezone.utc)).total_seconds() / 3600
+            hours = (close_dt - datetime.now(_ET)).total_seconds() / 3600
             if 0 < hours <= 6:
                 time_bonus = 1.5
             elif 0 < hours <= 48:
@@ -94,7 +96,7 @@ def score_opportunity(
             close_dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
             if close_dt.tzinfo is None:
                 close_dt = close_dt.replace(tzinfo=timezone.utc)
-            hours = (close_dt - datetime.now(timezone.utc)).total_seconds() / 3600
+            hours = (close_dt - datetime.now(_ET)).total_seconds() / 3600
             if 0 < hours <= 6:
                 time_bonus = 1.5
             elif 0 < hours <= 24:

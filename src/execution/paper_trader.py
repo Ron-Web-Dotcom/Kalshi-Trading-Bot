@@ -3,6 +3,8 @@
 import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.paper_trader")
 
@@ -69,7 +71,7 @@ class PaperTrader:
         notional   = contracts * price_cents / 100
         fee        = notional * KALSHI_FEE_PCT
         total_cost = notional + fee
-        now        = datetime.now(timezone.utc).isoformat()
+        now        = datetime.now(_ET).isoformat()
 
         record = {
             "ticker":        ticker,

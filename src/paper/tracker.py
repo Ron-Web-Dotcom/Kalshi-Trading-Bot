@@ -3,6 +3,8 @@
 import logging
 from datetime import datetime, timezone
 from typing import Dict, List
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.paper_tracker")
 
@@ -11,7 +13,7 @@ async def log_signal(db, ticker: str, action: str, side: str,
                      price: float, contracts: int = 1,
                      ai_confidence: float = 0, ai_reasoning: str = "",
                      arbitrage_pct: float = 0, signal_source: str = "") -> int:
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(_ET).isoformat()
     return await db.insert("paper_signals", {
         "ticker": ticker,
         "action": action,
@@ -29,7 +31,7 @@ async def log_signal(db, ticker: str, action: str, side: str,
 
 
 async def settle_signal(db, signal_id: int, outcome: float) -> None:
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(_ET).isoformat()
     await db.execute(
         "UPDATE paper_signals SET outcome=?, settled=1, settled_at=? WHERE id=?",
         (outcome, now, signal_id)

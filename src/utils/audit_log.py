@@ -4,6 +4,8 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.audit_log")
 
@@ -31,7 +33,7 @@ class AuditLogger:
         operator: str = "bot",
     ) -> None:
         """Insert audit row into DB and append to logs/audit.log."""
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(_ET).isoformat()
 
         # ── File log ──────────────────────────────────────────────────────────
         ev_str = f"{net_ev:.2f}¢" if net_ev is not None else "n/a"

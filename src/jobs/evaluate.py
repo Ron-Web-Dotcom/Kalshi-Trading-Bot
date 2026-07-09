@@ -2,6 +2,8 @@
 
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.jobs.evaluate")
 
@@ -64,7 +66,7 @@ async def run_evaluation(db=None, scaler=None) -> None:
             scaler = _default_scaler
         scaler.update(total_pnl)
 
-        now  = datetime.now(timezone.utc).isoformat()
+        now  = datetime.now(_ET).isoformat()
         today = now[:10]  # YYYY-MM-DD
 
         await db.insert("performance_metrics", {

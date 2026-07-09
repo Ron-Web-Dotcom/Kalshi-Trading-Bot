@@ -28,6 +28,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.live_event_detector")
 
@@ -308,7 +310,7 @@ async def _crypto_live(title: str) -> bool:
 
 
 async def _politics_live(title: str) -> bool:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(_ET)
     if now.month == 11 and now.weekday() == 1 and 2 <= now.day <= 8:
         return True
     if now.month in (3,4,5,6) and now.weekday() == 1:

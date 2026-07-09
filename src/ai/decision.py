@@ -5,6 +5,8 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.ai_decision")
 
@@ -367,7 +369,7 @@ HARD RULES:
             )
 
             if self.db:
-                now = datetime.now(timezone.utc).isoformat()
+                now = datetime.now(_ET).isoformat()
                 try:
                     usage = response.usage
                     cost = (usage.prompt_tokens * 0.15e-6 + usage.completion_tokens * 0.60e-6)

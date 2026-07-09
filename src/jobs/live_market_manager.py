@@ -25,6 +25,8 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from src.utils.junk_filter import is_junk
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.live_manager")
 
@@ -49,7 +51,7 @@ PRICE_ALERT_INTERVAL   = 600   # seconds — check at most every 10 min
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(_ET)
 
 
 def _parse_dt(s: str) -> Optional[datetime]:
@@ -303,7 +305,7 @@ async def _fill_slots(
         _tonight_et = _et_now.replace(hour=23, minute=59, second=59, microsecond=0)
         _tonight_utc = _tonight_et.astimezone(timezone.utc)
     except Exception:
-        _tonight_utc = datetime.now(timezone.utc).replace(hour=23, minute=59, second=59, microsecond=0)
+        _tonight_utc = datetime.now(_ET).replace(hour=23, minute=59, second=59, microsecond=0)
 
     def _closes_today(m: Dict) -> bool:
         ct = m.get("close_time") or ""
@@ -313,7 +315,7 @@ async def _fill_slots(
             cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
             if cd.tzinfo is None:
                 cd = cd.replace(tzinfo=timezone.utc)
-            now = datetime.now(timezone.utc)
+            now = datetime.now(_ET)
             return now < cd <= _tonight_utc
         except Exception:
             return False

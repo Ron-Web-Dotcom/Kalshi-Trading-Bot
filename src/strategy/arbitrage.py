@@ -3,6 +3,8 @@
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.arbitrage")
 
@@ -35,7 +37,7 @@ class ArbitrageDetector:
         Returns signals with action/side pre-determined.
         """
         signals = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(_ET)
 
         for c in comparisons:
             diff_pct = c.get("diff_pct", 0)
@@ -103,7 +105,7 @@ class ArbitrageDetector:
         Only flag if net > 0 and above threshold.
         """
         signals = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(_ET)
 
         for m in markets:
             ticker = m.get("ticker", "")

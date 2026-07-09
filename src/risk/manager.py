@@ -3,6 +3,8 @@
 import logging
 from datetime import datetime, timedelta, timezone, date
 from typing import Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.risk")
 
@@ -17,7 +19,7 @@ class RiskManager:
         self._daily_loss_date: Optional[date] = None
 
     def _reset_daily_if_needed(self):
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(_ET).date()
         if self._daily_loss_date != today:
             self._daily_loss = 0.0
             self._daily_loss_date = today
@@ -29,7 +31,7 @@ class RiskManager:
         try:
             from src.config.settings import settings
             paper_flag = 0 if settings.trading.live_trading_enabled else 1
-            today = datetime.now(timezone.utc).date().isoformat()
+            today = datetime.now(_ET).date().isoformat()
             row = await self.db.fetchone(
                 "SELECT COALESCE(SUM(ABS(pnl)),0) AS loss FROM trade_logs "
                 "WHERE pnl < 0 AND paper_trade=? AND resolved_at >= ?",
@@ -54,7 +56,7 @@ class RiskManager:
         # 1. Cooldown — keyed by (ticker, platform) so Kalshi/Poly don't block each other
         last = self._last_trade_time.get((ticker, platform))
         if last:
-            elapsed = (datetime.now(timezone.utc) - last).total_seconds()
+            elapsed = (datetime.now(_ET) - last).total_seconds()
             if elapsed < self.cfg.cooldown_between_trades_seconds:
                 remaining = int(self.cfg.cooldown_between_trades_seconds - elapsed)
                 return False, f"Cooldown: {remaining}s remaining for {ticker}"
@@ -103,7 +105,7 @@ class RiskManager:
 
     def record_trade(self, ticker: str, pnl: float = 0.0, platform: str = "kalshi"):
         """Record a completed trade for cooldown tracking."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(_ET)
         self._last_trade_time[(ticker, platform)] = now
         # Prune stale entries to prevent unbounded growth over thousands of tickers
         cutoff = now - timedelta(seconds=self.cfg.cooldown_between_trades_seconds * 2)
@@ -164,7 +166,7 @@ class RiskManager:
         # Check 1: daily loss total — use trade_logs directly to avoid JOIN fan-out
         try:
             paper_flag = 0 if settings.trading.live_trading_enabled else 1
-            today = datetime.now(timezone.utc).date().isoformat()
+            today = datetime.now(_ET).date().isoformat()
             row = await db.fetchone(
                 "SELECT COALESCE(SUM(CASE WHEN pnl < 0 THEN ABS(pnl) ELSE 0 END), 0) AS daily_loss "
                 "FROM trade_logs "

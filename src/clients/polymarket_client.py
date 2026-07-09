@@ -14,6 +14,8 @@ import time
 from typing import Dict, List, Optional
 
 import httpx
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.polymarket_client")
 
@@ -343,7 +345,7 @@ class PolymarketTradingClient:
                 logger.warning("Polymarket live markets: get_markets returned 0 — API may be down")
                 return []
 
-            cutoff = datetime.now(timezone.utc) + timedelta(hours=max_hours)
+            cutoff = datetime.now(_ET) + timedelta(hours=max_hours)
             live = []
             for m in all_markets:
                 if not ((m.get("yes_ask") or 0) > 1 and (m.get("title") or "")):

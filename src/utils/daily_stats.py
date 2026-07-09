@@ -3,6 +3,8 @@
 import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.daily_stats")
 
@@ -36,7 +38,7 @@ def _build_eval_entry(
         "close_time":  close_time or "",
         "yes_ask":     float(yes_ask or 0),
         "price_cents": float(yes_ask or 0),   # alias used by bot_alert_loop
-        "evaluated_at": evaluated_at or datetime.now(timezone.utc).isoformat(),
+        "evaluated_at": evaluated_at or datetime.now(_ET).isoformat(),
     }
 
 
@@ -49,7 +51,7 @@ class DailyStats:
     """
 
     def __init__(self) -> None:
-        self.bot_start_time: Optional[datetime] = datetime.now(timezone.utc)
+        self.bot_start_time: Optional[datetime] = datetime.now(_ET)
         self.markets_scanned: int = 0
         self.signals_generated: int = 0
         self.trades_executed: int = 0
@@ -74,7 +76,7 @@ class DailyStats:
         """Called after each scan cycle to keep heartbeat data fresh."""
         self.last_live_scan_markets = live_markets[:6]
         self.last_regular_scan_top  = regular_top[:6]
-        self.last_scan_updated_at   = datetime.now(timezone.utc).isoformat()
+        self.last_scan_updated_at   = datetime.now(_ET).isoformat()
 
     # ── Recording methods ──────────────────────────────────────────────────
 
@@ -115,7 +117,7 @@ class DailyStats:
 
     def _active_evaluations(self) -> List[Dict]:
         """Return evaluations that haven't expired yet (close_time still in future)."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(_ET)
         active = []
         for e in self.all_evaluations:
             ct = e.get("close_time", "")
@@ -171,7 +173,7 @@ class DailyStats:
             "reasoning":   reasoning,
             "platform":    platform,
             "skip_reason": skip_reason or "confidence below threshold",
-            "recorded_at": recorded_at or datetime.now(timezone.utc).isoformat(),
+            "recorded_at": recorded_at or datetime.now(_ET).isoformat(),
         })
         # Keep top 5 by confidence (highest-confidence misses are most interesting)
         self.near_misses.sort(key=lambda x: x.get("confidence") or 0, reverse=True)
@@ -218,7 +220,7 @@ class DailyStats:
 
     def record_error(self, msg: str) -> None:
         """Append error to the list (max 50 retained)."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(_ET)
         self.errors.append((now, msg))
         if len(self.errors) > 50:
             self.errors = self.errors[-50:]
@@ -258,7 +260,7 @@ class DailyStats:
         """Return human-readable uptime, e.g. '2d 4h 32m'."""
         if not self.bot_start_time:
             return "unknown"
-        delta = datetime.now(timezone.utc) - self.bot_start_time
+        delta = datetime.now(_ET) - self.bot_start_time
         total_seconds = int(delta.total_seconds())
         days, remainder = divmod(total_seconds, 86400)
         hours, remainder = divmod(remainder, 3600)

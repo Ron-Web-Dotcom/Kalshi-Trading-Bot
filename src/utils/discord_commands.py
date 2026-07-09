@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.discord_commands")
 
@@ -185,7 +187,7 @@ class DiscordCommandListener:
                 await self._send(f"❌ No open position found for `{ticker}`.")
                 return
 
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(_ET).isoformat()
             await self.db.execute(
                 "UPDATE positions SET status='closed', close_reason='manual_discord', closed_at=? WHERE ticker=? AND status='open'",
                 (now, ticker)

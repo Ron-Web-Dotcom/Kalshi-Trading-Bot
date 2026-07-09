@@ -16,6 +16,8 @@ Silent — no Discord, no new loops, no memory impact.
 import json
 import logging
 import os
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.calibrator")
 
@@ -52,7 +54,7 @@ def _save(threshold: float, reason: str, trades_used: int) -> None:
                 "threshold":   round(threshold, 1),
                 "reason":      reason,
                 "trades_used": trades_used,
-                "updated_at":  datetime.datetime.utcnow().isoformat(),
+                "updated_at":  datetime.datetime.now(_ET).isoformat(),
             }, f)
     except Exception as e:
         logger.warning("Could not save calibrated threshold: %s", e)

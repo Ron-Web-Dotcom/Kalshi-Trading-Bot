@@ -3,6 +3,8 @@
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Optional
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.live_trader")
 
@@ -116,7 +118,7 @@ class LiveTrader:
             return None
 
         order_id = order_resp.get("order", {}).get("order_id", "unknown")
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(_ET).isoformat()
 
         record = {
             "ticker": ticker,

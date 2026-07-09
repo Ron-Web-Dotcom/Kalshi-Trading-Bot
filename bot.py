@@ -574,7 +574,7 @@ class TradingBot:
             from src.utils.eastern_time import now_et
             from datetime import timedelta
 
-            last_summary_at = datetime.now(timezone.utc).isoformat()
+            last_summary_at = datetime.now(_ET).isoformat()
 
             _SUMMARY_HOURS = {6: "Morning", 12: "Afternoon", 18: "Evening"}  # midnight covered by daily_summary_loop
             _first_run = True
@@ -724,7 +724,7 @@ class TradingBot:
                 except Exception as e:
                     logger.error("Daytime summary error: %s", e)
                 finally:
-                    last_summary_at = datetime.now(timezone.utc).isoformat()
+                    last_summary_at = datetime.now(_ET).isoformat()
 
         async def daily_summary_loop():
             """Post midnight daily report to Discord, then reset daily stats."""
@@ -923,7 +923,7 @@ class TradingBot:
 
             # ticker → {band, pick_snapshot, alerted_at, result_sent}
             _alerted: dict = {}
-            _alerted_date  = datetime.now(timezone.utc).date()
+            _alerted_date  = datetime.now(_ET).date()
             # frozenset of ticker+band keys sent in last watching alert
             _last_sent_keys: frozenset = frozenset()
             # tickers whose results have already been reported
@@ -1001,7 +1001,7 @@ class TradingBot:
 
                     discord   = DiscordAlerter()
                     mode      = "PAPER" if not settings.trading.live_trading_enabled else "LIVE"
-                    now_utc   = datetime.now(timezone.utc)
+                    now_utc   = datetime.now(_ET)
                     MIN_CONF  = _get_min_conf()  # refresh each cycle (default 65%)
                     new_picks: list = []
 
@@ -1724,7 +1724,7 @@ class TradingBot:
                                 scanned = datetime.fromisoformat(existing["scanned_at"])
                                 if scanned.tzinfo is None:
                                     scanned = scanned.replace(tzinfo=timezone.utc)
-                                if (datetime.now(timezone.utc) - scanned).total_seconds() < 600:
+                                if (datetime.now(_ET) - scanned).total_seconds() < 600:
                                     continue   # re-evaluated within last 10 min, skip
                             except Exception:
                                 pass
@@ -1839,6 +1839,7 @@ class TradingBot:
             while not self._shutdown.is_set():
                 try:
                     from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
                     _et = ZoneInfo("America/New_York")
                     now_et = datetime.now(_et)
                     # Wait until next Sunday 03:00 ET

@@ -12,6 +12,8 @@ Each cycle:
 import logging
 from datetime import datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.manual_monitor")
 
@@ -253,7 +255,7 @@ async def _send_manual_trade_alert(
                 {"name": "🤖 AI Verdict",  "value": verdict,           "inline": True},
                 {"name": "📊 Analysis",    "value": verdict_detail,    "inline": False},
             ],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(_ET).isoformat(),
             "footer": {"text": "Holding with you 🤝" if agrees else "Consider reviewing this position"},
         }]
     }

@@ -8,6 +8,8 @@ from typing import Dict, List
 
 from src.clients.kalshi_client import KalshiClient
 from src.utils.database import DatabaseManager
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.market_data")
 
@@ -40,7 +42,7 @@ class MarketDataFetcher:
             len(markets), len(markets_by_vol), len(short_duration),
         )
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(_ET).isoformat()
         stored = 0
         skipped = 0
 

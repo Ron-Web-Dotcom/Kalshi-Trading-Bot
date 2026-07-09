@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import httpx
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 # Global rate limiter shared across ALL KalshiClient instances
 # Kalshi allows ~3 req/s sustained — use a semaphore to serialize across tasks
@@ -161,7 +163,7 @@ class KalshiClient:
         category tags if events endpoint unavailable.
         """
         live_markets: List[Dict] = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(_ET)
 
         # Strategy 1: /events endpoint — grab all open sport events closing within 24h
         # Kalshi doesn't expose an "in_game" flag, so we rely on:
@@ -284,7 +286,7 @@ class KalshiClient:
             except Exception:
                 pass
 
-            now = datetime.now(timezone.utc)
+            now = datetime.now(_ET)
             for m in markets:
                 ticker = (m.get("ticker") or "").upper()
                 title  = (m.get("title") or "").lower()
@@ -359,7 +361,7 @@ class KalshiClient:
                     return dt
                 except Exception:
                     return datetime.max.replace(tzinfo=timezone.utc)
-            now = datetime.now(timezone.utc)
+            now = datetime.now(_ET)
             # Only include markets that haven't closed yet
             markets = [m for m in markets if _close_key(m) > now]
             markets.sort(key=_close_key)
@@ -376,7 +378,7 @@ class KalshiClient:
         Falls back to API with yes_ask→last_price→yes_bid price chain.
         """
         from datetime import datetime, timezone
-        now = datetime.now(timezone.utc)
+        now = datetime.now(_ET)
 
         # ── DB path (preferred — prices already enriched by ingest job) ──────
         if db is not None:

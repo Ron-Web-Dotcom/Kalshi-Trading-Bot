@@ -21,7 +21,7 @@ def utc_to_et(dt: datetime) -> datetime:
 def format_et(dt: datetime = None, fmt: str = "%I:%M %p ET") -> str:
     """Format a datetime (or now) as Eastern time string."""
     if dt is None:
-        dt = datetime.now(timezone.utc)
+        dt = datetime.now(_ET)
     return utc_to_et(dt).strftime(fmt)
 
 

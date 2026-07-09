@@ -3,6 +3,8 @@
 import logging
 from datetime import datetime, timezone
 from typing import Dict, List
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.jobs.track")
 
@@ -34,7 +36,7 @@ async def run_tracking(db_manager, risk=None) -> None:
         risk = RiskManager(db=db_manager)
     ai       = AIDecisionEngine(db=db_manager)
     discord  = DiscordAlerter()
-    now      = datetime.now(timezone.utc).isoformat()
+    now      = datetime.now(_ET).isoformat()
 
     try:
         positions: List[Dict] = await db_manager.fetchall(
@@ -218,7 +220,7 @@ async def run_tracking(db_manager, risk=None) -> None:
                     if _tl_track and _tl_track.get("id"):
                         await db_manager.execute(
                             "UPDATE trade_logs SET pnl=?, resolved_at=?, result=? WHERE id=?",
-                            (pnl, datetime.now(timezone.utc).isoformat(), "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN"), _tl_track["id"])
+                            (pnl, datetime.now(_ET).isoformat(), "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN"), _tl_track["id"])
                         )
                     risk.record_result(ticker, pnl, platform)
                     try:

@@ -28,6 +28,8 @@ The hourly digest:
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.live_miss_tracker")
 
@@ -47,10 +49,10 @@ class LiveMissTracker:
         # tickers included in the LAST hourly digest — don't repeat them
         self._last_digest_tickers: set = set()
         self._last_digest_at: Optional[datetime] = None
-        self._day = datetime.now(timezone.utc).date()
+        self._day = datetime.now(_ET).date()
 
     def _maybe_reset(self):
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(_ET).date()
         if today != self._day:
             self._misses.clear()
             self._last_digest_tickers.clear()
@@ -88,7 +90,7 @@ class LiveMissTracker:
             "skip_reason":     skip_reason,
             "scan_type":       scan_type,
             "platform":        platform,
-            "scanned_at":      datetime.now(timezone.utc).isoformat(),
+            "scanned_at":      datetime.now(_ET).isoformat(),
             "resolved_at":     None,
             "actual_outcome":  None,   # "yes" or "no"
             "was_correct":     None,   # True / False
@@ -119,7 +121,7 @@ class LiveMissTracker:
         else:
             pnl_per_10 = -10.0
 
-        entry["resolved_at"]    = datetime.now(timezone.utc).isoformat()
+        entry["resolved_at"]    = datetime.now(_ET).isoformat()
         entry["actual_outcome"] = actual
         entry["was_correct"]    = correct
         entry["potential_pnl"]  = round(pnl_per_10, 2)
@@ -140,7 +142,7 @@ class LiveMissTracker:
         Sorted by potential_pnl descending (most painful miss first).
         """
         self._maybe_reset()
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+        cutoff = datetime.now(_ET) - timedelta(hours=window_hours)
         result = []
         for ticker, entry in self._misses.items():
             if not entry.get("was_correct"):
@@ -168,7 +170,7 @@ class LiveMissTracker:
     def mark_digest_sent(self, tickers: List[str]) -> None:
         """Call after sending a digest to prevent those tickers repeating next hour."""
         self._last_digest_tickers = set(tickers)
-        self._last_digest_at = datetime.now(timezone.utc)
+        self._last_digest_at = datetime.now(_ET)
 
     def all_live_misses(self) -> List[Dict]:
         """All recorded live-scan misses today (resolved or pending)."""

@@ -32,6 +32,8 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import httpx
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.category_scanner")
 
@@ -302,7 +304,7 @@ def _pre_score(market: Dict) -> float:
             close_dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
             if close_dt.tzinfo is None:
                 close_dt = close_dt.replace(tzinfo=timezone.utc)
-            hours = (close_dt - datetime.now(timezone.utc)).total_seconds() / 3600
+            hours = (close_dt - datetime.now(_ET)).total_seconds() / 3600
             if 0.1 < hours <= 1:      time_bonus = 1.6  # very soon
             elif 1 < hours <= 6:      time_bonus = 2.0  # sweet spot — live/near-live
             elif 6 < hours <= 24:     time_bonus = 1.5  # today

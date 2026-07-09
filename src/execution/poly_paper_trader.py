@@ -14,6 +14,8 @@ Polymarket fee model:
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Optional
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.poly_paper_trader")
 
@@ -88,7 +90,7 @@ class PolyPaperTrader:
         notional   = contracts * price_cents / 100
         fee        = _poly_fee(price_cents, contracts)
         total_cost = notional + fee
-        now        = datetime.now(timezone.utc).isoformat()
+        now        = datetime.now(_ET).isoformat()
 
         # Duplicate guard BEFORE placing any live order
         # Primary check: same ticker+side (catches same API session)

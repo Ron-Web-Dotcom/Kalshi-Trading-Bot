@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import httpx
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.discord")
 
@@ -49,7 +51,7 @@ class DiscordAlerter:
             "title": title[:256],
             "description": description[:4096],
             "color": color,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(_ET).isoformat(),
         }
         if safe_fields:
             embed["fields"] = safe_fields
@@ -209,7 +211,7 @@ class DiscordAlerter:
             return
 
         mode_tag = "📝 PAPER" if mode == "PAPER" else "💰 LIVE"
-        now_utc  = datetime.now(timezone.utc)
+        now_utc  = datetime.now(_ET)
         from src.utils.eastern_time import now_et as _now_et, format_et as _fmt_et, utc_to_et as _utc_to_et_ba
         _now_et_obj  = _now_et()
         _today_et    = _now_et_obj.date()
@@ -481,7 +483,7 @@ class DiscordAlerter:
                 "description": "\n\n".join(lines),
                 "color": 0xFF8C00,
                 "fields": fields,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(_ET).isoformat(),
                 "footer": {"text": "In-play markets resolving soon — high time sensitivity"},
             }]
         }
@@ -771,7 +773,7 @@ class DiscordAlerter:
             return  # nothing new since last send — stay silent
 
         # Update the watermark before posting so concurrent calls don't double-send
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(_ET).isoformat()
         self.__class__._last_near_miss_digest_at = now_iso
 
         mode_tag = "📝 PAPER" if paper else "💰 LIVE"
@@ -968,7 +970,7 @@ class DiscordAlerter:
     ) -> None:
         """Hourly heartbeat — clean stats, watching section, best pick."""
         from src.utils.eastern_time import format_et, et_label, now_et as _hb_now_et, utc_to_et as _hb_utc_to_et
-        now_utc  = datetime.now(timezone.utc)
+        now_utc  = datetime.now(_ET)
         hhmm     = format_et(now_utc, "%I:%M %p") + f" {et_label()}"
         color    = 0x5865F2
         _hb_today_et    = _hb_now_et().date()
@@ -1528,7 +1530,7 @@ class DiscordAlerter:
                 buy_signals.append(b)
 
         from src.utils.eastern_time import utc_to_et as _utc_to_et, now_et as _now_et_ds
-        _now_ds   = datetime.now(timezone.utc)
+        _now_ds   = datetime.now(_ET)
         _today_ds = _now_et_ds().date()
         _tomorrow_ds = _today_ds.__class__.fromordinal(_today_ds.toordinal() + 1)
 

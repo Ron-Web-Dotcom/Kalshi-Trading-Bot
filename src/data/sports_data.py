@@ -17,6 +17,8 @@ import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional, Tuple
 
 import httpx
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.sports_data")
 
@@ -395,8 +397,8 @@ async def fetch_nba_game_stats(team_name: str) -> Optional[str]:
         return None
     # Recent games
     from datetime import datetime, timedelta
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    past  = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
+    today = datetime.now(_ET).strftime("%Y-%m-%d")
+    past  = (datetime.now(_ET) - timedelta(days=30)).strftime("%Y-%m-%d")
     games = await _get_json(
         f"{BDL_BASE}/games",
         params={"team_ids[]": team_id, "start_date": past,
@@ -421,7 +423,7 @@ async def fetch_nba_game_stats(team_name: str) -> Optional[str]:
 async def fetch_mlb_schedule(team_id: int = None) -> List[Dict]:
     """Official MLB Stats API — today's games or team schedule."""
     from datetime import datetime
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today = datetime.now(_ET).strftime("%Y-%m-%d")
     params = {"sportId": 1, "date": today, "hydrate": "team,linescore"}
     if team_id:
         params["teamId"] = team_id

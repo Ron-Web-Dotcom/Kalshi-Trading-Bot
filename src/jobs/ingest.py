@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from src.utils.junk_filter import is_junk
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.jobs.ingest")
 
@@ -40,7 +42,7 @@ async def run_ingestion(db_manager, market_queue: Optional[asyncio.Queue] = None
         try:
             logger.info("━━━ POLYMARKET INGEST START ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             raw_poly = await poly.get_markets(limit=500)
-            now_ts   = datetime.now(timezone.utc).isoformat()
+            now_ts   = datetime.now(_ET).isoformat()
             rows = []
             for pm in raw_poly:
                 try:
