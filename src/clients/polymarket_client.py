@@ -17,6 +17,34 @@ import httpx
 
 logger = logging.getLogger("trading.polymarket_client")
 
+
+def _normalize_poly_ts(ts: str) -> str:
+    """
+    Polymarket API sometimes returns ET timestamps with a hardcoded -05:00 (EST) offset
+    even during summer (EDT = -04:00). Re-interpret the naive datetime as America/New_York
+    so DST is applied correctly, giving the true UTC equivalent.
+    Only touches non-UTC timestamps (those with a non-zero UTC offset).
+    """
+    if not ts:
+        return ts
+    try:
+        from datetime import datetime, timezone
+        import zoneinfo
+        cd = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if cd.tzinfo is None:
+            return ts
+        # If already UTC (offset == 0), leave as-is
+        if cd.utcoffset().total_seconds() == 0:
+            return ts
+        # Re-attach the naive local time as America/New_York (DST-aware)
+        et = zoneinfo.ZoneInfo("America/New_York")
+        naive = cd.replace(tzinfo=None)
+        cd_et = naive.replace(tzinfo=et)
+        return cd_et.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    except Exception:
+        return ts
+
+
 GAMMA_BASE = "https://gamma-api.polymarket.com"
 CLOB_BASE  = "https://clob.polymarket.com"
 _TIMEOUT   = httpx.Timeout(20.0)
@@ -220,7 +248,7 @@ class PolymarketTradingClient:
                 "yes_bid":       round(max(yes_price - 1, 1), 1),
                 "no_bid":        round(max(no_price  - 1, 1), 1),
                 "volume":        volume,
-                "close_time":    m.get("endDate") or m.get("endDateIso", ""),
+                "close_time":    _normalize_poly_ts(m.get("endDate") or m.get("endDateIso", "")),
                 "open_interest": 0,
                 "status":        "open",
                 "_yes_token":    token_ids[0] if len(token_ids) > 0 else None,

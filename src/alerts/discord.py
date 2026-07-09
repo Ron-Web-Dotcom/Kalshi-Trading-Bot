@@ -248,7 +248,16 @@ class DiscordAlerter:
                 return " ⏰ resolving now"
             if hrs <= 1:
                 mins = int(hrs * 60)
-                return f" 🔴 LIVE — {mins}min left" if mins > 0 else " 🔴 LIVE — closing now"
+                if mins <= 0:
+                    return " 🔴 LIVE — closing now"
+                try:
+                    cd = datetime.fromisoformat(str(close_time).replace("Z", "+00:00"))
+                    if cd.tzinfo is None:
+                        cd = cd.replace(tzinfo=timezone.utc)
+                    et_time = _fmt_et(cd, "%I:%M %p")
+                    return f" 🔴 LIVE — {mins}min left ({et_time} ET)"
+                except Exception:
+                    return f" 🔴 LIVE — {mins}min left"
             try:
                 cd = datetime.fromisoformat(str(close_time).replace("Z", "+00:00"))
                 if cd.tzinfo is None:
@@ -979,7 +988,10 @@ class DiscordAlerter:
                     return "⏰ Resolving now"
                 if hours <= 1:
                     mins = int(hours * 60)
-                    return f"🔴 LIVE — {mins}min left"
+                    if mins <= 0:
+                        return "🔴 LIVE — closing now"
+                    et_time = close_dt.astimezone(_hb_tz_et).strftime("%I:%M %p")
+                    return f"🔴 LIVE — {mins}min left ({et_time} ET)"
                 et_date = close_dt.astimezone(_hb_tz_et).date()
                 if et_date == _hb_today_et:
                     return "⏳ Ends today"
