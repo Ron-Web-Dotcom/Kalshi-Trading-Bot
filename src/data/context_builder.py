@@ -213,6 +213,16 @@ async def build_market_context(
     from src.data.web_search import fetch_live_context
     tasks["web_search"] = fetch_live_context(title, timeout=max(timeout_seconds - 2, 1.0))
 
+    # SofaScore: live match stats, H2H, and form for any market with two teams
+    try:
+        from src.clients.sofascore_client import SofaScoreClient
+        _ssc = SofaScoreClient()
+        _teams = _ssc.extract_teams_from_title(title)
+        if _teams:
+            tasks["sofascore"] = _ssc.build_match_context(_teams[0], _teams[1])
+    except Exception as _ssc_init_err:
+        logger.debug("SofaScore init skipped: %s", _ssc_init_err)
+
     # Metaculus: always fetch — gives rule engine a probability anchor and raises AI confidence
     tasks["community"] = fetch_community_prediction(title)
 
@@ -250,6 +260,10 @@ async def build_market_context(
     sofa_deep = results.get("sofa_deep")
     if isinstance(sofa_deep, str) and sofa_deep:
         blocks.append(sofa_deep)
+
+    sofascore = results.get("sofascore")
+    if isinstance(sofascore, str) and sofascore:
+        blocks.append(sofascore)
 
     economics = results.get("economics")
     if isinstance(economics, str) and economics:
