@@ -1049,6 +1049,24 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                             net_ev or 0, exp_profit_usd or 0, poly_str,
                         )
 
+                        # Fire BOT ALERT (watching) BEFORE placing the bid
+                        try:
+                            _watch_pick = {
+                                "ticker":     ticker,
+                                "title":      best.get("title") or ticker,
+                                "platform":   best.get("platform", "kalshi"),
+                                "side":       side,
+                                "confidence": decision.get("confidence", 0),
+                                "net_ev":     net_ev,
+                                "action":     "BUY",
+                                "close_time": best.get("close_time", ""),
+                                "yes_ask":    price if side == "yes" else (100 - price),
+                                "reasoning":  decision.get("reasoning", "")[:120],
+                            }
+                            await discord.bot_alert([_watch_pick], mode=mode_label)
+                        except Exception as _ba_err:
+                            logger.debug("Pre-trade bot_alert failed: %s", _ba_err)
+
                         # Route to the correct platform's trader (single Discord alert comes from execute())
                         platform = best.get("platform", "kalshi")
                         active_trader = kalshi_trader if platform == "kalshi" else poly_trader
@@ -1073,6 +1091,16 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                             results.total_positions += 1
                             results.total_capital_used += rec.get("total_cost", 0)
                             results.ai_trades += 1
+                            # Mark this traded market as a live event in the heartbeat
+                            _traded_market = dict(market)
+                            _traded_market["_just_traded"] = True
+                            _existing_live = list(getattr(_ds, "last_live_scan_markets", []))
+                            if not any(m.get("ticker") == ticker for m in _existing_live):
+                                _existing_live.insert(0, _traded_market)
+                            _ds.update_scan_state(
+                                live_markets=_existing_live[:6],
+                                regular_top=list(getattr(_ds, "last_regular_scan_top", [])),
+                            )
                             await auditor.log(
                                 db, "TRADE_PLACED", ticker=ticker, platform=platform,
                                 side=side, price_cents=price,
