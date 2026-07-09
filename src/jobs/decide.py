@@ -187,6 +187,33 @@ async def make_decision_for_market(
     """
     from src.config.settings import settings
 
+    # ── Market quality gate — applied before any AI/rule spend ───────────────
+    title_lower = (market.get("title", "") or "").lower()
+    volume      = float(market.get("volume") or 0)
+    yes_ask     = float(market.get("yes_ask") or market.get("last_price") or 0)
+
+    is_weather = any(w in title_lower for w in (
+        "temperature", "rainfall", "rain", "snow", "hurricane",
+        "tornado", "wind speed", "precipitation", "weather",
+    ))
+    is_esports = any(w in title_lower for w in (
+        "honor of kings", "league of legends", "valorant", "dota",
+        "counter-strike", "cs2", "esport", "e-sport", "gaming",
+        "bo3", "bo5", "first blood", "first dragon", "first baron",
+        "lgd ", "team yandex", "team liquid", "team spirit",
+    ))
+
+    if volume < 50 and volume > 0:
+        logger.debug("SKIP low-volume %s vol=%.0f", market.get("ticker","?")[:40], volume)
+        return None
+
+    # Override min_confidence for risky market types
+    if min_confidence is None:
+        if is_weather or is_esports:
+            min_confidence = 88.0
+        elif yes_ask > 55:
+            min_confidence = 85.0
+
     tcfg     = settings.trading
     hard_cap = getattr(tcfg, "daily_ai_hard_cap", 15.0)
     ai_capped = False
