@@ -19,6 +19,8 @@ Sources (all free, no API key required):
   PREDICTION MARKETS (cross-reference)
   10. Manifold Markets API — community forecasts on same or similar questions
   11. Metaculus API        — aggregated community probability estimates
+  12. Polymarket Gamma API — independent prediction market YES/NO prices
+  13. PredictIt API        — US politics contracts (elections, approval, legislation)
 
   KNOWLEDGE / BACKGROUND
   12. Wikipedia REST API   — authoritative article summaries for key entities
@@ -29,7 +31,7 @@ Sources (all free, no API key required):
   15. Reddit RSS search    — community discussion and sentiment
 
   VIDEO COVERAGE
-  16. YouTube search       — video titles, channels, view counts (no API key)
+  17. YouTube search       — video titles, channels, view counts (no API key)
 """
 
 import asyncio
@@ -408,6 +410,99 @@ async def _youtube_search(q: str) -> List[str]:
         return []
 
 
+# ── Prediction market price fetchers ─────────────────────────────────────────
+
+def _kw_overlap(a: str, b: str) -> float:
+    """Jaccard similarity between two strings, ignoring stopwords."""
+    sw = {"will", "the", "a", "an", "in", "on", "at", "to", "of", "by",
+          "be", "is", "or", "and", "for", "it", "its", "this", "does"}
+    wa = {w for w in re.sub(r"[^\w\s]", " ", a.lower()).split() if len(w) > 2 and w not in sw}
+    wb = {w for w in re.sub(r"[^\w\s]", " ", b.lower()).split() if len(w) > 2 and w not in sw}
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
+
+
+async def _polymarket_price(title: str) -> Optional[str]:
+    """
+    Search Polymarket Gamma API for a market matching the title.
+    Returns a formatted context block with YES/NO prices, or None.
+    """
+    try:
+        q = " ".join(title.split()[:7])
+        data = await _get(
+            "https://gamma-api.polymarket.com/markets",
+            params={"search": q, "active": "true", "closed": "false", "limit": 8},
+            as_json=True,
+        )
+        if not data:
+            return None
+        raw = data if isinstance(data, list) else data.get("data", [])
+        best, best_score = None, 0.0
+        for m in raw:
+            score = _kw_overlap(title, m.get("question", ""))
+            if score > best_score:
+                best, best_score = m, score
+        if not best or best_score < 0.15:
+            return None
+        prices = best.get("outcomePrices") or []
+        if len(prices) < 2:
+            return None
+        yes_p = float(prices[0]) * 100
+        no_p  = float(prices[1]) * 100
+        vol   = float(best.get("volume") or 0)
+        return (
+            f"Polymarket: \"{best.get('question','')}\"\n"
+            f"  YES: {yes_p:.0f}%  |  NO: {no_p:.0f}%  |  Volume: ${vol:,.0f}\n"
+            f"  (independent prediction market — gaps vs Kalshi signal mispricing)"
+        )
+    except Exception as e:
+        logger.debug("Polymarket price fetch failed: %s", e)
+        return None
+
+
+async def _predictit_price(title: str) -> Optional[str]:
+    """
+    Search PredictIt public API for a US politics market matching the title.
+    Returns a formatted context block, or None.
+    PredictIt is most useful for elections, approval ratings, legislation.
+    """
+    # Only worth calling for politics-flavoured titles
+    _POL_WORDS = {"president", "congress", "senate", "house", "elect", "vote",
+                  "democrat", "republican", "trump", "biden", "harris", "governor",
+                  "approval", "bill", "law", "scotus", "supreme", "court", "fed",
+                  "rate", "fomc", "inflation", "cpi", "gdp", "unemployment"}
+    title_lower = title.lower()
+    if not any(w in title_lower for w in _POL_WORDS):
+        return None
+    try:
+        data = await _get(
+            "https://www.predictit.org/api/marketdata/all/",
+            as_json=True,
+        )
+        if not data:
+            return None
+        markets = data.get("markets", [])
+        best, best_score = None, 0.0
+        for m in markets:
+            score = _kw_overlap(title, m.get("name", ""))
+            if score > best_score:
+                best, best_score = m, score
+        if not best or best_score < 0.18:
+            return None
+        contracts = best.get("contracts", [])
+        if not contracts:
+            return None
+        lines = [f"PredictIt: \"{best.get('name','')[:100]}\""]
+        for c in contracts[:4]:
+            yes_p = (c.get("lastTradePrice") or c.get("bestYesPrice") or 0) * 100
+            lines.append(f"  {c.get('name','')[:60]}: {yes_p:.0f}%")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.debug("PredictIt fetch failed: %s", e)
+        return None
+
+
 # ── Main aggregator ───────────────────────────────────────────────────────────
 
 async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
@@ -436,9 +531,11 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
                 _ap_news(q),
                 _reuters_news(q),
                 _bbc_news(q),
-                # Prediction market cross-reference
+                # Prediction market cross-reference (4 independent sources)
                 _manifold_markets(q),
                 _metaculus(q),
+                _polymarket_price(market_title),
+                _predictit_price(market_title),
                 # Knowledge / background
                 _ddg_instant(q),
                 *wiki_coros,
@@ -472,6 +569,8 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     bbc_h      = _next() or []
     manifold   = _next()
     metaculus  = _next()
+    poly_price = _next()
+    predictit  = _next()
     ddg        = _next()
     wiki_results = [_next() for _ in wiki_coros]
     reddit_h      = _next() or []
@@ -538,12 +637,16 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
             lines.append(f"  • {vid}")
         blocks.append("\n".join(lines))
 
-    # 6. Prediction market cross-references
+    # 6. Prediction market cross-references (Manifold, Metaculus, Polymarket, PredictIt)
     pm_lines = []
     if isinstance(manifold, str) and manifold:
         pm_lines.append(manifold)
     if isinstance(metaculus, str) and metaculus:
         pm_lines.append(metaculus)
+    if isinstance(poly_price, str) and poly_price:
+        pm_lines.append(poly_price)
+    if isinstance(predictit, str) and predictit:
+        pm_lines.append(predictit)
     if pm_lines:
         blocks.append("=== OTHER PREDICTION MARKETS ===\n" + "\n".join(pm_lines))
 
@@ -552,12 +655,18 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
             bool(all_headlines), bool(wiki_text), bool(ddg),
             bool(reddit_h), bool(youtube_deep or youtube_h), bool(pm_lines),
         ])
+        pm_sources = "+".join(filter(None, [
+            "Manifold" if isinstance(manifold, str) and manifold else "",
+            "Metaculus" if isinstance(metaculus, str) and metaculus else "",
+            "Polymarket" if isinstance(poly_price, str) and poly_price else "",
+            "PredictIt" if isinstance(predictit, str) and predictit else "",
+        ])) or "none"
         logger.info(
             "Web search: %d headlines | %d wiki | reddit=%s | youtube_deep=%s | pred_markets=%s | query='%s'",
             len(all_headlines), len(wiki_text),
             "yes" if reddit_h else "no",
             "yes" if youtube_deep else f"{len(youtube_h)} titles",
-            "yes" if pm_lines else "no",
+            pm_sources,
             q[:60],
         )
         return "\n\n".join(blocks)
