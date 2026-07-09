@@ -100,16 +100,6 @@ class PolymarketTradingClient:
 
     # ── Market data (PUBLIC — no auth) ────────────────────────────────────────
 
-    def _auth_headers(self, method: str, path: str, body: str = "") -> Dict[str, str]:
-        ts  = str(int(time.time() * 1000))
-        sig = self._sign(ts, method, path, body)
-        return {
-            "X-PM-Access-Key":  self.key_id,
-            "X-PM-Timestamp":   ts,
-            "X-PM-Signature":   sig,
-            "Content-Type":     "application/json",
-        }
-
     # ── Market data ───────────────────────────────────────────────────────────
 
     async def get_markets(self, limit: int = 100) -> List[Dict]:
@@ -327,15 +317,15 @@ class PolymarketTradingClient:
                     parsed = self._parse_market(m)
                     if not parsed or (parsed.get("yes_ask") or 0) <= 1:
                         continue
-                    ticker = parsed.get("ticker") or parsed.get("condition_id") or ""
+                    ticker = parsed.get("ticker") or ""
                     if ticker in seen_tickers:
                         continue
+                    seen_tickers.add(ticker)
                     title = (parsed.get("title") or "").lower()
                     # Must look like an actual game market — not a general prediction
                     if any(kw in title for kw in _GAME_KEYWORDS):
                         parsed["_poly_live"] = True
                         live_markets.append(parsed)
-                        seen_tickers.add(ticker)
             except Exception as e:
                 logger.debug("Polymarket tag=%s fetch: %s", tag, e)
 
@@ -347,16 +337,26 @@ class PolymarketTradingClient:
         Fetch active Polymarket markets with valid prices (used for expiring pool).
         """
         try:
+            from datetime import datetime, timezone, timedelta
             all_markets = await self.get_markets(limit=100)
             if not all_markets:
                 logger.warning("Polymarket live markets: get_markets returned 0 — API may be down")
                 return []
 
-            live = [
-                m for m in all_markets
-                if (m.get("yes_ask") or 0) > 1
-                and (m.get("title") or "")
-            ]
+            cutoff = datetime.now(timezone.utc) + timedelta(hours=max_hours)
+            live = []
+            for m in all_markets:
+                if not ((m.get("yes_ask") or 0) > 1 and (m.get("title") or "")):
+                    continue
+                close_time_str = m.get("close_time") or ""
+                if close_time_str:
+                    try:
+                        ct = datetime.fromisoformat(close_time_str.replace("Z", "+00:00"))
+                        if ct > cutoff:
+                            continue
+                    except Exception:
+                        pass
+                live.append(m)
 
             if not live and all_markets:
                 sample = all_markets[0]

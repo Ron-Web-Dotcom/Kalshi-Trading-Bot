@@ -52,11 +52,11 @@ async def run_ingestion(db_manager, market_queue: Optional[asyncio.Queue] = None
                         pm.get("yes_bid", 0), pm.get("yes_ask", 0),
                         pm.get("no_bid",  0), pm.get("no_ask",  0),
                         pm.get("volume",  0), 0,
-                        pm.get("close_time", ""), pm.get("yes_ask", 0),
+                        pm.get("close_time", ""), pm.get("last_price") or pm.get("yes_ask", 0),
                         now_ts, "polymarket",
                     ))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Polymarket ingest row error: %s", e)
             if rows:
                 await db_manager.executemany("""
                     INSERT OR REPLACE INTO markets

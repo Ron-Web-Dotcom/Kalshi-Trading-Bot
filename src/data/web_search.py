@@ -257,7 +257,7 @@ async def _youtube_deep(q: str, timeout: float) -> Optional[str]:
     """Kick off deep YouTube research — transcripts + descriptions."""
     try:
         from src.data.youtube_research import deep_youtube_research
-        return await deep_youtube_research(q, timeout=min(timeout - 2, 16.0))
+        return await deep_youtube_research(q, timeout=max(1, min(timeout - 2, 16.0)))
     except Exception as e:
         logger.warning("YouTube deep research failed: %s", e)
         return None
@@ -492,37 +492,37 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     # Build all coroutines — wiki lookups for each entity name
     wiki_coros = [_wikipedia(e) for e in entities[:2]]
 
-    def _skip(name: str, fallback):
+    async def _skip(name: str, fallback):
         """Return fallback immediately if source is disabled by health check."""
-        return asyncio.coroutine(lambda: fallback)() if name in DISABLED_SOURCES else None
+        return fallback
 
-    async def _guarded(name, coro, fallback):
+    async def _guarded(name, coro_factory, fallback):
         if name in DISABLED_SOURCES:
             return fallback
-        return await coro
+        return await coro_factory()
 
     try:
         results = await asyncio.wait_for(
             asyncio.gather(
                 # News (6 active sources)
-                _guarded("google_news",   _google_news(q),             []),
-                _guarded("yahoo_news",    _yahoo_news(q),              []),
-                _guarded("bing_news",     _bing_news(q),               []),
-                _guarded("aljazeera",     _aljazeera_news(q),          []),
-                _guarded("npr",           _npr_news(q),                []),
-                _guarded("bbc",           _bbc_news(q),                []),
+                _guarded("google_news",   lambda: _google_news(q),             []),
+                _guarded("yahoo_news",    lambda: _yahoo_news(q),              []),
+                _guarded("bing_news",     lambda: _bing_news(q),               []),
+                _guarded("aljazeera",     lambda: _aljazeera_news(q),          []),
+                _guarded("npr",           lambda: _npr_news(q),                []),
+                _guarded("bbc",           lambda: _bbc_news(q),                []),
                 # Prediction markets (3 active sources)
-                _guarded("manifold",      _manifold_markets(q),        None),
-                _guarded("polymarket",    _polymarket_price(market_title), None),
-                _guarded("predictit",     _predictit_price(market_title), None),
+                _guarded("manifold",      lambda: _manifold_markets(q),        None),
+                _guarded("polymarket",    lambda: _polymarket_price(market_title), None),
+                _guarded("predictit",     lambda: _predictit_price(market_title), None),
                 # Knowledge / background
-                _guarded("duckduckgo",    _ddg_instant(q),             None),
-                _guarded("wikidata",      _wikidata(q),                None),
-                *[_guarded("wikipedia",   c,                           None) for c in wiki_coros],
+                _guarded("duckduckgo",    lambda: _ddg_instant(q),             None),
+                _guarded("wikidata",      lambda: _wikidata(q),                None),
+                *[_guarded("wikipedia",   (lambda c: lambda: c)(c),            None) for c in wiki_coros],
                 # Video titles (fast)
-                _guarded("youtube",       _youtube_search(q),          []),
+                _guarded("youtube",       lambda: _youtube_search(q),          []),
                 # YouTube deep research — transcripts + descriptions (slower, high value)
-                _guarded("youtube_deep",  _youtube_deep(q, timeout),   None),
+                _guarded("youtube_deep",  lambda: _youtube_deep(q, timeout),   None),
                 return_exceptions=True,
             ),
             timeout=timeout,
@@ -550,9 +550,6 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     ddg        = _next()
     wikidata   = _next()
     wiki_results  = [_next() for _ in wiki_coros]
-    youtube_h     = _next() or []
-    youtube_deep  = _next()
-    reddit_h      = _next() or []
     youtube_h     = _next() or []
     youtube_deep  = _next()   # full transcript/description block or None
 

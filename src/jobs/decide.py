@@ -166,7 +166,7 @@ async def _run_rule_engine(market: Dict, context: str) -> Optional[Dict]:
             "net_ev":     rd.net_ev,
         }
     except Exception as e:
-        logger.debug("Rule engine error: %s", e)
+        logger.warning("Rule engine error: %s", e)
         return None
 
 
@@ -209,7 +209,7 @@ async def make_decision_for_market(
             timeout=16.0,
         )
     except Exception as e:
-        logger.debug("Context build error: %s", e)
+        logger.warning("Context build error: %s", e)
 
     ticker   = market.get("ticker", "?")
     min_conf = min_confidence if min_confidence is not None else tcfg.min_ai_confidence
@@ -260,7 +260,7 @@ async def make_decision_for_market(
 
     # Enforce minimum confidence — never let sub-threshold signals escape
     if final and float(final.get("confidence", 0)) < min_conf:
-        _log_hold(market, context, min_conf, signals)
+        _log_hold(market, context, min_conf, signals, confidence=float(final.get("confidence", 0)))
         return None
 
     if final is None:
@@ -295,23 +295,23 @@ async def make_decision_for_market(
             yes_ask=float(market.get("yes_ask") or market.get("last_price") or 0),
         )
         daily_stats.record_signal(ticker, conf, net_ev, action)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("daily_stats record error: %s", e)
 
     return final
 
 
-def _log_hold(market: Dict, context: str, min_conf: float, signals: List[Dict]) -> None:
+def _log_hold(market: Dict, context: str, min_conf: float, signals: List[Dict], confidence: float = 0) -> None:
     """Log a HOLD — also records near-misses for the daily digest."""
     ticker = market.get("ticker", "?")
     try:
         from src.utils.daily_stats import stats as daily_stats
         daily_stats.record_evaluation(
-            ticker=ticker, action="HOLD", side="yes", confidence=0,
+            ticker=ticker, action="HOLD", side="yes", confidence=confidence,
             net_ev=None, true_prob=None, reasoning="both engines: HOLD",
             title=market.get("title", ""), platform=market.get("platform", "kalshi"),
             close_time=market.get("close_time", "") or market.get("expiration_time", ""),
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("daily_stats record error: %s", e)
     logger.debug("⬜ HOLD  %s  (both engines below threshold)", ticker)

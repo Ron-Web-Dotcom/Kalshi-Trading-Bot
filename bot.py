@@ -173,6 +173,8 @@ class TradingBot:
                                     _side  = _tl.get("side", "yes")
                                     _entry = float(_tl.get("price") or 0)
                                     _exit  = _no if _side == "no" else _yes
+                                    if not _exit:
+                                        continue
                                     _pnl   = (_exit - _entry) * int(_tl.get("contracts") or 1) / 100.0
                                     _res   = "WIN" if _pnl > 0 else ("LOSS" if _pnl < 0 else "BREAK_EVEN")
                                     await self.db.execute(
@@ -618,11 +620,7 @@ class TradingBot:
                     _et_sum      = _now_et_sum()
                     _paper_flag  = 0 if settings.trading.live_trading_enabled else 1
 
-                    # At midnight (hour=0) we report on yesterday; other periods report today
-                    if period == "Midnight":
-                        pnl_date = (_et_sum - _td2(days=1)).date().isoformat()
-                    else:
-                        pnl_date = _et_sum.date().isoformat()
+                    pnl_date = _et_sum.date().isoformat()
 
                     open_pos = await self.db.fetchall(
                         "SELECT p.* FROM positions p "
@@ -1350,16 +1348,19 @@ class TradingBot:
                         try:
                             # Check DB: did this market close?
                             row = await self.db.fetchone(
-                                "SELECT status, last_price, yes_ask, no_ask "
+                                "SELECT status, last_price, yes_ask, no_ask, close_time "
                                 "FROM markets WHERE ticker=? LIMIT 1",
                                 (ticker,)
                             )
                             if not row:
                                 continue
-                            status   = row.get("status", "")
-                            yes_ask  = float(row.get("yes_ask") or row.get("last_price") or 0)
-                            # A market is resolved when yes_ask hits near 0 or near 100
-                            if status == "closed" or yes_ask <= 5 or yes_ask >= 95:
+                            status     = row.get("status", "")
+                            yes_ask    = float(row.get("yes_ask") or row.get("last_price") or 0)
+                            close_time = row.get("close_time")
+                            # Price heuristic (near 0 or 100) only applied after market has closed
+                            _now_utc = datetime.utcnow().isoformat()
+                            _market_closed = close_time and close_time <= _now_utc
+                            if status == "closed" or (_market_closed and (yes_ask <= 5 or yes_ask >= 95)):
                                 actual = "yes" if yes_ask >= 95 else "no" if yes_ask <= 5 else None
                                 if actual:
                                     live_miss_tracker.mark_resolved(ticker, actual)
@@ -1830,7 +1831,7 @@ class TradingBot:
                 except Exception:
                     return False
 
-            while True:
+            while not self._shutdown.is_set():
                 try:
                     from zoneinfo import ZoneInfo
                     _et = ZoneInfo("America/New_York")
@@ -1881,7 +1882,7 @@ class TradingBot:
                         lines.append("✅ All sources healthy — no changes needed.")
 
                     color = 0x00ff00 if failed == 0 else 0xff4444
-                    await self.discord.send_message("\n".join(lines))
+                    await DiscordAlerter().send_message("\n".join(lines))
 
                 except Exception as e:
                     logger.error("Weekly health check loop error: %s", e)

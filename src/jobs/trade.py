@@ -96,6 +96,9 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         logger.warning("RISK LOCKOUT: %s", lockout_reason)
         await discord.error_alert(lockout_reason, context="daily_loss_lockout")
         await auditor.log(db, "LOCKOUT", reason=lockout_reason)
+        await kalshi.close()
+        await poly_client.close()
+        await comparator.close()
         return results
 
     # ── Open positions: log them + check cap ─────────────────────────────
@@ -120,7 +123,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             if (_now - opened) > _now_td(hours=1):
                 open_titles.add(p["title"].strip().lower())
         except Exception:
-            open_titles.add(p["title"].strip().lower())
+            pass
     if open_count > 0:
         logger.info("── Open Positions (%d) ──────────────────────────────────────────", open_count)
         for _p in open_positions_rows:
@@ -145,6 +148,9 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             daily_stats.record_skip("max_positions")
         except Exception:
             pass
+        await kalshi.close()
+        await poly_client.close()
+        await comparator.close()
         return results
 
     mode_label = "LIVE" if live_mode else "PAPER"
@@ -471,6 +477,9 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     try:
                         if is_junk(pm.get("title", "")):
                             continue
+                        _pm_ticker = pm.get("ticker", "")
+                        if not _pm_ticker:
+                            continue
                         await db.execute("""
                             INSERT OR REPLACE INTO markets
                             (ticker, title, category, status, yes_bid, yes_ask,
@@ -478,7 +487,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                              last_price, fetched_at, platform)
                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                         """, (
-                            pm["ticker"], pm.get("title","")[:200],
+                            _pm_ticker, pm.get("title","")[:200],
                             pm.get("category",""), "open",
                             pm.get("yes_bid",0), pm.get("yes_ask",0),
                             pm.get("no_bid",0),  pm.get("no_ask",0),
@@ -734,6 +743,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     live_allowed, live_reason = risk.check_trade(
                         live_tick, scaler.current_size,
                         current_positions=[], portfolio_value=portfolio_val,
+                        daily_loss_override=daily_loss_db,
                         platform=live_platform,
                     )
                     if not live_allowed:

@@ -131,7 +131,6 @@ class ExternalMarketComparator:
     """
 
     def __init__(self, db=None):
-        self.polymarket = PolymarketClient()
         self.db         = db
         self._poly_cache: List[Dict] = []
         self._poly_cache_time: float = 0.0
@@ -175,11 +174,11 @@ class ExternalMarketComparator:
                             "slug":       m.get("slug", ""),
                         })
                     self._poly_cache = parsed
+                    self._poly_cache_time = time.time()
             except Exception as e:
                 logger.warning("Polymarket cache refresh failed: %s", e)
                 if not self._poly_cache:
                     self._poly_cache = []
-            self._poly_cache_time = time.time()
 
     async def compare_and_log(self, kalshi_markets: List[Dict]) -> List[Dict]:
         """
@@ -217,9 +216,6 @@ class ExternalMarketComparator:
                 side       = "yes"
                 gross_edge = poly_yes - kalshi_yes
                 buy_price  = kalshi_yes
-                if gross_edge <= 0:
-                    # No edge on either side — skip this pair
-                    continue
             else:
                 # Kalshi overprices YES → buy NO on Kalshi
                 side       = "no"
@@ -310,4 +306,4 @@ class ExternalMarketComparator:
         return best, best_jaccard, best_overlap
 
     async def close(self):
-        await self.polymarket.close()
+        pass

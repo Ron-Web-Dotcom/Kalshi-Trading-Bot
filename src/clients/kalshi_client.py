@@ -125,8 +125,8 @@ class KalshiClient:
                 return resp.json()
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 401:
-                    logger.debug("Kalshi 401 on %s %s — %s", method, path, e.response.text[:100])
-                    return {}
+                    logger.error("Kalshi 401 Unauthorized on %s %s — %s", method, path, e.response.text[:100])
+                    raise
                 if attempt == retries - 1:
                     _safe = e.response.text[:200]
                     if self.cfg.api_key_id:
@@ -139,6 +139,7 @@ class KalshiClient:
                     logger.error(f"Request failed {method} {path}: {e}")
                     raise
                 await asyncio.sleep(2 ** attempt)
+        raise RuntimeError(f"_request exhausted all {retries} retries due to rate limiting on {method} {path}")
 
     # ── Market data ───────────────────────────────────────────────────────────
 
@@ -269,6 +270,8 @@ class KalshiClient:
                         "series_ticker": prefix,
                         "limit": 100,
                     })
+                    if not isinstance(data, dict):
+                        continue
                     batch = data.get("markets") or []
                     markets.extend(batch)
                     await asyncio.sleep(0.05)
@@ -350,7 +353,10 @@ class KalshiClient:
             def _close_key(m):
                 ct = m.get("close_time") or ""
                 try:
-                    return datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                    dt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt
                 except Exception:
                     return datetime.max.replace(tzinfo=timezone.utc)
             now = datetime.now(timezone.utc)
@@ -371,8 +377,6 @@ class KalshiClient:
         """
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
-        cutoff = (now.replace(tzinfo=timezone.utc)
-                  if now.tzinfo else now.replace(tzinfo=timezone.utc))
 
         # ── DB path (preferred — prices already enriched by ingest job) ──────
         if db is not None:
@@ -482,7 +486,8 @@ class KalshiClient:
     async def create_order(self, ticker: str, side: str, action: str,
                            count: int, price: int,
                            order_type: str = "limit",
-                           time_in_force: str = "gtc") -> Dict:
+                           time_in_force: str = "gtc",
+                           client_order_id: str = "") -> Dict:
         # Kalshi API expects only the price key matching the side — not both
         price_key = "yes_price" if side == "yes" else "no_price"
         body = {
@@ -493,7 +498,7 @@ class KalshiClient:
             "type": order_type,
             price_key: price,
             "time_in_force": time_in_force,
-            "client_order_id": f"bot_{int(time.time() * 1000)}",
+            "client_order_id": client_order_id if client_order_id else f"bot_{int(time.time() * 1000)}",
         }
         return await self._request("POST", "/portfolio/orders", body=body)
 
@@ -510,10 +515,11 @@ class KalshiClient:
                           yes_price: int = 0, no_price: int = 0,
                           client_order_id: str = "") -> Dict:
         price = yes_price if side == "yes" else no_price
-        return await self.create_order(
-            ticker=ticker, side=side, action=action,
-            count=count, price=price, order_type=type_
-        )
+        kwargs = dict(ticker=ticker, side=side, action=action,
+                      count=count, price=price, order_type=type_)
+        if client_order_id:
+            kwargs["client_order_id"] = client_order_id
+        return await self.create_order(**kwargs)
 
     async def close(self) -> None:
         if self._client and not self._client.is_closed:

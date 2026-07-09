@@ -8,11 +8,12 @@ logger = logging.getLogger("trading.jobs.evaluate")
 
 _last_discord_trade_bucket: int = -1
 _bucket_loaded: bool = False
+_default_scaler = None
 
 
 async def run_evaluation(db=None, scaler=None) -> None:
     """Compute and store a performance snapshot, log a clean summary table."""
-    global _last_discord_trade_bucket, _bucket_loaded
+    global _last_discord_trade_bucket, _bucket_loaded, _default_scaler
     from src.utils.database import DatabaseManager
     from src.alerts.discord import DiscordAlerter
     from src.risk.scaling import AutoScaler
@@ -57,8 +58,11 @@ async def run_evaluation(db=None, scaler=None) -> None:
             ORDER BY executed_at DESC LIMIT 5
         """)
 
-        scaler      = scaler if scaler is not None else AutoScaler()
-        scale_factor = scaler.update(total_pnl)
+        if scaler is None:
+            if _default_scaler is None:
+                _default_scaler = AutoScaler()
+            scaler = _default_scaler
+        scaler.update(total_pnl)
 
         now  = datetime.now(timezone.utc).isoformat()
         today = now[:10]  # YYYY-MM-DD

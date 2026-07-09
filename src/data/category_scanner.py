@@ -246,6 +246,11 @@ def _parse_poly_market(m: Dict, tag: str) -> Optional[Dict]:
 
         # Try to get token IDs for order placement
         token_ids = m.get("clobTokenIds") or m.get("tokenIds") or []
+        if isinstance(token_ids, str):
+            try:
+                token_ids = _j.loads(token_ids)
+            except Exception:
+                token_ids = []
 
         return {
             "platform":    "polymarket",
@@ -393,7 +398,7 @@ class CategoryScanner:
             def _norm_price(v):
                 try:
                     f = float(v or 0)
-                    return f if f <= 1.0 else f / 100.0
+                    return f / 100.0 if f > 1 else f
                 except Exception:
                     return 0.0
 
