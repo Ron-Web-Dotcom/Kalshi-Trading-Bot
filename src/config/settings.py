@@ -83,8 +83,8 @@ class TradingConfig:
     kelly_fraction: float = field(default_factory=lambda: _env_float("KELLY_FRACTION", 0.25))
 
     # AI thresholds — 77% minimum confidence required before any trade
-    min_ai_confidence: float = field(default_factory=lambda: _env_float("MIN_AI_CONFIDENCE", 77.0))
-    min_confidence_to_trade: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE_TO_TRADE", 0.77))
+    min_ai_confidence: float = field(default_factory=lambda: _env_float("MIN_AI_CONFIDENCE", 75.0))
+    min_confidence_to_trade: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE_TO_TRADE", 0.75))
 
     # Minimum profit requirements — need real edge, not statistical noise
     min_profit_roi_pct: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ROI_PCT", 1.0))
@@ -92,7 +92,7 @@ class TradingConfig:
 
     # AI position re-evaluation — check open positions against fresh data each cycle
     enable_ai_reeval: bool  = field(default_factory=lambda: _env_bool("ENABLE_AI_REEVAL", True))
-    reeval_min_confidence: float = field(default_factory=lambda: _env_float("REEVAL_MIN_CONFIDENCE", 77.0))
+    reeval_min_confidence: float = field(default_factory=lambda: _env_float("REEVAL_MIN_CONFIDENCE", 75.0))
 
     # AI budget — $5 daily soft limit, $15 hard stop (150% of $10 cap)
     daily_ai_budget: float = field(default_factory=lambda: _env_float("DAILY_AI_BUDGET", 5.0))
