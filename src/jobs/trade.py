@@ -847,7 +847,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 and not _already_open(m)
                 and 2 < _tradeable_price(m) < 98
                 and m.get("close_time")
-                and _closes_within_week(m)   # 7 days
+                and (_closes_today(m) or _closes_tomorrow(m))  # today or tomorrow only
                 and not is_junk(m.get("title", ""))
             ]
             cat_poly = [
@@ -856,7 +856,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 and not _already_open(m)
                 and m.get("yes_ask", 0) > 1
                 and m.get("close_time")
-                and _closes_within_week(m)   # 7 days
+                and (_closes_today(m) or _closes_tomorrow(m))  # today or tomorrow only
                 and not is_junk(m.get("title", ""))
             ]
             # Merge category-scanned markets in, deduplicating by ticker
