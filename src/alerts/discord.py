@@ -187,8 +187,10 @@ class DiscordAlerter:
         if reasoning:
             body += f"\n_{reasoning[:200]}_"
 
+        from src.utils.eastern_time import format_et, et_label
+        now_et_str = format_et(fmt="%I:%M %p") + f" {et_label()}"
         payload = self._embed(
-            title=f"✅ BID PLACED  [{mode_tag}]",
+            title=f"✅ BID PLACED  [{mode_tag}]  {now_et_str}",
             description=body,
             color=0x00C853,
         )
@@ -206,8 +208,10 @@ class DiscordAlerter:
 
         mode_tag = "📝 PAPER" if mode == "PAPER" else "💰 LIVE"
         now_utc  = datetime.now(timezone.utc)
-        from src.utils.eastern_time import now_et as _now_et, format_et as _fmt_et
-        _today_et = _now_et().date()
+        from src.utils.eastern_time import now_et as _now_et, format_et as _fmt_et, utc_to_et as _utc_to_et_ba
+        _now_et_obj  = _now_et()
+        _today_et    = _now_et_obj.date()
+        _tomorrow_et = _today_et.__class__.fromordinal(_today_et.toordinal() + 1)
 
         def _close_dt(p: Dict):
             ct = p.get("close_time", "")
@@ -227,15 +231,11 @@ class DiscordAlerter:
                 return None
             return (cd - now_utc).total_seconds() / 3600
 
-        import zoneinfo as _ziet
-        _tz_et_ba  = _ziet.ZoneInfo("America/New_York")
-        _tomorrow_et = _today_et.__class__.fromordinal(_today_et.toordinal() + 1)
-
         def _et_date(p: Dict):
             cd = _close_dt(p)
             if cd is None:
                 return None
-            return cd.astimezone(_tz_et_ba).date()
+            return _utc_to_et_ba(cd).date()
 
         def _is_today_et(p: Dict) -> bool:
             return _et_date(p) == _today_et
@@ -262,7 +262,7 @@ class DiscordAlerter:
                 cd = datetime.fromisoformat(str(close_time).replace("Z", "+00:00"))
                 if cd.tzinfo is None:
                     cd = cd.replace(tzinfo=timezone.utc)
-                cd_et = cd.astimezone(_tz_et_ba)
+                cd_et = _utc_to_et_ba(cd)
                 et_time = _fmt_et(cd, "%I:%M %p")
                 if is_today:
                     return f" 🟡 TODAY {et_time} ET"
@@ -373,8 +373,10 @@ class DiscordAlerter:
         if reason:
             body += f"\n_{reason}_"
 
+        from src.utils.eastern_time import format_et, et_label
+        now_et_str = format_et(fmt="%I:%M %p") + f" {et_label()}"
         payload = self._embed(
-            title=f"{headline}  [{mode_tag}]",
+            title=f"{headline}  [{mode_tag}]  {now_et_str}",
             description=body,
             color=color,
         )
@@ -413,9 +415,11 @@ class DiscordAlerter:
         for l in losses:
             lines.append(_item_line(l, "🔴"))
 
+        from src.utils.eastern_time import format_et, et_label
+        now_et_str = format_et(fmt="%I:%M %p") + f" {et_label()}"
         color = 0x00C853 if total_pnl > 0 else 0xFF1744 if total_pnl < 0 else 0x888888
         payload = self._embed(
-            title=f"📊 LIVE BID RESULTS — {total} closed  [{mode_tag}]",
+            title=f"📊 LIVE BID RESULTS — {total} closed  [{mode_tag}]  {now_et_str}",
             description=(
                 f"**Net: ${pnl_sign}{total_pnl:.2f}** across {total} position{'s' if total > 1 else ''} "
                 f"({len(wins)} win{'s' if len(wins)!=1 else ''}, "
@@ -463,9 +467,11 @@ class DiscordAlerter:
                     "inline": False,
                 })
 
+        from src.utils.eastern_time import format_et, et_label
+        now_et_str = format_et(fmt="%I:%M %p") + f" {et_label()}"
         payload = {
             "embeds": [{
-                "title": f"⚡ LIVE TRADES — Entering {len(trades)} position{'s' if len(trades) > 1 else ''} now  [{mode_tag}]",
+                "title": f"⚡ LIVE TRADES — Entering {len(trades)} position{'s' if len(trades) > 1 else ''} now  [{mode_tag}]  {now_et_str}",
                 "description": "\n\n".join(lines),
                 "color": 0xFF8C00,
                 "fields": fields,
@@ -595,9 +601,11 @@ class DiscordAlerter:
         if ai_reason:
             fields.append({"name": "🤖 AI's Exact Reasoning", "value": ai_reason[:300], "inline": False})
 
+        from src.utils.eastern_time import format_et, et_label
+        now_et_str = format_et(fmt="%I:%M %p") + f" {et_label()}"
         display = self._display_ticker(ticker, market_title)
         payload = self._embed(
-            title=f"{trigger_emoji} {mode_tag} Position Closed — {'Profit' if pnl >= 0 else 'Loss'} ${pnl_sign}{abs(pnl):.2f}",
+            title=f"{trigger_emoji} {mode_tag} Position Closed — {'Profit' if pnl >= 0 else 'Loss'} ${pnl_sign}{abs(pnl):.2f}  {now_et_str}",
             description=f"_{display}_ · **{side.upper()}** · {contracts} contracts",
             color=color,
             fields=fields,
@@ -953,14 +961,13 @@ class DiscordAlerter:
         regular_scan_top: Optional[List[Dict]] = None,
     ) -> None:
         """Hourly heartbeat — clean stats, watching section, best pick."""
-        from src.utils.eastern_time import format_et, et_label, now_et as _hb_now_et
-        import zoneinfo as _hb_zi
+        from src.utils.eastern_time import format_et, et_label, now_et as _hb_now_et, utc_to_et as _hb_utc_to_et
         now_utc  = datetime.now(timezone.utc)
         hhmm     = format_et(now_utc, "%I:%M %p") + f" {et_label()}"
         color    = 0x5865F2
-        _hb_tz_et    = _hb_zi.ZoneInfo("America/New_York")
-        _hb_today_et = _hb_now_et().date()
+        _hb_today_et    = _hb_now_et().date()
         _hb_tomorrow_et = _hb_today_et.__class__.fromordinal(_hb_today_et.toordinal() + 1)
+        _hb_tz_et       = _hb_now_et().tzinfo  # ZoneInfo("America/New_York") via now_et()
 
         def _close_et_date(ct: str):
             if not ct:
@@ -969,7 +976,7 @@ class DiscordAlerter:
                 cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
                 if cd.tzinfo is None:
                     cd = cd.replace(tzinfo=timezone.utc)
-                return cd.astimezone(_hb_tz_et).date()
+                return _hb_utc_to_et(cd).date()
             except Exception:
                 return None
 
@@ -1105,7 +1112,7 @@ class DiscordAlerter:
         else:
             inplay_str = f"⚡ **0/{open_positions}** in-play — no live events today" if open_positions > 0 else "⚡ No open bets"
 
-        positions_parts = [pos_line] + pnl_lines + [inplay_str]
+        positions_parts = [pos_line, *pnl_lines, inplay_str]
         positions_val = "\n".join(positions_parts)
 
         fields = [
@@ -1516,49 +1523,38 @@ class DiscordAlerter:
                 seen_tickers.add(t)
                 buy_signals.append(b)
 
-        import zoneinfo as _zi
-        _tz_et  = _zi.ZoneInfo("America/New_York")
-        _now_ds = datetime.now(timezone.utc)
-        _today_ds = _now_ds.astimezone(_tz_et).date()
+        from src.utils.eastern_time import utc_to_et as _utc_to_et, now_et as _now_et_ds
+        _now_ds   = datetime.now(timezone.utc)
+        _today_ds = _now_et_ds().date()
+        _tomorrow_ds = _today_ds.__class__.fromordinal(_today_ds.toordinal() + 1)
+
+        def _cd_et(b):
+            ct = b.get("close_time", "")
+            if not ct:
+                return None
+            try:
+                cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+                if cd.tzinfo is None:
+                    cd = cd.replace(tzinfo=timezone.utc)
+                return _utc_to_et(cd)
+            except Exception:
+                return None
 
         def _is_today_ds(b) -> bool:
-            ct = b.get("close_time", "")
-            if not ct:
+            cd_et = _cd_et(b)
+            if cd_et is None:
                 return False
-            try:
-                cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
-                if cd.tzinfo is None:
-                    cd = cd.replace(tzinfo=timezone.utc)
-                return cd.astimezone(_tz_et).date() == _today_ds and (cd - _now_ds).total_seconds() > 0
-            except Exception:
-                return False
-
-        def _hrs_to_close(b):
-            ct = b.get("close_time", "")
-            if not ct:
-                return 999
-            try:
-                cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
-                if cd.tzinfo is None:
-                    cd = cd.replace(tzinfo=timezone.utc)
-                return (cd - _now_ds).total_seconds() / 3600
-            except Exception:
-                return 999
-
-        _tomorrow_ds = (_now_ds.astimezone(_tz_et).date().__class__.fromordinal(
-            _today_ds.toordinal() + 1))
+            return cd_et.date() == _today_ds and (cd_et.astimezone(timezone.utc) - _now_ds).total_seconds() > 0
 
         def _is_tomorrow_ds(b) -> bool:
-            ct = b.get("close_time", "")
-            if not ct:
-                return False
-            try:
-                cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
-                if cd.tzinfo is None:
-                    cd = cd.replace(tzinfo=timezone.utc)
-                return cd.astimezone(_tz_et).date() == _tomorrow_ds
-            except Exception:
-                return False
+            cd_et = _cd_et(b)
+            return cd_et is not None and cd_et.date() == _tomorrow_ds
+
+        def _hrs_to_close(b):
+            cd_et = _cd_et(b)
+            if cd_et is None:
+                return 999
+            return (cd_et.astimezone(timezone.utc) - _now_ds).total_seconds() / 3600
 
         # Today's bids + tomorrow only — anything further out is not "right now"
         today_buys = [b for b in buy_signals if _is_today_ds(b)][:3]
@@ -1584,14 +1580,12 @@ class DiscordAlerter:
                 label  = self._display_ticker(b.get("ticker",""), b.get("title","") or "")[:120]
                 conf   = b.get("confidence", 0)
                 hrs    = _hrs_to_close(b)
+                cd_et_b = _cd_et(b)
                 try:
-                    ct = b.get("close_time", "")
-                    cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
-                    if cd.tzinfo is None:
-                        cd = cd.replace(tzinfo=timezone.utc)
-                    cd_et  = cd.astimezone(_tz_et)
-                    day_lbl = "TOMORROW" if cd_et.date() == _tomorrow_ds else cd_et.strftime("%b %d")
-                    time_lbl = cd_et.strftime("%I:%M %p") + " ET"
+                    if cd_et_b is None:
+                        raise ValueError
+                    day_lbl  = "TOMORROW" if cd_et_b.date() == _tomorrow_ds else cd_et_b.strftime("%b %d")
+                    time_lbl = cd_et_b.strftime("%I:%M %p") + " ET"
                 except Exception:
                     day_lbl  = f"~{int(hrs/24)}d away"
                     time_lbl = ""
