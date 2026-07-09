@@ -127,10 +127,6 @@ async def _bing_news(q: str)    -> List[str]:
     t = await _get(f"https://www.bing.com/news/search?q={quote_plus(q)}&format=rss")
     return _rss_headlines(t, 5)
 
-async def _guardian_news(q: str) -> List[str]:
-    t = await _get(f"https://www.theguardian.com/search?q={quote_plus(q)}&format=rss")
-    return _rss_headlines(t, 4)
-
 async def _aljazeera_news(q: str) -> List[str]:
     t = await _get(f"https://www.aljazeera.com/search/{quote_plus(q)}?format=rss")
     return _rss_headlines(t, 3)
@@ -139,19 +135,6 @@ async def _npr_news(q: str) -> List[str]:
     # NPR doesn't have query-based RSS, use topic feed for politics/general
     t = await _get("https://feeds.npr.org/1001/rss.xml")
     return _rss_headlines(t, 3)
-
-async def _ap_news(q: str) -> List[str]:
-    t = await _get("https://feeds.apnews.com/rss/apf-topnews")
-    headlines = _rss_headlines(t, 10)
-    # filter to relevant ones
-    kws = q.lower().split()
-    return [h for h in headlines if any(k in h.lower() for k in kws)][:4]
-
-async def _reuters_news(q: str) -> List[str]:
-    t = await _get("https://feeds.reuters.com/reuters/topNews")
-    headlines = _rss_headlines(t, 10)
-    kws = q.lower().split()
-    return [h for h in headlines if any(k in h.lower() for k in kws)][:4]
 
 async def _bbc_news(q: str) -> List[str]:
     t = await _get("https://feeds.bbci.co.uk/news/rss.xml")
@@ -185,32 +168,6 @@ async def _manifold_markets(q: str) -> Optional[str]:
         return "\n".join(lines) if lines else None
     except Exception as e:
         logger.warning("Manifold failed: %s", e)
-        return None
-
-
-async def _metaculus(q: str) -> Optional[str]:
-    """Metaculus community prediction aggregates."""
-    try:
-        data = await _get(
-            "https://www.metaculus.com/api2/questions/",
-            params={"search": q[:80], "status": "open",
-                    "order_by": "-activity", "limit": 3},
-            as_json=True,
-        )
-        if not data:
-            return None
-        lines = []
-        for item in (data.get("results") or [])[:2]:
-            title = (item.get("title") or "")[:70]
-            cp    = item.get("community_prediction") or {}
-            pred  = (cp.get("full") or {}).get("q2")
-            if pred is not None and title:
-                lines.append(
-                    f"Metaculus community: '{title}' → {pred*100:.0f}%"
-                )
-        return "\n".join(lines) if lines else None
-    except Exception as e:
-        logger.warning("Metaculus failed: %s", e)
         return None
 
 
@@ -291,29 +248,6 @@ async def _wikidata(q: str) -> Optional[str]:
     except Exception as e:
         logger.warning("Wikidata failed: %s", e)
         return None
-
-
-async def _reddit_search(q: str) -> List[str]:
-    """Reddit JSON search — top posts about the query."""
-    try:
-        data = await _get(
-            f"https://www.reddit.com/search.json?q={quote_plus(q)}&sort=new&limit=5&t=week",
-            as_json=True,
-        )
-        if not data:
-            return []
-        posts = []
-        for child in (data.get("data", {}).get("children") or [])[:5]:
-            post  = child.get("data", {})
-            title = (post.get("title") or "").strip()
-            score = post.get("score", 0) or 0
-            sub   = post.get("subreddit", "")
-            if title and len(title) > 10:
-                posts.append(f"r/{sub} ({score:,} upvotes): {title}")
-        return posts
-    except Exception as e:
-        logger.warning("Reddit search failed: %s", e)
-        return []
 
 
 async def _youtube_deep(q: str, timeout: float) -> Optional[str]:
@@ -555,27 +489,22 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     try:
         results = await asyncio.wait_for(
             asyncio.gather(
-                # News search (9 sources)
+                # News search (6 sources — AP/Reuters/Guardian/Reddit removed, 403/DNS)
                 _google_news(q),
                 _yahoo_news(q),
                 _bing_news(q),
-                _guardian_news(q),
                 _aljazeera_news(q),
                 _npr_news(q),
-                _ap_news(q),
-                _reuters_news(q),
                 _bbc_news(q),
-                # Prediction market cross-reference (4 independent sources)
+                # Prediction market cross-reference (3 sources — Metaculus removed, 403)
                 _manifold_markets(q),
-                _metaculus(q),
                 _polymarket_price(market_title),
                 _predictit_price(market_title),
                 # Knowledge / background
                 _ddg_instant(q),
                 _wikidata(q),
                 *wiki_coros,
-                # Community + video titles (fast)
-                _reddit_search(q),
+                # Video titles (fast)
                 _youtube_search(q),
                 # YouTube deep research — transcripts + descriptions (slower, high value)
                 _youtube_deep(q, timeout),

@@ -82,7 +82,7 @@ def check_python():
 # ── 2. Required packages ──────────────────────────────────────────────────────
 
 REQUIRED_PACKAGES = [
-    "aiosqlite", "httpx", "openai", "discord",
+    "aiosqlite", "httpx", "openai",
     "dotenv", "zoneinfo", "pydantic",
 ]
 
@@ -309,26 +309,21 @@ SOURCES = [
     ("Google News RSS",  "https://news.google.com/rss/search?q=bitcoin&hl=en-US&gl=US&ceid=US:en", False),
     ("Yahoo News RSS",   "https://news.yahoo.com/rss/search?p=bitcoin",                             False),
     ("Bing News RSS",    "https://www.bing.com/news/search?q=bitcoin&format=rss",                   False),
-    ("Guardian RSS",     "https://www.theguardian.com/search?q=bitcoin&format=rss",                 False),
     ("NPR RSS",          "https://feeds.npr.org/1001/rss.xml",                                      False),
-    ("AP News RSS",      "https://feeds.apnews.com/rss/apf-topnews",                                False),
-    ("Reuters RSS",      "https://feeds.reuters.com/reuters/topNews",                               False),
     ("BBC RSS",          "https://feeds.bbci.co.uk/news/rss.xml",                                   False),
+    ("AlJazeera RSS",    "https://www.aljazeera.com/search/bitcoin?format=rss",                    False),
     ("Manifold",         "https://api.manifold.markets/v0/search-markets?term=bitcoin&limit=2",     True),
-    ("Metaculus",        "https://www.metaculus.com/api2/questions/?search=bitcoin&limit=2",        True),
     ("Polymarket",       "https://gamma-api.polymarket.com/markets?search=bitcoin&active=true&limit=3", True),
     ("PredictIt",        "https://www.predictit.org/api/marketdata/all/",                          True),
     ("Wikipedia",        "https://en.wikipedia.org/api/rest_v1/page/summary/Bitcoin",              True),
     ("DuckDuckGo",       "https://api.duckduckgo.com/?q=bitcoin&format=json&no_html=1&skip_disambig=1", True),
     ("Wikidata",         "https://www.wikidata.org/w/api.php?action=wbsearchentities&search=bitcoin&language=en&limit=2&format=json", True),
-    ("Reddit",           "https://www.reddit.com/search.json?q=bitcoin&sort=new&limit=3&t=week",   True),
     ("YouTube",          "https://www.youtube.com/results?search_query=bitcoin",                   False),
     ("CoinGecko",        "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", True),
     ("Yahoo Finance",    "https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?interval=1d&range=1d", True),
     ("ESPN scoreboard",  "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard", True),
     ("FRED (fed funds)", "https://fred.stlouisfed.org/graph/fredgraph.csv?id=FEDFUNDS",            False),
     ("wttr.in weather",  "https://wttr.in/New+York?format=j1",                                     True),
-    ("AlJazeera RSS",    "https://www.aljazeera.com/search/bitcoin?format=rss",                    False),
 ]
 
 async def check_sources():
@@ -372,7 +367,7 @@ async def check_kalshi():
         else:
             ok("LIVE_TRADING_ENABLED=false (paper mode)")
 
-        from src.kalshi.client import KalshiClient
+        from src.clients.kalshi_client import KalshiClient
         client = KalshiClient()
         # Just verify the client initialises (no actual API call to avoid rate limits)
         ok("KalshiClient initialised")
@@ -455,7 +450,7 @@ def check_disk():
         import shutil
         try:
             from src.config.settings import settings
-            path = os.path.dirname(settings.database.path)
+            path = os.path.dirname(os.path.abspath(settings.database.path)) or "."
         except Exception:
             path = "."
         total, used, free = shutil.disk_usage(path)
