@@ -936,16 +936,14 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 _hours_out = (_close_dt - now_utc).total_seconds() / 3600
             except Exception:
                 pass
-            # Bid only on today's ET calendar date — LIVE (≤1h) or TODAY (>1h same date)
-            _best_is_today = _closes_today(_best_market)
-            if not _best_is_today:
+            # Bid on markets closing within 48h — not just today
+            if _hours_out > 48:
                 logger.info(
-                    "Best opportunity WATCHING — %s closes in %.0fh (not today ET) — will bid on event day",
+                    "Best opportunity WATCHING — %s closes in %.0fh (>48h) — will bid closer to event",
                     _best_market.get("ticker", "?"), _hours_out,
                 )
-                daily_stats.record_skip("watching_not_today")
+                daily_stats.record_skip("watching_not_soon")
                 best = None
-                daily_stats.record_skip("watching_not_today")
 
         # Live markets get one extra trade slot per cycle — they're time-sensitive
         live_bonus = 1 if (best and best.get("market", {}).get("is_live")) else 0
