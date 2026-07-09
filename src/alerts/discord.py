@@ -266,14 +266,16 @@ class DiscordAlerter:
                     cd = cd.replace(tzinfo=timezone.utc)
                 cd_et = _utc_to_et_ba(cd)
                 et_time = _fmt_et(cd, "%I:%M %p")
+                date_str = cd_et.strftime("%b %-d")
                 if is_today:
-                    return f" 🟡 TODAY {et_time} ET"
+                    return f" 🟡 TODAY ({date_str}) {et_time} ET"
                 if cd_et.date() == _tomorrow_et:
-                    return f" 🌅 TOMORROW {et_time} ET"
-                return f" 📅 {cd_et.strftime('%b %d')} {et_time} ET"
+                    return f" 🌅 TOMORROW ({date_str}) {et_time} ET"
+                return f" 📅 {date_str} {et_time} ET"
             except Exception:
+                today_str = _today_et.strftime("%b %-d")
                 if is_today:
-                    return " 🟡 TODAY"
+                    return f" 🟡 TODAY ({today_str})"
                 return " 📅 UPCOMING"
 
         def _pick_line(p: Dict) -> str:
@@ -315,13 +317,15 @@ class DiscordAlerter:
             week_picks     = [p for p in watching if not _is_today_et(p) and not _is_tomorrow_et(p)]
 
             if today_picks:
+                today_label = _today_et.strftime("%b %-d")
                 sections.append(
-                    "**🟡 WATCHING — TODAY**\n"
+                    f"**🟡 WATCHING — TODAY ({today_label})**\n"
                     + "\n\n".join(_pick_line(p) for p in today_picks[:4])
                 )
             if tomorrow_picks:
+                tomorrow_label = _tomorrow_et.strftime("%b %-d")
                 sections.append(
-                    "**🌅 WATCHING — TOMORROW**\n"
+                    f"**🌅 WATCHING — TOMORROW ({tomorrow_label})**\n"
                     + "\n\n".join(_pick_line(p) for p in tomorrow_picks[:3])
                 )
 
@@ -1002,10 +1006,11 @@ class DiscordAlerter:
                     et_time = close_dt.astimezone(_hb_tz_et).strftime("%I:%M %p")
                     return f"🔴 LIVE — {mins}min left ({et_time} ET)"
                 et_date = close_dt.astimezone(_hb_tz_et).date()
+                date_str = et_date.strftime("%b %-d")
                 if et_date == _hb_today_et:
-                    return "⏳ Ends today"
+                    return f"⏳ Ends today ({date_str})"
                 if et_date == _hb_tomorrow_et:
-                    return "📆 Ends tomorrow"
+                    return f"📆 Ends tomorrow ({date_str})"
                 return "📅 Future"
             except Exception:
                 return "📅 Long-term"
@@ -1574,9 +1579,10 @@ class DiscordAlerter:
                 ev_s   = f" | EV {ev:+.1f}¢" if ev is not None else ""
                 side   = (b.get("side") or "YES").upper()
                 reason = (b.get("reasoning") or "")[:120]
+                today_lbl = _today_ds.strftime("%b %-d")
                 rlines.append(
                     f"🟢 {plat} **{label}**\n"
-                    f"   BUY **{side}** TODAY — {conf:.0f}% conf{ev_s}\n"
+                    f"   BUY **{side}** TODAY ({today_lbl}) — {conf:.0f}% conf{ev_s}\n"
                     f"   _{reason}_"
                 )
             for b in watch_buys:
@@ -1588,7 +1594,8 @@ class DiscordAlerter:
                 try:
                     if cd_et_b is None:
                         raise ValueError
-                    day_lbl  = "TOMORROW" if cd_et_b.date() == _tomorrow_ds else cd_et_b.strftime("%b %d")
+                    date_str = cd_et_b.strftime("%b %-d")
+                    day_lbl  = f"TOMORROW ({date_str})" if cd_et_b.date() == _tomorrow_ds else date_str
                     time_lbl = cd_et_b.strftime("%I:%M %p") + " ET"
                 except Exception:
                     day_lbl  = f"~{int(hrs/24)}d away"
