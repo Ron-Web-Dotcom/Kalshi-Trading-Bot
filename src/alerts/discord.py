@@ -154,8 +154,10 @@ class DiscordAlerter:
                     "inline": False,
                 })
 
+        from src.utils.eastern_time import format_et, et_label
+        now_et_str = format_et(fmt="%I:%M %p") + f" {et_label()}"
         payload = self._embed(
-            title=f"🚀 Kalshi + Polymarket Bot Started — {mode} MODE",
+            title=f"🚀 Kalshi + Polymarket Bot Started — {mode} MODE  {now_et_str}",
             description=f"Bot is online and scanning markets on {platforms}.",
             color=color,
             fields=fields,
@@ -1217,6 +1219,8 @@ class DiscordAlerter:
         unrealised_pnl: float = 0.0,
     ) -> None:
         """Midnight daily report — full day recap posted to Discord."""
+        from src.utils.eastern_time import format_et, et_label
+        now_et_str = format_et(fmt="%I:%M %p") + f" {et_label()}"
         mode_tag  = "📝 PAPER" if paper else "💰 LIVE"
         pnl_sign  = "+" if today_pnl >= 0 else ""
         all_sign  = "+" if alltime_pnl >= 0 else ""
@@ -1310,9 +1314,9 @@ class DiscordAlerter:
             fields.append({"name": f"⚠️ Errors ({err_count} total)", "value": "\n".join(err_lines)[:400], "inline": False})
 
         payload = self._embed(
-            title=f"📊 {mode_tag} Daily Report — {date}",
+            title=f"📊 {mode_tag} Daily Report — {date}  {now_et_str}",
             description=(
-                f"End-of-day summary for **{date}**. "
+                f"End-of-day summary for **{date} ET**. "
                 f"Bot ran for **{snap.get('uptime','?')}** scanning prediction markets 24/7."
             ),
             color=color,
