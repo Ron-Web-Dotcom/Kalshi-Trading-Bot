@@ -212,6 +212,22 @@ async def make_decision_for_market(
         logger.debug("SKIP long-shot %s yes_ask=%.0f¢", market.get("ticker","?")[:40], yes_ask)
         return None
 
+    # Minimum time-to-close guard — don't bet on markets closing in < 30 min
+    # Prevents mid-game bets that resolve before outcome is clear
+    ct = market.get("close_time") or market.get("expiration_time") or ""
+    if ct:
+        try:
+            from datetime import timezone as _tz
+            _cd = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
+            if _cd.tzinfo is None:
+                _cd = _cd.replace(tzinfo=_tz.utc).astimezone(_ET)
+            mins_left = (_cd - datetime.now(_ET)).total_seconds() / 60
+            if 0 < mins_left < 30:
+                logger.debug("SKIP closing-too-soon %s %.0f min left", market.get("ticker","?")[:40], mins_left)
+                return None
+        except Exception:
+            pass
+
     # Override min_confidence for risky market types
     if min_confidence is None:
         if is_weather or is_esports:
