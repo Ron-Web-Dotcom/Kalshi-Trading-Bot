@@ -1,6 +1,7 @@
 """Job: track open positions — mark-to-market, stop-loss, take-profit, settlement."""
 
 import logging
+import time
 from datetime import datetime
 from typing import Dict, List
 from zoneinfo import ZoneInfo
@@ -11,6 +12,11 @@ def _et_now() -> str:
     return datetime.now(_ET).strftime("%Y-%m-%dT%H:%M:%S")
 
 logger = logging.getLogger("trading.jobs.track")
+
+# Two-stage opt-out tracker: pos_id → unix timestamp when AI said HOLD on a losing position.
+# If the position is STILL losing on the next re-eval pass → cash out regardless.
+_reeval_hold_since: Dict[int, float] = {}
+_REEVAL_PATIENCE_SECS = 1800  # 30 min: if still losing after HOLD, cash out
 
 
 async def run_tracking(db_manager, risk=None) -> None:
@@ -116,8 +122,12 @@ async def run_tracking(db_manager, risk=None) -> None:
                         pnl = (cur_price - avg_price) * contracts / 100
                         close_price_used = cur_price
                     elif enable_reeval and pct_change <= -10:
-                        # AI opt-out for Polymarket — if down 10%+ let AI decide whether to exit
+                        # Two-stage opt-out for Polymarket — same logic as Kalshi
                         try:
+                            patience_expired = (
+                                pos_id in _reeval_hold_since
+                                and (time.time() - _reeval_hold_since[pos_id]) >= _REEVAL_PATIENCE_SECS
+                            )
                             poly_mkt_ctx = {
                                 "ticker": ticker, "title": pos.get("title", ticker),
                                 "yes_ask": cur_price, "platform": "polymarket",
@@ -128,10 +138,22 @@ async def run_tracking(db_manager, risk=None) -> None:
                                 close_reason = f"ai_reeval:{reeval['reasoning'][:60]}"
                                 pnl = (cur_price - avg_price) * contracts / 100
                                 close_price_used = cur_price
+                                _reeval_hold_since.pop(pos_id, None)
+                            elif patience_expired:
+                                close_reason = f"ai_reeval:no improvement after hold — cashing out ({pct_change:.1f}%)"
+                                pnl = (cur_price - avg_price) * contracts / 100
+                                close_price_used = cur_price
+                                _reeval_hold_since.pop(pos_id, None)
+                                logger.info("CASHOUT POLY %s — still down %.1f%% after hold period", ticker, pct_change)
+                            else:
+                                if pos_id not in _reeval_hold_since:
+                                    _reeval_hold_since[pos_id] = time.time()
+                                    logger.info("WATCH POLY %s — AI says hold, watching for %.0f min", ticker, _REEVAL_PATIENCE_SECS / 60)
                         except Exception as _re_err:
                             logger.debug("Poly re-eval skipped for %s: %s", ticker, _re_err)
 
                     if close_reason:
+                        _reeval_hold_since.pop(pos_id, None)  # clean up watcher on any close
                         await db_manager.execute("""
                             UPDATE positions SET status='closed', current_price=?,
                             pnl=?, closed_at=?, close_reason=? WHERE id=?
@@ -214,18 +236,35 @@ async def run_tracking(db_manager, risk=None) -> None:
                 elif take_profit_pct > 0 and pct_change >= take_profit_pct:
                     close_reason = f"take_profit:{pct_change:.1f}%"
 
-                # ── 4. AI re-evaluation — opt-out if thesis has broken down ──
-                elif enable_reeval:
+                # ── 4. AI re-evaluation — two-stage opt-out ──────────────────
+                # Stage 1: down 10% → AI decides EXIT now or HOLD and watch
+                # Stage 2: still losing after HOLD → cash out (patience expired)
+                elif enable_reeval and pct_change <= -10:
                     try:
+                        patience_expired = (
+                            pos_id in _reeval_hold_since
+                            and (time.time() - _reeval_hold_since[pos_id]) >= _REEVAL_PATIENCE_SECS
+                        )
                         fresh_context = await build_market_context(mkt | {"ticker": ticker, "title": mkt.get("title", ticker)})
                         reeval = await ai.evaluate_open_position(pos, mkt | {"ticker": ticker}, fresh_context)
-                        if (reeval["verdict"] == "EXIT"
-                                and reeval["confidence"] >= reeval_min_conf):
+                        if reeval["verdict"] == "EXIT" and reeval["confidence"] >= reeval_min_conf:
                             close_reason = f"ai_reeval:{reeval['reasoning'][:60]}"
+                            _reeval_hold_since.pop(pos_id, None)
+                        elif patience_expired:
+                            # Held long enough — cash out, thesis hasn't recovered
+                            close_reason = f"ai_reeval:no improvement after hold — cashing out ({pct_change:.1f}%)"
+                            _reeval_hold_since.pop(pos_id, None)
+                            logger.info("CASHOUT %s — still down %.1f%% after hold period", ticker, pct_change)
+                        else:
+                            # AI says HOLD — start the patience timer if not already running
+                            if pos_id not in _reeval_hold_since:
+                                _reeval_hold_since[pos_id] = time.time()
+                                logger.info("WATCH %s — AI says hold, watching for %.0f min", ticker, _REEVAL_PATIENCE_SECS / 60)
                     except Exception as re_err:
                         logger.debug("Re-eval skipped for %s: %s", ticker, re_err)
 
                 if close_reason:
+                    _reeval_hold_since.pop(pos_id, None)  # clean up watcher on any close
                     await db_manager.execute("""
                         UPDATE positions
                         SET status='closed', current_price=?, pnl=?,
