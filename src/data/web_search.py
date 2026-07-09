@@ -23,15 +23,15 @@ Sources (all free, no API key required):
   13. PredictIt API        — US politics contracts (elections, approval, legislation)
 
   KNOWLEDGE / BACKGROUND
-  12. Wikipedia REST API   — authoritative article summaries for key entities
-  13. DuckDuckGo Instant   — Wikipedia-backed instant answers
-  14. Wikidata API         — structured facts (dates, relationships, numbers)
+  14. Wikipedia REST API   — authoritative article summaries for key entities
+  15. DuckDuckGo Instant   — Wikipedia-backed instant answers
+  16. Wikidata API         — structured facts (dates, relationships, numbers)
 
   COMMUNITY SENTIMENT
-  15. Reddit RSS search    — community discussion and sentiment
+  17. Reddit RSS search    — community discussion and sentiment
 
   VIDEO COVERAGE
-  17. YouTube search       — video titles, channels, view counts (no API key)
+  18. YouTube search       — video titles, channels, view counts (no API key)
 """
 
 import asyncio
@@ -257,6 +257,39 @@ async def _ddg_instant(q: str) -> Optional[str]:
         return None
     except Exception as e:
         logger.warning("DDG failed: %s", e)
+        return None
+
+
+async def _wikidata(q: str) -> Optional[str]:
+    """
+    Wikidata API — structured facts: dates, numeric values, relationships.
+    Good for resolving entity facts like birth dates, country populations,
+    GDP figures, team rosters, election dates.
+    """
+    try:
+        data = await _get(
+            "https://www.wikidata.org/w/api.php",
+            params={
+                "action": "wbsearchentities",
+                "search": q[:80],
+                "language": "en",
+                "limit": 3,
+                "format": "json",
+            },
+            as_json=True,
+        )
+        if not data:
+            return None
+        items = data.get("search", [])
+        lines = []
+        for item in items[:3]:
+            label = item.get("label", "")
+            desc  = item.get("description", "")
+            if label and desc:
+                lines.append(f"Wikidata: {label} — {desc}")
+        return "\n".join(lines) if lines else None
+    except Exception as e:
+        logger.warning("Wikidata failed: %s", e)
         return None
 
 
@@ -528,6 +561,7 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
                 _bing_news(q),
                 _guardian_news(q),
                 _aljazeera_news(q),
+                _npr_news(q),
                 _ap_news(q),
                 _reuters_news(q),
                 _bbc_news(q),
@@ -538,6 +572,7 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
                 _predictit_price(market_title),
                 # Knowledge / background
                 _ddg_instant(q),
+                _wikidata(q),
                 *wiki_coros,
                 # Community + video titles (fast)
                 _reddit_search(q),
@@ -564,6 +599,7 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     bing_h     = _next() or []
     guardian_h = _next() or []
     alj_h      = _next() or []
+    npr_h      = _next() or []
     ap_h       = _next() or []
     reuters_h  = _next() or []
     bbc_h      = _next() or []
@@ -572,6 +608,7 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     poly_price = _next()
     predictit  = _next()
     ddg        = _next()
+    wikidata   = _next()
     wiki_results = [_next() for _ in wiki_coros]
     reddit_h      = _next() or []
     youtube_h     = _next() or []
@@ -586,6 +623,7 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
         ("Bing",     bing_h),
         ("Guardian", guardian_h),
         ("AlJazeera",alj_h),
+        ("NPR",      npr_h),
         ("AP",       ap_h),
         ("Reuters",  reuters_h),
         ("BBC",      bbc_h),
@@ -606,6 +644,10 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     # 2. DuckDuckGo instant answer
     if isinstance(ddg, str) and ddg:
         blocks.append(f"Background (DDG): {ddg}")
+
+    # 2b. Wikidata structured facts
+    if isinstance(wikidata, str) and wikidata:
+        blocks.append(f"=== WIKIDATA FACTS ===\n{wikidata}")
 
     # 3. News headlines from all sources
     if all_headlines:
@@ -667,15 +709,15 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
 
         logger.info(
             "Context sources for '%s':\n"
-            "  News:       %s Google  %s Yahoo  %s Bing  %s Guardian  %s AlJazeera  %s AP  %s Reuters  %s BBC\n"
-            "  Knowledge:  %s Wikipedia(%d)  %s DDG  %s Reddit  %s YouTube\n"
+            "  News:       %s Google  %s Yahoo  %s Bing  %s Guardian  %s AlJazeera  %s NPR  %s AP  %s Reuters  %s BBC\n"
+            "  Knowledge:  %s Wikipedia(%d)  %s DDG  %s Wikidata  %s Reddit  %s YouTube\n"
             "  Pred mkts:  %s Manifold  %s Metaculus  %s Polymarket  %s PredictIt\n"
             "  Total: %d headlines | %d wiki blocks | pred_markets=%s",
             q[:60],
-            _hit(google_h),   _hit(yahoo_h),  _hit(bing_h), _hit(guardian_h),
-            _hit(alj_h),      _hit(ap_h),     _hit(reuters_h), _hit(bbc_h),
-            _hit(wiki_text),  len(wiki_text), _hit(ddg),    _hit(reddit_h), _hit(youtube_deep or youtube_h),
-            _hit(manifold),   _hit(metaculus), _hit(poly_price), _hit(predictit),
+            _hit(google_h), _hit(yahoo_h), _hit(bing_h), _hit(guardian_h),
+            _hit(alj_h),    _hit(npr_h),  _hit(ap_h),   _hit(reuters_h), _hit(bbc_h),
+            _hit(wiki_text), len(wiki_text), _hit(ddg), _hit(wikidata), _hit(reddit_h), _hit(youtube_deep or youtube_h),
+            _hit(manifold),  _hit(metaculus), _hit(poly_price), _hit(predictit),
             len(all_headlines), len(wiki_text), pm_sources,
         )
         return "\n\n".join(blocks)
