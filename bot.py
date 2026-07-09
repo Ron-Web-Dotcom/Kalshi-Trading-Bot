@@ -1264,6 +1264,36 @@ class TradingBot:
             _morning_summary_sent = False
             _summary_6am_sent = False
 
+            # If bot starts after 6am ET, fire the morning summary immediately
+            # so a restart doesn't cause a missed daily briefing
+            _startup_et = now_et()
+            if _startup_et.hour >= 6 and _startup_et.hour < 12:
+                try:
+                    from src.alerts.discord import DiscordAlerter as _DA
+                    _d = _DA()
+                    open_pos = await self.db.fetchone("SELECT COUNT(*) as n FROM positions WHERE status='open'") or {}
+                    unreal   = await self.db.fetchone("SELECT COALESCE(SUM(pnl),0) as p FROM positions WHERE status='open'") or {}
+                    wl       = await self.db.fetchone(
+                        "SELECT COUNT(*) as total, SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins, "
+                        "COALESCE(SUM(pnl),0) as pnl FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN')"
+                    ) or {}
+                    total = wl.get("total") or 0
+                    wins  = wl.get("wins") or 0
+                    wr    = f"{wins/total*100:.0f}%" if total else "n/a"
+                    _restart_time = _startup_et.strftime("%I:%M %p ET")
+                    await _d.send_message(
+                        f"📋 **Morning Summary** *(sent after restart at {_restart_time})*\n"
+                        f"📊 Open positions: **{open_pos.get('n', 0)}**\n"
+                        f"💰 Unrealised PnL: **${float(unreal.get('p', 0) or 0):.2f}**\n"
+                        f"🏆 All-time: {total} closed | Win rate: {wr} | PnL: ${float(wl.get('pnl',0) or 0):.2f}\n"
+                        f"🔍 Live scan active — bot alert firing every 10 min"
+                    )
+                    _morning_summary_sent = True
+                    _summary_6am_sent = True
+                    logger.info("Post-restart morning summary sent at %s", _restart_time)
+                except Exception as _rse:
+                    logger.debug("Post-restart morning summary error: %s", _rse)
+
             while not self._shutdown.is_set():
                 await asyncio.sleep(LIVE_SCAN_INTERVAL)
                 if self._shutdown.is_set():
