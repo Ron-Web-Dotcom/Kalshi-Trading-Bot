@@ -1257,9 +1257,19 @@ class TradingBot:
                 try:
                     from src.alerts.discord import DiscordAlerter as _DA
                     _d = _DA()
-                    open_pos = await self.db.fetchone("SELECT COUNT(*) as n FROM positions WHERE status='open'") or {}
-                    unreal   = await self.db.fetchone("SELECT COALESCE(SUM(pnl),0) as p FROM positions WHERE status='open'") or {}
-                    wl       = await self.db.fetchone(
+                    open_pos  = await self.db.fetchone("SELECT COUNT(*) as n FROM positions WHERE status='open'") or {}
+                    open_rows = await self.db.fetchall(
+                        "SELECT p.ticker, p.side, p.avg_price, p.contracts, p.platform, m.title, "
+                        "       COALESCE(m.yes_ask, p.avg_price) as cur_yes, COALESCE(m.no_ask, 0) as cur_no "
+                        "FROM positions p LEFT JOIN markets m ON m.ticker = p.ticker "
+                        "WHERE p.status='open'"
+                    ) or []
+                    unreal_pnl = sum(
+                        ((r.get("cur_no") if r.get("side") == "no" else r.get("cur_yes") or 0) - (r.get("avg_price") or 0))
+                        * int(r.get("contracts") or 0) / 100
+                        for r in open_rows
+                    )
+                    wl = await self.db.fetchone(
                         "SELECT COUNT(*) as total, SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins, "
                         "COALESCE(SUM(pnl),0) as pnl FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN')"
                     ) or {}
@@ -1267,10 +1277,18 @@ class TradingBot:
                     wins  = wl.get("wins") or 0
                     wr    = f"{wins/total*100:.0f}%" if total else "n/a"
                     _restart_time = _startup_et.strftime("%I:%M %p ET")
+                    open_lines = ""
+                    for r in open_rows[:5]:
+                        _ttl  = (r.get("title") or r.get("ticker") or "")[:50]
+                        _side = (r.get("side") or "yes").upper()
+                        _pr   = float(r.get("avg_price") or 0)
+                        _ct   = int(r.get("contracts") or 0)
+                        _plat = "🟣" if r.get("platform") == "polymarket" else "🟦"
+                        open_lines += f"\n  {_plat} {_ttl} | {_side} @ {_pr:.0f}¢ × {_ct}"
                     await _d.send_message(
                         f"📋 **Morning Summary** *(sent after restart at {_restart_time})*\n"
-                        f"📊 Open positions: **{open_pos.get('n', 0)}**\n"
-                        f"💰 Unrealised PnL: **${float(unreal.get('p', 0) or 0):.2f}**\n"
+                        f"📊 Open positions: **{open_pos.get('n', 0)}**{open_lines}\n"
+                        f"💰 Unrealised PnL: **${unreal_pnl:+.2f}**\n"
                         f"🏆 All-time: {total} closed | Win rate: {wr} | PnL: ${float(wl.get('pnl',0) or 0):.2f}\n"
                         f"🔍 Live scan active — bot alert firing every 10 min"
                     )
@@ -1346,7 +1364,17 @@ class TradingBot:
                         from src.alerts.discord import DiscordAlerter as _DA
                         _d = _DA()
                         open_pos  = await self.db.fetchone("SELECT COUNT(*) as n FROM positions WHERE status='open'") or {}
-                        unreal    = await self.db.fetchone("SELECT COALESCE(SUM(pnl),0) as p FROM positions WHERE status='open'") or {}
+                        open_rows_6 = await self.db.fetchall(
+                            "SELECT p.ticker, p.side, p.avg_price, p.contracts, p.platform, m.title, "
+                            "       COALESCE(m.yes_ask, p.avg_price) as cur_yes, COALESCE(m.no_ask, 0) as cur_no "
+                            "FROM positions p LEFT JOIN markets m ON m.ticker = p.ticker "
+                            "WHERE p.status='open'"
+                        ) or []
+                        unreal_6 = sum(
+                            ((r.get("cur_no") if r.get("side") == "no" else r.get("cur_yes") or 0) - (r.get("avg_price") or 0))
+                            * int(r.get("contracts") or 0) / 100
+                            for r in open_rows_6
+                        )
                         wl        = await self.db.fetchone(
                             "SELECT COUNT(*) as total, SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins, "
                             "COALESCE(SUM(pnl),0) as pnl FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN')"
@@ -1354,10 +1382,18 @@ class TradingBot:
                         total     = wl.get("total") or 0
                         wins      = wl.get("wins") or 0
                         wr        = f"{wins/total*100:.0f}%" if total else "n/a"
+                        open_lines_6 = ""
+                        for r in open_rows_6[:5]:
+                            _ttl  = (r.get("title") or r.get("ticker") or "")[:50]
+                            _side = (r.get("side") or "yes").upper()
+                            _pr   = float(r.get("avg_price") or 0)
+                            _ct   = int(r.get("contracts") or 0)
+                            _plat = "🟣" if r.get("platform") == "polymarket" else "🟦"
+                            open_lines_6 += f"\n  {_plat} {_ttl} | {_side} @ {_pr:.0f}¢ × {_ct}"
                         await _d.send_message(
                             f"📋 **6 AM Morning Summary**\n"
-                            f"📊 Open positions: **{open_pos.get('n', 0)}**\n"
-                            f"💰 Unrealised PnL: **${float(unreal.get('p', 0) or 0):.2f}**\n"
+                            f"📊 Open positions: **{open_pos.get('n', 0)}**{open_lines_6}\n"
+                            f"💰 Unrealised PnL: **${unreal_6:+.2f}**\n"
                             f"🏆 All-time: {total} closed | Win rate: {wr} | PnL: ${float(wl.get('pnl',0) or 0):.2f}\n"
                             f"🔍 Live scan active — bot alert firing every 10 min"
                         )
