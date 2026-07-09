@@ -63,7 +63,7 @@ class TradingConfig:
     max_drawdown_pct: float = field(default_factory=lambda: _env_float("MAX_DRAWDOWN_PCT", 15.0))
     max_sector_exposure_pct: float = field(default_factory=lambda: _env_float("MAX_SECTOR_EXPOSURE_PCT", 30.0))
     cooldown_between_trades_seconds: int = field(default_factory=lambda: _env_int("TRADE_COOLDOWN_SECONDS", 30))
-    stop_loss_pct: float = field(default_factory=lambda: _env_float("STOP_LOSS_PCT", 50.0))
+    stop_loss_pct: float = field(default_factory=lambda: _env_float("STOP_LOSS_PCT", 25.0))
     take_profit_pct: float = field(default_factory=lambda: _env_float("TAKE_PROFIT_PCT", 40.0))
 
     # Portfolio value used for risk % calculations (updated dynamically from API when live)
