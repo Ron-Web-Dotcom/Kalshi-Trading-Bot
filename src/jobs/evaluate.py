@@ -113,9 +113,9 @@ async def run_evaluation(db=None, scaler=None) -> None:
                             t["price"], pnl_str, src)
         logger.info("╚══════════════════════════════════════════════╝")
 
-        # Discord summary only when trade count has increased by ≥10 since last send
-        if total > 0 and total // 10 > _last_discord_trade_bucket:
-            _last_discord_trade_bucket = total // 10
+        # Discord summary only when trade count has increased by ≥50 since last send
+        if total > 0 and total // 50 > _last_discord_trade_bucket:
+            _last_discord_trade_bucket = total // 50
             discord = DiscordAlerter()
             await discord.pnl_update(total_pnl, win_rate, total, scaler.scale_factor)
 
