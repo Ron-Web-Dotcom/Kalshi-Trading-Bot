@@ -73,29 +73,11 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
     min_vol       = settings.trading.min_market_volume
     portfolio_val = settings.trading.portfolio_value
 
-    kalshi            = KalshiClient()
-    poly_client       = PolymarketTradingClient()
-    fetcher           = MarketDataFetcher(kalshi, db)
-    comparator        = ExternalMarketComparator(db)
-    # Use singletons passed from TradingBot when available (preserves cooldown/scale state)
-    arb               = arb_det   if arb_det  is not None else ArbitrageDetector()
-    risk              = risk       if risk     is not None else RiskManager(db)
-    scaler            = scaler     if scaler   is not None else AutoScaler()
+    # ── Daily loss lockout check — BEFORE any API calls ───────────────────
+    # No requests to Kalshi or Polymarket when locked out — saves API calls
+    # and prevents rate limiting during the cooldown period.
     discord           = DiscordAlerter()
-
-    # Fetch live balance so Kelly and risk checks use real portfolio size (A2)
-    if live_mode:
-        try:
-            bal = await kalshi.get_balance()
-            live_balance = (bal.get("balance") or 0) / 100  # cents → dollars
-            if live_balance > 0:
-                portfolio_val = live_balance
-                settings.trading.portfolio_value = portfolio_val
-                logger.info("Live portfolio: $%.2f", portfolio_val)
-        except Exception as _be:
-            logger.warning("Could not fetch live balance — using config $%.2f: %s", portfolio_val, _be)
-
-    # ── Daily loss lockout check ──────────────────────────────────────────
+    risk              = risk if risk is not None else RiskManager(db)
     locked, lockout_reason = await risk.check_daily_loss_lockout(db)
     if locked:
         logger.warning("RISK LOCKOUT: %s", lockout_reason)
@@ -113,10 +95,27 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 pass
             _lockout_last_alerted = _time.time()
         await auditor.log(db, "LOCKOUT", reason=lockout_reason)
-        await kalshi.close()
-        await poly_client.close()
-        await comparator.close()
         return results
+
+    # ── Initialize API clients — only reached when NOT locked out ─────────
+    kalshi            = KalshiClient()
+    poly_client       = PolymarketTradingClient()
+    fetcher           = MarketDataFetcher(kalshi, db)
+    comparator        = ExternalMarketComparator(db)
+    arb               = arb_det if arb_det is not None else ArbitrageDetector()
+    scaler            = scaler  if scaler  is not None else AutoScaler()
+
+    # Fetch live balance so Kelly and risk checks use real portfolio size
+    if live_mode:
+        try:
+            bal = await kalshi.get_balance()
+            live_balance = (bal.get("balance") or 0) / 100
+            if live_balance > 0:
+                portfolio_val = live_balance
+                settings.trading.portfolio_value = portfolio_val
+                logger.info("Live portfolio: $%.2f", portfolio_val)
+        except Exception as _be:
+            logger.warning("Could not fetch live balance — using config $%.2f: %s", portfolio_val, _be)
 
     # ── Open positions: log them + check cap ─────────────────────────────
     open_positions_rows = await db.fetchall(
