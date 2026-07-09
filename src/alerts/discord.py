@@ -1258,7 +1258,6 @@ class DiscordAlerter:
                 "name":  "💰 Performance",
                 "value": (
                     f"Today's realised PnL: **${pnl_sign}{today_pnl:.2f}**\n"
-                    f"Unrealised PnL (open): **${'+'if unrealised_pnl>=0 else ''}{unrealised_pnl:.2f}**\n"
                     f"All-time realised PnL: **${all_sign}{alltime_pnl:.2f}**\n"
                     f"{wr_emoji} Win rate: **{win_rate:.0f}%** ({wins}W / {losses}L)\n"
                     f"Open positions: **{open_positions}**"

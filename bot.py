@@ -1288,7 +1288,6 @@ class TradingBot:
                     await _d.send_message(
                         f"📋 **Morning Summary** *(sent after restart at {_restart_time})*\n"
                         f"📊 Open positions: **{open_pos.get('n', 0)}**{open_lines}\n"
-                        f"💰 Unrealised PnL: **${unreal_pnl:+.2f}**\n"
                         f"🏆 All-time: {total} closed | Win rate: {wr} | PnL: ${float(wl.get('pnl',0) or 0):.2f}\n"
                         f"🔍 Live scan active — bot alert firing every 10 min"
                     )
@@ -1393,7 +1392,6 @@ class TradingBot:
                         await _d.send_message(
                             f"📋 **6 AM Morning Summary**\n"
                             f"📊 Open positions: **{open_pos.get('n', 0)}**{open_lines_6}\n"
-                            f"💰 Unrealised PnL: **${unreal_6:+.2f}**\n"
                             f"🏆 All-time: {total} closed | Win rate: {wr} | PnL: ${float(wl.get('pnl',0) or 0):.2f}\n"
                             f"🔍 Live scan active — bot alert firing every 10 min"
                         )
