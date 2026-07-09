@@ -115,6 +115,21 @@ async def run_tracking(db_manager, risk=None) -> None:
                         close_reason = f"take_profit:{pct_change:.1f}%"
                         pnl = (cur_price - avg_price) * contracts / 100
                         close_price_used = cur_price
+                    elif enable_reeval and pct_change <= -10:
+                        # AI opt-out for Polymarket — if down 10%+ let AI decide whether to exit
+                        try:
+                            poly_mkt_ctx = {
+                                "ticker": ticker, "title": pos.get("title", ticker),
+                                "yes_ask": cur_price, "platform": "polymarket",
+                            }
+                            fresh_ctx = await build_market_context(poly_mkt_ctx)
+                            reeval = await ai.evaluate_open_position(pos, poly_mkt_ctx, fresh_ctx)
+                            if reeval["verdict"] == "EXIT" and reeval["confidence"] >= reeval_min_conf:
+                                close_reason = f"ai_reeval:{reeval['reasoning'][:60]}"
+                                pnl = (cur_price - avg_price) * contracts / 100
+                                close_price_used = cur_price
+                        except Exception as _re_err:
+                            logger.debug("Poly re-eval skipped for %s: %s", ticker, _re_err)
 
                     if close_reason:
                         await db_manager.execute("""
