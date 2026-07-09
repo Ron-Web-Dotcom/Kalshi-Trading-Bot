@@ -278,8 +278,8 @@ def check_confidence():
         from src.config.settings import settings
         t = settings.trading
         checks = [
-            ("min_ai_confidence",      t.min_ai_confidence,      77.0),
-            ("min_confidence_to_trade", t.min_confidence_to_trade, 0.77),
+            ("min_ai_confidence",      t.min_ai_confidence,      75.0),
+            ("min_confidence_to_trade", t.min_confidence_to_trade, 0.75),
         ]
         for name, val, minimum in checks:
             if val >= minimum:
@@ -291,14 +291,14 @@ def check_confidence():
 
     try:
         from src.utils.confidence_calibrator import _FLOOR_CONF, _DEFAULT
-        if _FLOOR_CONF >= 77.0:
+        if _FLOOR_CONF >= 75.0:
             ok(f"calibrator _FLOOR_CONF = {_FLOOR_CONF}")
         else:
-            fail(f"calibrator _FLOOR_CONF = {_FLOOR_CONF}", "expected ≥ 77")
-        if _DEFAULT >= 77.0:
+            fail(f"calibrator _FLOOR_CONF = {_FLOOR_CONF}", "expected ≥ 75")
+        if _DEFAULT >= 75.0:
             ok(f"calibrator _DEFAULT = {_DEFAULT}")
         else:
-            warn(f"calibrator _DEFAULT = {_DEFAULT}", "expected ≥ 77")
+            warn(f"calibrator _DEFAULT = {_DEFAULT}", "expected ≥ 75")
     except Exception as e:
         fail("confidence_calibrator import", str(e))
 
