@@ -1786,6 +1786,107 @@ class TradingBot:
                 except Exception as e:
                     logger.error("Live miss scan loop error: %s", e)
 
+        async def weekly_health_check_loop():
+            """
+            Runs every Sunday at 03:00 ET (low-traffic window).
+            Tests all 18 active data sources. Any that fail are added to
+            DISABLED_SOURCES so the bot skips them instead of wasting time on
+            dead requests. Discord alert sent listing what failed and what was
+            disabled. Sources that pass again on the next check are re-enabled.
+            """
+            from src.data.web_search import DISABLED_SOURCES
+            import httpx as _httpx
+
+            HEALTH_SOURCES = [
+                ("google_news",  "https://news.google.com/rss/search?q=bitcoin&hl=en-US&gl=US&ceid=US:en", False),
+                ("yahoo_news",   "https://news.yahoo.com/rss/search?p=bitcoin",                             False),
+                ("bing_news",    "https://www.bing.com/news/search?q=bitcoin&format=rss",                   False),
+                ("aljazeera",    "https://www.aljazeera.com/search/bitcoin?format=rss",                     False),
+                ("npr",          "https://feeds.npr.org/1001/rss.xml",                                      False),
+                ("bbc",          "https://feeds.bbci.co.uk/news/rss.xml",                                   False),
+                ("manifold",     "https://api.manifold.markets/v0/search-markets?term=bitcoin&limit=2",     True),
+                ("polymarket",   "https://gamma-api.polymarket.com/markets?search=bitcoin&active=true&limit=3", True),
+                ("predictit",    "https://www.predictit.org/api/marketdata/all/",                          True),
+                ("wikipedia",    "https://en.wikipedia.org/api/rest_v1/page/summary/Bitcoin",              True),
+                ("duckduckgo",   "https://api.duckduckgo.com/?q=bitcoin&format=json&no_html=1&skip_disambig=1", True),
+                ("wikidata",     "https://www.wikidata.org/w/api.php?action=wbsearchentities&search=bitcoin&language=en&limit=2&format=json", True),
+                ("youtube",      "https://www.youtube.com/results?search_query=bitcoin",                   False),
+                ("coingecko",    "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", True),
+                ("yahoo_finance","https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?interval=1d&range=1d", True),
+                ("espn",         "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard", True),
+                ("fred",         "https://fred.stlouisfed.org/graph/fredgraph.csv?id=FEDFUNDS",            False),
+                ("wttr",         "https://wttr.in/New+York?format=j1",                                     True),
+            ]
+
+            _ua = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+            async def _probe(name, url, as_json):
+                try:
+                    async with _httpx.AsyncClient(timeout=10, headers=_ua, follow_redirects=True) as c:
+                        r = await c.get(url)
+                        r.raise_for_status()
+                        _ = r.json() if as_json else r.text
+                        return True
+                except Exception:
+                    return False
+
+            while True:
+                try:
+                    from zoneinfo import ZoneInfo
+                    _et = ZoneInfo("America/New_York")
+                    now_et = datetime.now(_et)
+                    # Wait until next Sunday 03:00 ET
+                    days_until_sunday = (6 - now_et.weekday()) % 7
+                    if days_until_sunday == 0 and now_et.hour >= 3:
+                        days_until_sunday = 7
+                    next_run = now_et.replace(hour=3, minute=0, second=0, microsecond=0)
+                    next_run = next_run + __import__('datetime').timedelta(days=days_until_sunday)
+                    sleep_secs = (next_run - now_et).total_seconds()
+                    logger.info("Weekly health check scheduled in %.0fh", sleep_secs / 3600)
+                    await asyncio.sleep(sleep_secs)
+
+                    logger.info("Running weekly data source health check...")
+                    results = await asyncio.gather(*[_probe(n, u, j) for n, u, j in HEALTH_SOURCES])
+
+                    newly_disabled = []
+                    newly_enabled  = []
+                    still_disabled = []
+
+                    for (name, _, _), ok in zip(HEALTH_SOURCES, results):
+                        if not ok:
+                            if name not in DISABLED_SOURCES:
+                                DISABLED_SOURCES.add(name)
+                                newly_disabled.append(name)
+                                logger.warning("Health check: DISABLED source '%s' (probe failed)", name)
+                            else:
+                                still_disabled.append(name)
+                        else:
+                            if name in DISABLED_SOURCES:
+                                DISABLED_SOURCES.discard(name)
+                                newly_enabled.append(name)
+                                logger.info("Health check: RE-ENABLED source '%s' (probe passed)", name)
+
+                    passed  = sum(results)
+                    failed  = len(HEALTH_SOURCES) - passed
+
+                    # Always send a Discord summary
+                    lines = [f"**Weekly Source Health Check — {passed}/{len(HEALTH_SOURCES)} healthy**\n"]
+                    if newly_disabled:
+                        lines.append(f"🚫 **Newly disabled** ({len(newly_disabled)}): {', '.join(newly_disabled)}")
+                    if still_disabled:
+                        lines.append(f"⛔ **Still disabled** ({len(still_disabled)}): {', '.join(still_disabled)}")
+                    if newly_enabled:
+                        lines.append(f"✅ **Re-enabled** ({len(newly_enabled)}): {', '.join(newly_enabled)}")
+                    if failed == 0:
+                        lines.append("✅ All sources healthy — no changes needed.")
+
+                    color = 0x00ff00 if failed == 0 else 0xff4444
+                    await self.discord.send_message("\n".join(lines))
+
+                except Exception as e:
+                    logger.error("Weekly health check loop error: %s", e)
+                    await asyncio.sleep(3600)
+
         tasks = [
             asyncio.create_task(ingest_loop(),                name="ingest"),
             asyncio.create_task(track_loop(),                 name="track"),
@@ -1799,6 +1900,7 @@ class TradingBot:
             # asyncio.create_task(discord_command_loop(),      name="discord_commands"),  # enable when Discord bot token is set up
             asyncio.create_task(live_market_manager_loop(),    name="live_market_manager"),
             asyncio.create_task(manual_trade_monitor_loop(),  name="manual_trade_monitor"),
+            asyncio.create_task(weekly_health_check_loop(),   name="weekly_health_check"),
         ]
 
         await self._shutdown.wait()

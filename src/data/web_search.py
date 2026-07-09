@@ -45,6 +45,9 @@ import httpx
 
 logger = logging.getLogger("trading.web_search")
 
+# Sources disabled by weekly health check — skipped until they pass again
+DISABLED_SOURCES: set = set()
+
 _TIMEOUT  = httpx.Timeout(9.0)
 _HEADERS  = {
     "User-Agent": (
@@ -486,28 +489,37 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     # Build all coroutines — wiki lookups for each entity name
     wiki_coros = [_wikipedia(e) for e in entities[:2]]
 
+    def _skip(name: str, fallback):
+        """Return fallback immediately if source is disabled by health check."""
+        return asyncio.coroutine(lambda: fallback)() if name in DISABLED_SOURCES else None
+
+    async def _guarded(name, coro, fallback):
+        if name in DISABLED_SOURCES:
+            return fallback
+        return await coro
+
     try:
         results = await asyncio.wait_for(
             asyncio.gather(
-                # News search (6 sources — AP/Reuters/Guardian/Reddit removed, 403/DNS)
-                _google_news(q),
-                _yahoo_news(q),
-                _bing_news(q),
-                _aljazeera_news(q),
-                _npr_news(q),
-                _bbc_news(q),
-                # Prediction market cross-reference (3 sources — Metaculus removed, 403)
-                _manifold_markets(q),
-                _polymarket_price(market_title),
-                _predictit_price(market_title),
+                # News (6 active sources)
+                _guarded("google_news",   _google_news(q),             []),
+                _guarded("yahoo_news",    _yahoo_news(q),              []),
+                _guarded("bing_news",     _bing_news(q),               []),
+                _guarded("aljazeera",     _aljazeera_news(q),          []),
+                _guarded("npr",           _npr_news(q),                []),
+                _guarded("bbc",           _bbc_news(q),                []),
+                # Prediction markets (3 active sources)
+                _guarded("manifold",      _manifold_markets(q),        None),
+                _guarded("polymarket",    _polymarket_price(market_title), None),
+                _guarded("predictit",     _predictit_price(market_title), None),
                 # Knowledge / background
-                _ddg_instant(q),
-                _wikidata(q),
-                *wiki_coros,
+                _guarded("duckduckgo",    _ddg_instant(q),             None),
+                _guarded("wikidata",      _wikidata(q),                None),
+                *[_guarded("wikipedia",   c,                           None) for c in wiki_coros],
                 # Video titles (fast)
-                _youtube_search(q),
+                _guarded("youtube",       _youtube_search(q),          []),
                 # YouTube deep research — transcripts + descriptions (slower, high value)
-                _youtube_deep(q, timeout),
+                _guarded("youtube_deep",  _youtube_deep(q, timeout),   None),
                 return_exceptions=True,
             ),
             timeout=timeout,
@@ -526,19 +538,17 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     google_h   = _next() or []
     yahoo_h    = _next() or []
     bing_h     = _next() or []
-    guardian_h = _next() or []
     alj_h      = _next() or []
     npr_h      = _next() or []
-    ap_h       = _next() or []
-    reuters_h  = _next() or []
     bbc_h      = _next() or []
     manifold   = _next()
-    metaculus  = _next()
     poly_price = _next()
     predictit  = _next()
     ddg        = _next()
     wikidata   = _next()
-    wiki_results = [_next() for _ in wiki_coros]
+    wiki_results  = [_next() for _ in wiki_coros]
+    youtube_h     = _next() or []
+    youtube_deep  = _next()
     reddit_h      = _next() or []
     youtube_h     = _next() or []
     youtube_deep  = _next()   # full transcript/description block or None
@@ -547,15 +557,12 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     seen: set = set()
     all_headlines: List[Tuple[str, str]] = []
     for source, items in [
-        ("Google",   google_h),
-        ("Yahoo",    yahoo_h),
-        ("Bing",     bing_h),
-        ("Guardian", guardian_h),
-        ("AlJazeera",alj_h),
-        ("NPR",      npr_h),
-        ("AP",       ap_h),
-        ("Reuters",  reuters_h),
-        ("BBC",      bbc_h),
+        ("Google",    google_h),
+        ("Yahoo",     yahoo_h),
+        ("Bing",      bing_h),
+        ("AlJazeera", alj_h),
+        ("NPR",       npr_h),
+        ("BBC",       bbc_h),
     ]:
         for h in (items or []):
             norm = re.sub(r"\s+", " ", h.lower()[:70])
@@ -591,14 +598,7 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
             lines.append(f"  {i:2}. [{src}] {h}")
         blocks.append("\n".join(lines))
 
-    # 4. Reddit community sentiment
-    if reddit_h:
-        lines = ["=== COMMUNITY DISCUSSION (Reddit) ==="]
-        for post in reddit_h[:5]:
-            lines.append(f"  • {post}")
-        blocks.append("\n".join(lines))
-
-    # 5. YouTube — deep research (transcripts + descriptions) takes priority
+    # 4. YouTube — deep research (transcripts + descriptions) takes priority
     if isinstance(youtube_deep, str) and youtube_deep:
         blocks.append(youtube_deep)
     elif youtube_h:
@@ -608,12 +608,10 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
             lines.append(f"  • {vid}")
         blocks.append("\n".join(lines))
 
-    # 6. Prediction market cross-references (Manifold, Metaculus, Polymarket, PredictIt)
+    # 5. Prediction market cross-references (Manifold, Polymarket, PredictIt)
     pm_lines = []
     if isinstance(manifold, str) and manifold:
         pm_lines.append(manifold)
-    if isinstance(metaculus, str) and metaculus:
-        pm_lines.append(metaculus)
     if isinstance(poly_price, str) and poly_price:
         pm_lines.append(poly_price)
     if isinstance(predictit, str) and predictit:
@@ -624,29 +622,28 @@ async def fetch_live_context(market_title: str, timeout: float = 12.0) -> str:
     if blocks:
         total_sources = sum([
             bool(all_headlines), bool(wiki_text), bool(ddg),
-            bool(reddit_h), bool(youtube_deep or youtube_h), bool(pm_lines),
+            bool(youtube_deep or youtube_h), bool(pm_lines),
         ])
         def _hit(v) -> str:
             return "✅" if v else "❌"
 
         pm_sources = "+".join(filter(None, [
             "Manifold"   if isinstance(manifold,   str) and manifold   else "",
-            "Metaculus"  if isinstance(metaculus,  str) and metaculus  else "",
             "Polymarket" if isinstance(poly_price, str) and poly_price else "",
             "PredictIt"  if isinstance(predictit,  str) and predictit  else "",
         ])) or "none"
 
         logger.info(
             "Context sources for '%s':\n"
-            "  News:       %s Google  %s Yahoo  %s Bing  %s Guardian  %s AlJazeera  %s NPR  %s AP  %s Reuters  %s BBC\n"
-            "  Knowledge:  %s Wikipedia(%d)  %s DDG  %s Wikidata  %s Reddit  %s YouTube\n"
-            "  Pred mkts:  %s Manifold  %s Metaculus  %s Polymarket  %s PredictIt\n"
+            "  News:       %s Google  %s Yahoo  %s Bing  %s AlJazeera  %s NPR  %s BBC\n"
+            "  Knowledge:  %s Wikipedia(%d)  %s DDG  %s Wikidata  %s YouTube\n"
+            "  Pred mkts:  %s Manifold  %s Polymarket  %s PredictIt\n"
             "  Total: %d headlines | %d wiki blocks | pred_markets=%s",
             q[:60],
-            _hit(google_h), _hit(yahoo_h), _hit(bing_h), _hit(guardian_h),
-            _hit(alj_h),    _hit(npr_h),  _hit(ap_h),   _hit(reuters_h), _hit(bbc_h),
-            _hit(wiki_text), len(wiki_text), _hit(ddg), _hit(wikidata), _hit(reddit_h), _hit(youtube_deep or youtube_h),
-            _hit(manifold),  _hit(metaculus), _hit(poly_price), _hit(predictit),
+            _hit(google_h), _hit(yahoo_h), _hit(bing_h),
+            _hit(alj_h),    _hit(npr_h),   _hit(bbc_h),
+            _hit(wiki_text), len(wiki_text), _hit(ddg), _hit(wikidata), _hit(youtube_deep or youtube_h),
+            _hit(manifold), _hit(poly_price), _hit(predictit),
             len(all_headlines), len(wiki_text), pm_sources,
         )
         return "\n\n".join(blocks)
