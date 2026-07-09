@@ -457,14 +457,15 @@ class KalshiClient:
                            count: int, price: int,
                            order_type: str = "limit",
                            time_in_force: str = "gtc") -> Dict:
+        # Kalshi API expects only the price key matching the side — not both
+        price_key = "yes_price" if side == "yes" else "no_price"
         body = {
             "ticker": ticker,
             "side": side,
             "action": action,
             "count": count,
             "type": order_type,
-            "yes_price": price if side == "yes" else (100 - price),
-            "no_price": price if side == "no" else (100 - price),
+            price_key: price,
             "time_in_force": time_in_force,
             "client_order_id": f"bot_{int(time.time() * 1000)}",
         }

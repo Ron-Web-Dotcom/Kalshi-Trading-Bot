@@ -378,7 +378,7 @@ HARD RULES:
             return decision
 
         except json.JSONDecodeError as e:
-            logger.warning("AI JSON parse error for %s: %s — raw: %s", ticker, e, raw[:200] if 'raw' in dir() else "?")
+            logger.warning("AI JSON parse error for %s: %s — raw: %s", ticker, e, raw[:200] if 'raw' in locals() else "?")
             return self._rule_based_decision(market, signals)
         except Exception as e:
             err_str = str(e)

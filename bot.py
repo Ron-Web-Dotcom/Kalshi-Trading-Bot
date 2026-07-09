@@ -289,7 +289,7 @@ class TradingBot:
             await asyncio.sleep(TRACK_INTERVAL)  # let first cycle run first
             while not self._shutdown.is_set():
                 try:
-                    await run_tracking(self.db)
+                    await run_tracking(self.db, self.risk)
                 except Exception as e:
                     logger.error("Track error: %s", e)
                 await asyncio.sleep(TRACK_INTERVAL)
@@ -1046,7 +1046,7 @@ class TradingBot:
                     #      ≤24h (today's events)     → 70%
                     #      ≤48h (tomorrow too)       → 80%
                     #      ≤7d  (regular scan)       → 85%
-                    for ev in list(_da.all_evaluations):
+                    for ev in _da._active_evaluations():
                         if ev.get("action") != "BUY":
                             continue
                         conf   = float(ev.get("confidence", 0) or 0)

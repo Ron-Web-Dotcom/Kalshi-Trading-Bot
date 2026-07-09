@@ -7,7 +7,7 @@ from typing import Dict, List
 logger = logging.getLogger("trading.jobs.track")
 
 
-async def run_tracking(db_manager) -> None:
+async def run_tracking(db_manager, risk=None) -> None:
     """
     For every open position:
       1. Fetch live price from Kalshi
@@ -30,7 +30,8 @@ async def run_tracking(db_manager) -> None:
     paper            = not settings.trading.live_trading_enabled
 
     kalshi   = KalshiClient()
-    risk     = RiskManager(db=db_manager)
+    if risk is None:
+        risk = RiskManager(db=db_manager)
     ai       = AIDecisionEngine(db=db_manager)
     discord  = DiscordAlerter()
     now      = datetime.now(timezone.utc).isoformat()
@@ -84,7 +85,7 @@ async def run_tracking(db_manager) -> None:
                         if alt_price > 0:
                             cur_price = 100.0 - alt_price
                     if cur_price == 0:
-                        logger.debug("TRACK SKIP Polymarket %s — %s price=0 in cache", ticker, bid_key)
+                        logger.warning("TRACK SKIP Polymarket %s — %s price=0 in cache (stale data?)", ticker, bid_key)
                         continue
                     # cur_price is the side's own price (no_ask for NO, yes_ask for YES)
                     # so PnL formula is the same: profit when our side's price rises
@@ -93,78 +94,43 @@ async def run_tracking(db_manager) -> None:
                     mkt_status = mkt_row.get("status", "open")
                     if mkt_status in ("resolved", "settled", "finalized"):
                         close_reason = f"resolved:{mkt_status}"
-                        # YES wins when YES price → 100; NO wins when NO price → 100 (YES → 0)
-                        final_price  = 100.0 if (
-                            (side == "yes" and cur_price >= 95) or
-                            (side == "no"  and cur_price >= 95)
-                        ) else 0.0
+                        # Our side wins when that side's price → 100 at resolution
+                        # (yes_ask→100 = YES won; no_ask→100 = NO won)
+                        final_price  = 100.0 if cur_price >= 95 else 0.0
                         pnl = (final_price - avg_price) * contracts / 100
-                        await db_manager.execute("""
-                            UPDATE positions SET status='closed', current_price=?,
-                            pnl=?, closed_at=?, close_reason=? WHERE id=?
-                        """, (final_price, pnl, now, close_reason, pos_id))
-                        pnl_sign = "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN")
-                        await db_manager.execute(
-                            "UPDATE trade_logs SET pnl=?, result=?, resolved_at=? WHERE ticker=? AND side=? AND (result IS NULL OR result='PENDING')",
-                            (pnl, pnl_sign, now, ticker, side)
-                        )
-                        risk.record_result(ticker, pnl, platform)
-                        try:
-                            await discord.position_closed(
-                                ticker=ticker, side=side,
-                                contracts=int(contracts),
-                                avg_price=float(avg_price),
-                                close_price=float(final_price),
-                                pnl=float(pnl),
-                                reason=close_reason,
-                                platform="polymarket",
-                            )
-                        except Exception as _disc_err:
-                            logger.debug("Discord alert failed: %s", _disc_err)
-                        closed += 1
+                        close_price_used = final_price
                     elif stop_loss_pct > 0 and pct_change <= -stop_loss_pct:
                         close_reason = f"stop_loss:{pct_change:.1f}%"
-                        await db_manager.execute("""
-                            UPDATE positions SET status='closed', current_price=?,
-                            pnl=?, closed_at=?, close_reason=? WHERE id=?
-                        """, (cur_price, pnl, now, close_reason, pos_id))
-                        pnl_sign = "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN")
-                        await db_manager.execute(
-                            "UPDATE trade_logs SET pnl=?, result=?, resolved_at=? WHERE ticker=? AND side=? AND (result IS NULL OR result='PENDING')",
-                            (pnl, pnl_sign, now, ticker, side)
-                        )
-                        risk.record_result(ticker, pnl, platform)
-                        try:
-                            await discord.position_closed(
-                                ticker=ticker, side=side,
-                                contracts=int(contracts),
-                                avg_price=float(avg_price),
-                                close_price=float(cur_price),
-                                pnl=float(pnl),
-                                reason=close_reason,
-                                platform="polymarket",
-                            )
-                        except Exception as _disc_err:
-                            logger.debug("Discord alert failed: %s", _disc_err)
-                        closed += 1
+                        pnl = (cur_price - avg_price) * contracts / 100
+                        close_price_used = cur_price
                     elif take_profit_pct > 0 and pct_change >= take_profit_pct:
                         close_reason = f"take_profit:{pct_change:.1f}%"
+                        pnl = (cur_price - avg_price) * contracts / 100
+                        close_price_used = cur_price
+
+                    if close_reason:
                         await db_manager.execute("""
                             UPDATE positions SET status='closed', current_price=?,
                             pnl=?, closed_at=?, close_reason=? WHERE id=?
-                        """, (cur_price, pnl, now, close_reason, pos_id))
+                        """, (close_price_used, pnl, now, close_reason, pos_id))
                         pnl_sign = "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN")
-                        await db_manager.execute(
-                            "UPDATE trade_logs SET pnl=?, result=?, resolved_at=? WHERE ticker=? AND side=? AND (result IS NULL OR result='PENDING')",
-                            (pnl, pnl_sign, now, ticker, side)
+                        _tl_poly = await db_manager.fetchone(
+                            "SELECT id FROM trade_logs WHERE ticker=? AND side=? AND pnl IS NULL "
+                            "AND (platform='polymarket') ORDER BY executed_at DESC LIMIT 1",
+                            (ticker, side)
                         )
+                        if _tl_poly and _tl_poly.get("id"):
+                            await db_manager.execute(
+                                "UPDATE trade_logs SET pnl=?, result=?, resolved_at=? WHERE id=?",
+                                (pnl, pnl_sign, now, _tl_poly["id"])
+                            )
                         risk.record_result(ticker, pnl, platform)
                         try:
                             await discord.position_closed(
                                 ticker=ticker, side=side,
                                 contracts=int(contracts),
                                 avg_price=float(avg_price),
-                                close_price=float(cur_price),
+                                close_price=float(close_price_used),
                                 pnl=float(pnl),
                                 reason=close_reason,
                                 platform="polymarket",

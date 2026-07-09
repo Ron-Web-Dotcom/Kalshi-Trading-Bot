@@ -32,7 +32,7 @@ class RiskManager:
             today = datetime.now(timezone.utc).date().isoformat()
             row = await self.db.fetchone(
                 "SELECT COALESCE(SUM(ABS(pnl)),0) AS loss FROM trade_logs "
-                "WHERE pnl < 0 AND paper_trade=? AND executed_at >= ?",
+                "WHERE pnl < 0 AND paper_trade=? AND resolved_at >= ?",
                 (paper_flag, today + "T00:00:00",)
             )
             return float((row or {}).get("loss", 0))
