@@ -1,14 +1,14 @@
 """Job: track open positions — mark-to-market, stop-loss, take-profit, settlement."""
 
 import logging
-from datetime import datetime, timezone as _tz
+from datetime import datetime
 from typing import Dict, List
 from zoneinfo import ZoneInfo
 _ET = ZoneInfo("America/New_York")
 
-def _utc_now() -> str:
-    """UTC ISO timestamp for DB writes — keeps resolved_at consistent across all code paths."""
-    return datetime.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%S")
+def _et_now() -> str:
+    """Eastern Time ISO timestamp for all DB writes."""
+    return datetime.now(_ET).strftime("%Y-%m-%dT%H:%M:%S")
 
 logger = logging.getLogger("trading.jobs.track")
 
@@ -40,7 +40,7 @@ async def run_tracking(db_manager, risk=None) -> None:
         risk = RiskManager(db=db_manager)
     ai       = AIDecisionEngine(db=db_manager)
     discord  = DiscordAlerter()
-    now      = _utc_now()
+    now      = _et_now()
 
     try:
         positions: List[Dict] = await db_manager.fetchall(
@@ -226,7 +226,7 @@ async def run_tracking(db_manager, risk=None) -> None:
                     if _tl_track and _tl_track.get("id"):
                         await db_manager.execute(
                             "UPDATE trade_logs SET pnl=?, resolved_at=?, result=? WHERE id=?",
-                            (pnl, _utc_now(), "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN"), _tl_track["id"])
+                            (pnl, _et_now(), "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN"), _tl_track["id"])
                         )
                     risk.record_result(ticker, pnl, platform)
                     try:

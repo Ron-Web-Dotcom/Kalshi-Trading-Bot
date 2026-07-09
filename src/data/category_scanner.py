@@ -399,13 +399,11 @@ class CategoryScanner:
         if not self.db:
             return []
         try:
-            from datetime import timezone as _tz
-            _today_et   = datetime.now(_ET).date().isoformat()          # e.g. "2025-07-07"
-            _tomorrow_et = (datetime.now(_ET).date()).isoformat()        # same day — close_time must be today
-            # Only fetch markets closing today ET — no far-future markets
-            _tonight_utc = (
+            # Tonight at 11:59:59 ET — Kalshi stores close_time in UTC so convert for DB query
+            from datetime import timezone as _tz_db
+            _tonight_et_as_utc = (
                 datetime.now(_ET).replace(hour=23, minute=59, second=59, microsecond=0)
-                .astimezone(_tz.utc).strftime("%Y-%m-%dT%H:%M:%S")
+                .astimezone(_tz_db.utc).strftime("%Y-%m-%dT%H:%M:%S")
             )
             rows = await self.db.fetchall(
                 "SELECT ticker, title, category, yes_ask, no_ask, yes_bid, no_bid, "
@@ -419,7 +417,7 @@ class CategoryScanner:
                 "AND close_time <= ? "
                 "AND title IS NOT NULL AND title != '' "
                 "ORDER BY volume DESC LIMIT 500",
-                (_tonight_utc,)
+                (_tonight_et_as_utc,)
             ) or []
 
             def _norm_price(v):

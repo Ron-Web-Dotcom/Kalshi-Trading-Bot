@@ -356,6 +356,10 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
         # ── Date/time helpers — defined early, used by both poly fetch and pool filters ──
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        from zoneinfo import ZoneInfo as _ZI
+        _ET_tz = _ZI("America/New_York")
+        def _et_now_str() -> str:
+            return _dt.now(_ET_tz).strftime("%Y-%m-%dT%H:%M:%S")
         arb_tickers = {s["ticker"] for s in all_signals}
         now_utc = _dt.now(_tz.utc)
 
@@ -469,8 +473,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         if poly_enabled:
             try:
                 raw_poly = await poly_client.get_markets(limit=500)
-                now_ts   = __import__("datetime").datetime.now(
-                    __import__("datetime").timezone.utc).isoformat()
+                now_ts   = _dt.now(_ET_tz).strftime("%Y-%m-%dT%H:%M:%S")
 
                 # Persist Polymarket markets to DB so tracker can read live prices
                 for pm in raw_poly:
@@ -1190,6 +1193,11 @@ async def _resolve_expired_positions(db, live_mode: bool = False, risk=None) -> 
     Record result in trade_logs, fire Discord W/L alert, hard-delete from positions.
     Runs every 45s trade cycle — real-time resolution, no waiting for heartbeat.
     """
+    from datetime import datetime as _r_dt
+    from zoneinfo import ZoneInfo as _r_ZI
+    _r_ET = _r_ZI("America/New_York")
+    def _et_now_str() -> str:
+        return _r_dt.now(_r_ET).strftime("%Y-%m-%dT%H:%M:%S")
     # Add close_time column to positions if missing (migration)
     try:
         await db.execute("ALTER TABLE positions ADD COLUMN close_time TEXT DEFAULT ''")
@@ -1283,8 +1291,8 @@ async def _resolve_expired_positions(db, live_mode: bool = False, risk=None) -> 
             )
             if _tl_row and _tl_row.get("id"):
                 await db.execute(
-                    "UPDATE trade_logs SET result='EXPIRED', resolved_at=datetime('now'), pnl=0 WHERE id=?",
-                    (_tl_row["id"],)
+                    "UPDATE trade_logs SET result='EXPIRED', resolved_at=?, pnl=0 WHERE id=?",
+                    (_et_now_str(), _tl_row["id"])
                 )
             continue
 
@@ -1312,9 +1320,9 @@ async def _resolve_expired_positions(db, live_mode: bool = False, risk=None) -> 
             )
             if _tl_row and _tl_row.get("id"):
                 await db.execute(
-                    "UPDATE trade_logs SET pnl=?, resolved_at=datetime('now'), "
+                    "UPDATE trade_logs SET pnl=?, resolved_at=?, "
                     "result=?, exit_price=? WHERE id=?",
-                    (pnl_usd, result, exit_p, _tl_row["id"])
+                    (pnl_usd, _et_now_str(), result, exit_p, _tl_row["id"])
                 )
         except Exception as _tl:
             logger.debug("trade_logs update %s: %s", ticker, _tl)
