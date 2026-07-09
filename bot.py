@@ -14,7 +14,7 @@ import argparse
 import gc
 import signal
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
 _ET = ZoneInfo("America/New_York")
@@ -141,11 +141,14 @@ class TradingBot:
         # Orphan cleanup: mark old unresolved trade_logs as VOID if position is gone AND
         # trade is older than 2 days (clearly stale, not a same-day open position).
         try:
+            _et_now_void = datetime.now(_ET).strftime("%Y-%m-%dT%H:%M:%S")
+            _et_2days_ago = (datetime.now(_ET) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S")
             await self.db.execute(
-                "UPDATE trade_logs SET result='VOID', resolved_at=datetime('now'), pnl=0 "
+                "UPDATE trade_logs SET result='VOID', resolved_at=?, pnl=0 "
                 "WHERE pnl IS NULL AND resolved_at IS NULL "
-                "AND executed_at < datetime('now', '-2 days') "
-                "AND ticker NOT IN (SELECT ticker FROM positions WHERE status='open')"
+                "AND executed_at < ? "
+                "AND ticker NOT IN (SELECT ticker FROM positions WHERE status='open')",
+                (_et_now_void, _et_2days_ago)
             )
             logger.info("Orphan trade_logs cleaned up (marked VOID)")
         except Exception as _oc:
