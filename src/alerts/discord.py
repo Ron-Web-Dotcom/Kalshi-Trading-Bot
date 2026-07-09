@@ -1078,13 +1078,9 @@ class DiscordAlerter:
                 ai_str = "\n👀 WATCHING — not yet evaluated"
             return f"{icon}{badge} **{title}** — {timing}\nYES {yes:.0f}¢ | NO {no:.0f}¢{ai_str}"
 
-        # Live scan section
+        # Live scan section — only shown when there are actual live events
         live_mkts = live_scan_markets or []
-        if live_mkts:
-            live_lines = [_market_line(m, " ⚡") for m in live_mkts[:4]]
-            live_section = "\n\n".join(live_lines)
-        else:
-            live_section = "_No live events confirmed this scan_"
+        live_section = "\n\n".join([_market_line(m, " ⚡") for m in live_mkts[:4]]) if live_mkts else None
 
         # ── Open Positions — plain-English PnL ───────────────────────────────
         # live_open_positions = positions whose market closes today (from DB query in bot.py)
@@ -1139,11 +1135,11 @@ class DiscordAlerter:
                 "value":  positions_val,
                 "inline": False,
             },
-            {
+            *([{
                 "name":   "⚡ Live Events This Scan",
                 "value":  live_section,
                 "inline": False,
-            },
+            }] if live_section else []),
             {
                 "name":   "⏱ Next Scan",
                 "value":  "in ~60s — running 24/7",
