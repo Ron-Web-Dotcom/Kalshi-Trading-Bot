@@ -37,6 +37,16 @@ _ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.category_scanner")
 
+
+def _norm_ts(ts: str) -> str:
+    """Normalize Polymarket endDate to true UTC, correcting Poly's hardcoded EST offset."""
+    try:
+        from src.clients.polymarket_client import _normalize_poly_ts
+        return _normalize_poly_ts(ts)
+    except Exception:
+        return ts
+
+
 _GAMMA_BASE = "https://gamma-api.polymarket.com"
 _TIMEOUT    = httpx.Timeout(15.0)
 _HEADERS    = {
@@ -265,7 +275,7 @@ def _parse_poly_market(m: Dict, tag: str) -> Optional[Dict]:
             "yes_bid":     round(max(yes_price - 1, 1), 1),
             "no_bid":      round(max(no_price  - 1, 1), 1),
             "volume":      volume,
-            "close_time":  m.get("endDate", ""),
+            "close_time":  _norm_ts(m.get("endDate", "")),
             "last_price":  yes_price,
             "open_interest": 0,
             "_yes_token":  token_ids[0] if len(token_ids) > 0 else "",

@@ -18,6 +18,16 @@ import httpx
 
 logger = logging.getLogger("trading.external_markets")
 
+
+def _normalize_ts(ts: str) -> str:
+    """Correct Polymarket's hardcoded EST (-05:00) offset to true ET (DST-aware UTC)."""
+    try:
+        from src.clients.polymarket_client import _normalize_poly_ts
+        return _normalize_poly_ts(ts)
+    except Exception:
+        return ts
+
+
 # Polymarket Gamma API — public, no auth required
 GAMMA_API  = "https://gamma-api.polymarket.com"
 # Kalshi taker fee
@@ -79,7 +89,7 @@ class PolymarketClient:
                     "yes_price":   yes_price,
                     "no_price":    no_price,
                     "volume":      float(m.get("volume") or 0),
-                    "end_date":    m.get("endDate", ""),
+                    "end_date":    _normalize_ts(m.get("endDate", "")),
                     "slug":        m.get("slug", ""),
                 })
             logger.debug("Polymarket: fetched %d active markets", len(markets))

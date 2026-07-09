@@ -211,7 +211,7 @@ class DiscordAlerter:
             return
 
         mode_tag = "📝 PAPER" if mode == "PAPER" else "💰 LIVE"
-        now_utc  = datetime.now(_ET)
+        now_utc  = datetime.now(timezone.utc)
         from src.utils.eastern_time import now_et as _now_et, format_et as _fmt_et, utc_to_et as _utc_to_et_ba
         _now_et_obj  = _now_et()
         _today_et    = _now_et_obj.date()
@@ -970,7 +970,7 @@ class DiscordAlerter:
     ) -> None:
         """Hourly heartbeat — clean stats, watching section, best pick."""
         from src.utils.eastern_time import format_et, et_label, now_et as _hb_now_et, utc_to_et as _hb_utc_to_et
-        now_utc  = datetime.now(_ET)
+        now_utc  = datetime.now(timezone.utc)
         hhmm     = format_et(now_utc, "%I:%M %p") + f" {et_label()}"
         color    = 0x5865F2
         _hb_today_et    = _hb_now_et().date()
