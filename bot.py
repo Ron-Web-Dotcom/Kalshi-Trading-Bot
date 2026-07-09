@@ -355,18 +355,19 @@ class TradingBot:
                     )
                     open_n = sum((r.get("n") or 0) for r in (open_rows or []))
                     open_by_platform = {(r.get("platform") or "kalshi"): r.get("n", 0) for r in (open_rows or [])}
-                    # Live in-play tickers from live slot manager
+                    # In-play: open positions whose market closes today (ET)
+                    _et_today_str = _now_et().strftime("%Y-%m-%d")
+                    inplay_row = await self.db.fetchone(
+                        "SELECT COUNT(*) as n FROM positions p "
+                        "JOIN markets m ON m.ticker = p.ticker "
+                        "WHERE p.status='open' "
+                        "AND date(m.close_time) = ?",
+                        (_et_today_str,)
+                    )
+                    live_open_n = (inplay_row or {}).get("n") or 0
+                    # Also grab live slot manager count for the live_slots param
                     from src.jobs.live_market_manager import _live_slots as _hb_ls
                     live_tickers = set(_hb_ls.keys())
-                    # Count live open positions across both platforms
-                    live_open_rows = await self.db.fetchall(
-                        "SELECT COUNT(*) as n FROM positions WHERE status='open' AND ticker IN ({})".format(
-                            ",".join("?" * len(live_tickers))
-                        ) if live_tickers else
-                        "SELECT 0 as n",
-                        tuple(live_tickers) if live_tickers else (),
-                    )
-                    live_open_n = (live_open_rows[0].get("n") or 0) if live_open_rows else 0
 
                     # Today's PnL — resolved trades where resolve happened today
                     _paper_flag = 0 if settings.trading.live_trading_enabled else 1
@@ -520,7 +521,6 @@ class TradingBot:
                     closed_trades = [dict(r) for r in (closed_rows or [])]
 
                     from src.utils.daily_stats import stats as daily_stats
-                    from src.jobs.live_market_manager import _live_slots, MAX_LIVE_POSITIONS
                     await discord.hourly_heartbeat(
                         markets_scanned=markets_total,
                         kalshi_count=kalshi_count,
@@ -539,8 +539,8 @@ class TradingBot:
                         total_pnl=total_pnl,
                         total_closed=total_closed,
                         best_pick=daily_stats.best_pick(),
-                        live_slots=len(_live_slots),
-                        live_slots_max=MAX_LIVE_POSITIONS,
+                        live_slots=len(_hb_ls),
+                        live_slots_max=10,
                         all_evaluations=list(getattr(daily_stats, "all_evaluations", [])),
                         live_scan_markets=list(getattr(daily_stats, "last_live_scan_markets", [])),
                         regular_scan_top=list(getattr(daily_stats, "last_regular_scan_top", [])),

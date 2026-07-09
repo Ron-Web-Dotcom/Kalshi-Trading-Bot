@@ -994,7 +994,7 @@ class DiscordAlerter:
             wr_emoji     = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
             all_pnl_sign = "+" if total_pnl >= 0 else ""
             record_str   = (
-                f"**{win_rate:.0f}% win rate** — {total_wins}W / {total_losses}L / {total_closed} closed\n"
+                f"**{win_rate:.0f}% win rate** — {total_wins}W / {total_losses}L\n"
                 f"All-time PnL: **${all_pnl_sign}{total_pnl:.2f}**"
             )
         elif all_evals:
@@ -1059,34 +1059,10 @@ class DiscordAlerter:
         else:
             live_section = "_No live events confirmed this scan_"
 
-        # Regular scan top picks
-        reg_mkts = regular_scan_top or top_candidates or []
-        reg_lines = []
-        seen_reg = set()
-        for m in reg_mkts[:6]:
-            t = m.get("ticker", "")
-            if t in seen_reg:
-                continue
-            seen_reg.add(t)
-            reg_lines.append(_market_line(m))
-            if len(reg_lines) >= 4:
-                break
-        regular_section = "\n\n".join(reg_lines) or "_Scanning... no candidates yet_"
-
         # ── Open Positions — plain-English PnL ───────────────────────────────
-        locked_s = "+" if paper_pnl >= 0 else ""
-        paper_s  = "+" if unrealised_pnl >= 0 else ""
-        p_emoji  = "💰" if paper_pnl >= 0 else "💸"
-        u_emoji  = "📈" if unrealised_pnl >= 0 else "📉"
+        # live_open_positions = positions whose market closes today (from DB query in bot.py)
+        todays_inplay = live_open_positions
 
-        if live_slots >= live_slots_max:
-            slots_str = f"⚡ **{live_slots}/{live_slots_max}** in-play slots filled"
-        elif live_slots > 0:
-            slots_str = f"⚡ **{live_slots}/{live_slots_max}** in-play slots active — hunting for more"
-        else:
-            slots_str = f"⚡ **0/{live_slots_max}** in-play — no live events right now"
-
-        regular_open = max(0, open_positions - live_open_positions)
         plat = open_by_platform or {}
         kal_n  = plat.get("kalshi", 0) + plat.get(None, 0)
         poly_n = plat.get("polymarket", 0)
@@ -1100,22 +1076,25 @@ class DiscordAlerter:
             if poly_n:
                 plat_parts.append(f"🟣 **{poly_n}** Polymarket")
             plat_str = " + ".join(plat_parts) if plat_parts else f"**{open_positions}**"
+            pos_line = f"**{open_positions}** open bets ({plat_str})"
 
-            if live_open_positions > 0:
-                pos_line = (
-                    f"**{open_positions}** open bets ({plat_str}) — "
-                    f"⚡ **{live_open_positions}** live in-play + "
-                    f"🎯 **{regular_open}** regular"
-                )
-            else:
-                pos_line = f"**{open_positions}** open bets ({plat_str}) — 🎯 all regular"
+        pnl_lines = []
+        if paper_pnl != 0.0:
+            locked_s = "+" if paper_pnl >= 0 else ""
+            p_emoji  = "💰" if paper_pnl >= 0 else "💸"
+            pnl_lines.append(f"{p_emoji} **Locked in:** ${locked_s}{paper_pnl:.2f} ← _money already banked from closed bets_")
+        if unrealised_pnl != 0.0:
+            paper_s = "+" if unrealised_pnl >= 0 else ""
+            u_emoji = "📈" if unrealised_pnl >= 0 else "📉"
+            pnl_lines.append(f"{u_emoji} **On paper:** ${paper_s}{unrealised_pnl:.2f} ← _what we'd pocket if we cashed out NOW_")
 
-        positions_val = (
-            f"{pos_line}\n"
-            f"{p_emoji} **Locked in:** ${locked_s}{paper_pnl:.2f} ← _money already banked from closed bets_\n"
-            f"{u_emoji} **On paper:** ${paper_s}{unrealised_pnl:.2f} ← _what we'd pocket if we cashed out NOW_\n"
-            f"{slots_str}"
-        )
+        if todays_inplay > 0:
+            inplay_str = f"⚡ **{todays_inplay}/{open_positions}** in-play — live events closing today"
+        else:
+            inplay_str = f"⚡ **0/{open_positions}** in-play — no live events today" if open_positions > 0 else "⚡ No open bets"
+
+        positions_parts = [pos_line] + pnl_lines + [inplay_str]
+        positions_val = "\n".join(positions_parts)
 
         fields = [
             {
@@ -1136,11 +1115,6 @@ class DiscordAlerter:
             {
                 "name":   "⚡ Live Events This Scan",
                 "value":  live_section,
-                "inline": False,
-            },
-            {
-                "name":   "🔍 Regular Scan — Top Picks",
-                "value":  regular_section,
                 "inline": False,
             },
             {
@@ -1257,7 +1231,7 @@ class DiscordAlerter:
                     f"Today's realised PnL: **${pnl_sign}{today_pnl:.2f}**\n"
                     f"Unrealised PnL (open): **${'+'if unrealised_pnl>=0 else ''}{unrealised_pnl:.2f}**\n"
                     f"All-time realised PnL: **${all_sign}{alltime_pnl:.2f}**\n"
-                    f"{wr_emoji} Win rate: **{win_rate:.0f}%** ({wins}W / {losses}L / {total_closed} closed)\n"
+                    f"{wr_emoji} Win rate: **{win_rate:.0f}%** ({wins}W / {losses}L)\n"
                     f"Open positions: **{open_positions}**"
                 ),
                 "inline": False,

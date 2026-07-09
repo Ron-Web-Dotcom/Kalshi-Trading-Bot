@@ -101,9 +101,17 @@ class DailyStats:
         # Replace existing entry for same ticker (keep freshest evaluation)
         self.all_evaluations = [e for e in self.all_evaluations if e["ticker"] != ticker]
         self.all_evaluations.append(entry)
-        # Keep top 20 by confidence
-        self.all_evaluations.sort(key=lambda x: x["confidence"], reverse=True)
-        self.all_evaluations = self.all_evaluations[:20]
+        # Keep top 15 per platform so neither Kalshi nor Polymarket squeezes the other out
+        by_plat: Dict[str, List[Dict]] = {}
+        for e in self.all_evaluations:
+            p = e.get("platform", "kalshi")
+            by_plat.setdefault(p, []).append(e)
+        merged: List[Dict] = []
+        for p_list in by_plat.values():
+            p_list.sort(key=lambda x: x["confidence"], reverse=True)
+            merged.extend(p_list[:15])
+        merged.sort(key=lambda x: x["confidence"], reverse=True)
+        self.all_evaluations = merged
 
     def _active_evaluations(self) -> List[Dict]:
         """Return evaluations that haven't expired yet (close_time still in future)."""
