@@ -420,7 +420,13 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
         def _tradeable_price(m):
             ask = m.get("yes_ask", 0) or 0
-            return ask if ask > 0 else (m.get("last_price", 0) or 0)
+            if ask > 0:
+                return ask
+            lp = m.get("last_price", 0) or 0
+            if lp > 0:
+                return lp
+            bid = m.get("yes_bid", 0) or 0
+            return bid
 
         def _already_open(m):
             if m.get("ticker") in open_tickers:
@@ -619,6 +625,10 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             and 2 < _tradeable_price(m) < 98
             and (m.get("title") or "")
         ]
+        if live_kalshi_raw and not live_kalshi:
+            no_price = [m.get("ticker","?") for m in live_kalshi_raw if not (2 < _tradeable_price(m) < 98)]
+            logger.info("Kalshi live: %d raw → 0 tradeable (price filter dropped %d: %s)",
+                        len(live_kalshi_raw), len(no_price), no_price[:5])
         live_poly = [
             m for m in live_poly_raw
             if not _already_open(m)

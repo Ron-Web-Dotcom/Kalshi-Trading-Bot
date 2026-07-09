@@ -221,7 +221,20 @@ class KalshiClient:
             logger.debug("Kalshi /events live fetch: %s", e)
 
         if live_markets:
-            logger.info("Kalshi LIVE NOW (/events): %d sport/game markets closing ≤24h", len(live_markets))
+            # Normalize prices — events API uses yes_ask/no_ask as fractions (0-1) sometimes
+            for m in live_markets:
+                for field in ("yes_ask", "no_ask", "last_price", "yes_bid", "no_bid"):
+                    v = m.get(field)
+                    if v is not None:
+                        try:
+                            fv = float(v)
+                            if 0 < fv < 1.0:  # fraction → cents
+                                m[field] = round(fv * 100, 2)
+                        except (TypeError, ValueError):
+                            pass
+            priced = sum(1 for m in live_markets if (m.get("yes_ask") or m.get("last_price") or 0) > 1)
+            logger.info("Kalshi LIVE NOW (/events): %d sport/game markets closing ≤24h (%d with price)",
+                        len(live_markets), priced)
             return live_markets[:max_markets]
 
         # Strategy 2: query each sport series directly — much faster than paginating all markets
@@ -295,7 +308,20 @@ class KalshiClient:
         except Exception as e:
             logger.debug("Kalshi live market scan: %s", e)
 
-        logger.info("Kalshi LIVE NOW (fallback scan): %d confirmed live markets", len(live_markets))
+        # Normalize prices — Kalshi /markets API sometimes returns fractions
+        for m in live_markets:
+            for field in ("yes_ask", "no_ask", "last_price", "yes_bid", "no_bid"):
+                v = m.get(field)
+                if v is not None:
+                    try:
+                        fv = float(v)
+                        if 0 < fv < 1.0:
+                            m[field] = round(fv * 100, 2)
+                    except (TypeError, ValueError):
+                        pass
+        priced = sum(1 for m in live_markets if (m.get("yes_ask") or m.get("last_price") or 0) > 1)
+        logger.info("Kalshi LIVE NOW (fallback scan): %d confirmed live markets (%d with price)",
+                    len(live_markets), priced)
         return live_markets[:max_markets]
 
     async def get_all_markets(self, status: str = "open", max_markets: int = 1000,
