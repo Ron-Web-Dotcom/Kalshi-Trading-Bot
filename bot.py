@@ -1791,8 +1791,8 @@ class TradingBot:
             Runs every Sunday at 03:00 ET (low-traffic window).
             Tests all 18 active data sources. Any that fail are added to
             DISABLED_SOURCES so the bot skips them instead of wasting time on
-            dead requests. Discord alert sent listing what failed and what was
-            disabled. Sources that pass again on the next check are re-enabled.
+            dead requests. Discord alert sent listing what failed.
+            To re-enable sources after a fix: python3 scripts/health_check.py
             """
             from src.data.web_search import DISABLED_SOURCES
             import httpx as _httpx
