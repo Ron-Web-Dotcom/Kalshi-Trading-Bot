@@ -418,44 +418,30 @@ class CategoryScanner:
         include_bulk: bool = True,
     ) -> List[Dict]:
         """
-        Fetch markets from EVERY tag/sub-category on both platforms in parallel.
-
-        Returns: flat list of market dicts sorted by _pre_score (best first),
-                 deduplicated by ticker, diversity-balanced across categories.
+        Single bulk request captures ALL Polymarket + ALL Kalshi markets at once.
+        One request to Polymarket Gamma API (limit=1000) + one Kalshi DB query.
+        Much faster and more complete than fetching 70+ tags individually.
         """
-        n_tags = len(POLY_TAG_SLUGS)
-        logger.info(
-            "Starting full category scan: %d Poly tags + bulk fetch + Kalshi DB",
-            n_tags,
+        logger.info("Starting full category scan: 1 Polymarket bulk + Kalshi DB")
+
+        # Single request gets everything — no tag loop needed
+        poly_bulk, kalshi_result = await asyncio.gather(
+            _fetch_poly_bulk(1000),
+            self._kalshi_all_categories(500),
+            return_exceptions=True,
         )
 
-        # All tag fetches run concurrently — even if many return empty it's fast
-        # Limit parallelism to avoid overwhelming the API (batch in groups of 20)
-        all_tag_results: List[List[Dict]] = []
-        batch_size = 20
-        for i in range(0, len(POLY_TAG_SLUGS), batch_size):
-            batch = POLY_TAG_SLUGS[i:i + batch_size]
-            batch_results = await asyncio.gather(
-                *[_fetch_poly_tag(tag, max_per_tag) for tag in batch],
-                return_exceptions=True,
-            )
-            for r in batch_results:
-                if isinstance(r, list):
-                    all_tag_results.append(r)
-
-        # Bulk fetch + Kalshi concurrently
-        extras = []
-        if include_bulk:
-            extras.append(_fetch_poly_bulk(50))
-        extras.append(self._kalshi_all_categories(max_per_tag))
-
-        extra_results = await asyncio.gather(*extras, return_exceptions=True)
+        all_tag_results = []
+        if isinstance(poly_bulk, list):
+            all_tag_results.append(poly_bulk)
+        if isinstance(kalshi_result, list):
+            all_tag_results.append(kalshi_result)
 
         # Merge and deduplicate
         seen_tickers: set = set()
         all_markets: List[Dict] = []
 
-        for source in [*all_tag_results, *extra_results]:
+        for source in all_tag_results:
             if not isinstance(source, list):
                 continue
             for m in source:
