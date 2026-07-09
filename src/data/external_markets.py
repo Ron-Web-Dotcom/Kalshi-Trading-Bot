@@ -150,7 +150,31 @@ class ExternalMarketComparator:
                                     params={"active": "true", "closed": "false", "limit": 100})
                     r.raise_for_status()
                     raw = r.json()
-                    self._poly_cache = raw if isinstance(raw, list) else raw.get("data", [])
+                    items = raw if isinstance(raw, list) else raw.get("data", [])
+                    parsed = []
+                    for m in items:
+                        prices = m.get("outcomePrices") or []
+                        if not prices or len(prices) < 2:
+                            continue
+                        try:
+                            yp = float(prices[0])
+                            np_ = float(prices[1])
+                            yp = yp * 100 if yp <= 1.0 else yp
+                            np_ = np_ * 100 if np_ <= 1.0 else np_
+                        except (TypeError, ValueError):
+                            continue
+                        if yp <= 0 or yp >= 100:
+                            continue
+                        parsed.append({
+                            "id":         m.get("id", ""),
+                            "question":   m.get("question", ""),
+                            "yes_price":  yp,
+                            "no_price":   np_,
+                            "volume":     float(m.get("volume") or 0),
+                            "end_date":   m.get("endDate", ""),
+                            "slug":       m.get("slug", ""),
+                        })
+                    self._poly_cache = parsed
             except Exception as e:
                 logger.warning("Polymarket cache refresh failed: %s", e)
                 if not self._poly_cache:
