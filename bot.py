@@ -614,7 +614,6 @@ class TradingBot:
                     break
 
                 try:
-                    from datetime import timedelta as _td2
                     discord      = DiscordAlerter()
                     from src.utils.eastern_time import now_et as _now_et_sum
                     _et_sum      = _now_et_sum()
@@ -1888,6 +1887,7 @@ class TradingBot:
                         lines.append("✅ All sources healthy — no changes needed.")
 
                     color = 0x00ff00 if failed == 0 else 0xff4444
+                    from src.alerts.discord import DiscordAlerter
                     await DiscordAlerter().send_message("\n".join(lines))
 
                 except Exception as e:
