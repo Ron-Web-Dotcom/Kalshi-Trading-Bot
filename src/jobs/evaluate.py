@@ -6,8 +6,12 @@ from datetime import datetime, timezone
 logger = logging.getLogger("trading.jobs.evaluate")
 
 
+_last_discord_trade_bucket: int = -1
+
+
 async def run_evaluation(db=None, scaler=None) -> None:
     """Compute and store a performance snapshot, log a clean summary table."""
+    global _last_discord_trade_bucket
     from src.utils.database import DatabaseManager
     from src.alerts.discord import DiscordAlerter
     from src.risk.scaling import AutoScaler
@@ -109,8 +113,9 @@ async def run_evaluation(db=None, scaler=None) -> None:
                             t["price"], pnl_str, src)
         logger.info("╚══════════════════════════════════════════════╝")
 
-        # Discord summary every 10 trades
-        if total > 0 and total % 10 == 0:
+        # Discord summary only when trade count has increased by ≥10 since last send
+        if total > 0 and total // 10 > _last_discord_trade_bucket:
+            _last_discord_trade_bucket = total // 10
             discord = DiscordAlerter()
             await discord.pnl_update(total_pnl, win_rate, total, scaler.scale_factor)
 
