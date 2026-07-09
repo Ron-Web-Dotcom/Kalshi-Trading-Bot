@@ -875,18 +875,22 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             logger.debug("Category sweep error (non-fatal): %s", _cat_err)
 
         # Expiring markets (closing soon but NOT confirmed live) → regular scan pool
-        # They still get AI evaluated, just without the live-trade priority boost
+        # Must pass the same today-only + volume filters as the main pools
         existing_all_tickers = {m.get("ticker") for m in long_term + short_term + live_kalshi + poly_markets}
         for m in expiring_kalshi_raw:
             if (m.get("ticker") not in existing_all_tickers
                     and not _already_open(m)
-                    and 2 < _tradeable_price(m) < 98):
+                    and 2 < _tradeable_price(m) < 98
+                    and m.get("volume", 0) > 0
+                    and _closes_today(m)):             # today only — no tomorrow bleed-through
                 long_term.append(m)
                 existing_all_tickers.add(m.get("ticker"))
         for m in expiring_poly_raw:
             if (m.get("ticker") not in existing_all_tickers
                     and not _already_open(m)
-                    and m.get("yes_ask", 0) > 1):
+                    and m.get("yes_ask", 0) > 1
+                    and m.get("volume", 0) > 0
+                    and _closes_today(m)):             # today only
                 poly_markets.append(m)
                 existing_all_tickers.add(m.get("ticker"))
 
@@ -998,7 +1002,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     exp_profit_usd = contracts_est * (net_ev / 100)
                 else:
                     # No EV from AI — estimate from confidence: treat conf-65 as edge
-                    edge = max(0.0, confidence - 65) * 0.002  # 70%→$0.01, 85%→$0.04
+                    edge = max(0.0, confidence - settings.trading.min_ai_confidence) * 0.002  # 70%→$0.00, 80%→$0.02, 88%→$0.036
                     exp_profit_usd = planned_size_usd * edge if edge > 0 else None
                 roi_pct = (exp_profit_usd / planned_size_usd * 100) if (exp_profit_usd and planned_size_usd) else None
 
@@ -1290,8 +1294,13 @@ async def _resolve_expired_positions(db, live_mode: bool = False, risk=None) -> 
             continue
 
         pnl_cents = (exit_p - entry) * contracts
-        pnl_usd   = pnl_cents / 100.0
-        result    = "WIN" if pnl_cents > 0 else ("LOSS" if pnl_cents < 0 else "BREAK_EVEN")
+        # Deduct Kalshi taker fee paid at entry (2% of entry cost)
+        if platform != "polymarket":
+            entry_fee_usd = (entry / 100.0) * contracts * 0.02
+        else:
+            entry_fee_usd = 0.0
+        pnl_usd   = (pnl_cents / 100.0) - entry_fee_usd
+        result    = "WIN" if pnl_usd > 0 else ("LOSS" if pnl_usd < 0 else "BREAK_EVEN")
 
         # Stamp into trade_logs (permanent W/L record)
         try:

@@ -180,7 +180,7 @@ class ExternalMarketComparator:
                             "yes_price":  yp,
                             "no_price":   np_,
                             "volume":     float(m.get("volume") or 0),
-                            "end_date":   m.get("endDate", ""),
+                            "end_date":   _normalize_ts(m.get("endDate", "")),
                             "slug":       m.get("slug", ""),
                         })
                     self._poly_cache = parsed

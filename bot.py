@@ -1069,11 +1069,10 @@ class TradingBot:
 
                     # 2. ALL BUY evaluations across every category — sports, crypto,
                     #    politics, weather, economics, etc. — no live-API gate.
-                    #    Tiers by time window + confidence:
-                    #      ≤6h  (closing very soon)  → MIN_CONF (65%)
-                    #      ≤24h (today's events)     → 70%
-                    #      ≤48h (tomorrow too)       → 80%
-                    #      ≤7d  (regular scan)       → 85%
+                    #    Tiers by time window + confidence (today-only events):
+                    #      ≤6h  (closing very soon)  → 70%
+                    #      ≤24h (today)              → 75%
+                    #      >24h (beyond today)       → 88%
                     for ev in _da._active_evaluations():
                         if ev.get("action") != "BUY":
                             continue

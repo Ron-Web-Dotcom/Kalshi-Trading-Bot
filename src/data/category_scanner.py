@@ -219,7 +219,7 @@ def _parse_poly_market(m: Dict, tag: str) -> Optional[Dict]:
         if isinstance(raw_prices, str):
             raw_prices = _j.loads(raw_prices)
 
-        yes_price, no_price = 50.0, 50.0
+        yes_price, no_price = 0.0, 0.0
         if len(raw_prices) >= 2:
             p0, p1 = float(raw_prices[0]), float(raw_prices[1])
             yes_price = p0 * 100 if p0 <= 1.0 else p0
@@ -229,12 +229,13 @@ def _parse_poly_market(m: Dict, tag: str) -> Optional[Dict]:
             yes_price = p0 * 100 if p0 <= 1.0 else p0
             no_price  = 100 - yes_price
 
-        # Fallback to bestAsk
+        # Fallback to bestAsk / lastTradePrice when outcomePrices missing
         if yes_price == 0:
             ask = float(m.get("bestAsk") or m.get("lastTradePrice") or 0)
             yes_price = ask * 100 if ask <= 1.0 else ask
             no_price  = 100 - yes_price
 
+        # Reject markets with no real price data
         if yes_price < 2 or yes_price > 98:
             return None
 
@@ -398,6 +399,14 @@ class CategoryScanner:
         if not self.db:
             return []
         try:
+            from datetime import timezone as _tz
+            _today_et   = datetime.now(_ET).date().isoformat()          # e.g. "2025-07-07"
+            _tomorrow_et = (datetime.now(_ET).date()).isoformat()        # same day — close_time must be today
+            # Only fetch markets closing today ET — no far-future markets
+            _tonight_utc = (
+                datetime.now(_ET).replace(hour=23, minute=59, second=59, microsecond=0)
+                .astimezone(_tz.utc).strftime("%Y-%m-%dT%H:%M:%S")
+            )
             rows = await self.db.fetchall(
                 "SELECT ticker, title, category, yes_ask, no_ask, yes_bid, no_bid, "
                 "volume, open_interest, close_time, last_price, platform "
@@ -405,8 +414,12 @@ class CategoryScanner:
                 "WHERE (status='open' OR status='') "
                 "AND (platform='kalshi' OR platform IS NULL) "
                 "AND (yes_ask > 0 OR last_price > 0) "
+                "AND volume > 0 "
+                "AND close_time IS NOT NULL AND close_time != '' "
+                "AND close_time <= ? "
                 "AND title IS NOT NULL AND title != '' "
-                "ORDER BY volume DESC LIMIT 500"
+                "ORDER BY volume DESC LIMIT 500",
+                (_tonight_utc,)
             ) or []
 
             def _norm_price(v):

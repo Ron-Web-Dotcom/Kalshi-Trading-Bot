@@ -16,9 +16,11 @@ import asyncio
 import logging
 import smtplib
 import os
-from datetime import date
+from datetime import datetime
 from email.mime.text import MIMEText
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("trading.jobs.decide")
 
@@ -32,7 +34,7 @@ async def _get_daily_ai_spend(db) -> float:
     if not db:
         return 0.0
     try:
-        today = date.today().isoformat()
+        today = datetime.now(_ET).date().isoformat()
         row = await db.fetchone(
             "SELECT COALESCE(SUM(cost_usd),0) AS total FROM ai_decisions WHERE decided_at >= ?",
             (today + "T00:00:00",)
@@ -72,7 +74,7 @@ def _send_cap_email(spent: float, cap: float) -> None:
 
 async def _fire_cap_alert(spent: float, cap: float) -> None:
     global _cap_alerted_date
-    today = date.today().isoformat()
+    today = datetime.now(_ET).date().isoformat()
     if _cap_alerted_date == today:
         return
     _cap_alerted_date = today
