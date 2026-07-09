@@ -1096,15 +1096,13 @@ class TradingBot:
                             continue
                         if hl == -1:
                             hl = 12  # assume same-day if close_time missing
-                        # Confidence threshold scales with how far out the event is
+                        # Confidence threshold — today-only events, scaled by urgency
                         if hl <= 6:
-                            min_c = MIN_CONF          # 65% — closing soon, any edge
+                            min_c = 70                # closing very soon — minimum 70%
                         elif hl <= 24:
-                            min_c = max(MIN_CONF, 70) # 70% — today
-                        elif hl <= 48:
-                            min_c = 80                # 80% — tomorrow
+                            min_c = 75                # today — 75%
                         else:
-                            min_c = 85                # 85% — further out
+                            min_c = 88                # far out — 88%+ only
                         if conf < min_c:
                             continue
                         # Re-alert if: never seen, price moved ≥5¢, or timing bucket changed

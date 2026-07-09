@@ -82,9 +82,9 @@ class TradingConfig:
     # Kelly criterion
     kelly_fraction: float = field(default_factory=lambda: _env_float("KELLY_FRACTION", 0.25))
 
-    # AI thresholds — 77% minimum confidence required before any trade
-    min_ai_confidence: float = field(default_factory=lambda: _env_float("MIN_AI_CONFIDENCE", 75.0))
-    min_confidence_to_trade: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE_TO_TRADE", 0.75))
+    # AI thresholds — 70% minimum confidence floor; tiers: 70-79 WATCH, 80-87 BID, 88+ FULL BID
+    min_ai_confidence: float = field(default_factory=lambda: _env_float("MIN_AI_CONFIDENCE", 70.0))
+    min_confidence_to_trade: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE_TO_TRADE", 0.70))
 
     # Minimum profit requirements — need real edge, not statistical noise
     min_profit_roi_pct: float = field(default_factory=lambda: _env_float("MIN_PROFIT_ROI_PCT", 1.0))

@@ -501,16 +501,14 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 _poly_base = [
                     m for m in raw_poly
                     if m.get("yes_ask", 0) > 1
+                    and m.get("volume", 0) > 0             # hard reject zero-volume
                     and m.get("ticker") not in open_tickers
                     and (m.get("title") or "").strip().lower() not in open_titles
                     and m.get("close_time")
                     and not is_junk(m.get("title", ""))
                 ]
-                # Split into today (bid eligible) and tomorrow (watch/score only) — 2-day scan
-                poly_short = [m for m in _poly_base if _closes_today(m)]
-                poly_long  = [m for m in _poly_base if _closes_tomorrow(m)
-                              and m.get("ticker") not in {x.get("ticker") for x in poly_short}]
-                poly_markets = poly_short + poly_long   # today first (higher priority)
+                # Today only — live events with same-day results
+                poly_markets = [m for m in _poly_base if _closes_today(m)]
                 logger.info("Polymarket: %d markets stored, %d tradeable",
                             len(raw_poly), len(poly_markets))
             except Exception as pe:
@@ -800,18 +798,17 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
                 # live_trades_alert is owned by live_market_manager — skip here to avoid duplicate alerts
 
-        # Scan pool: markets closing TOMORROW only (today+tomorrow = 2-day scan window)
-        # Bandwidth tracks up to 7 days but we only actively score today + tomorrow.
-        # When tomorrow becomes today the market moves to short_term/live for bidding.
+        # Scan pool: markets closing TODAY only — live events, same-day results
         long_term = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
             and not _already_open(m)
             and 2 < _tradeable_price(m) < 98
+            and m.get("volume", 0) > 0                    # hard reject zero-volume markets
             and m.get("volume", 0) >= max(min_vol, 10)
             and (m.get("title") or "")
             and m.get("close_time")
-            and _closes_tomorrow(m)                       # tomorrow only — not today, not 2+ days
+            and _closes_today(m)                          # today only — live events
             and not is_junk(m.get("title", ""))
         ]
 
@@ -821,6 +818,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             if m.get("ticker") not in arb_tickers
             and not _already_open(m)
             and 2 < _tradeable_price(m) < 98
+            and m.get("volume", 0) > 0                    # hard reject zero-volume markets
             and m.get("ticker") not in {x.get("ticker") for x in long_term}
             and m.get("close_time")                       # must have a close time set
             and _closes_today(m)
@@ -846,8 +844,9 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 and m.get("ticker") not in arb_tickers
                 and not _already_open(m)
                 and 2 < _tradeable_price(m) < 98
+                and m.get("volume", 0) > 0                     # hard reject zero-volume
                 and m.get("close_time")
-                and (_closes_today(m) or _closes_tomorrow(m))  # today or tomorrow only
+                and _closes_today(m)                           # today only
                 and not is_junk(m.get("title", ""))
             ]
             cat_poly = [
@@ -855,8 +854,9 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 if m.get("platform") == "polymarket"
                 and not _already_open(m)
                 and m.get("yes_ask", 0) > 1
+                and m.get("volume", 0) > 0                     # hard reject zero-volume
                 and m.get("close_time")
-                and (_closes_today(m) or _closes_tomorrow(m))  # today or tomorrow only
+                and _closes_today(m)                           # today only
                 and not is_junk(m.get("title", ""))
             ]
             # Merge category-scanned markets in, deduplicating by ticker
@@ -967,24 +967,24 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             net_ev   = decision.get("net_ev")
 
             # Confidence-tiered sizing:
-            #   70–79%  → half size  (50% of base) — medium conviction
-            #   80–89%  → full size  (100% of base) — high conviction
-            #   90–100% → max size   (150% of base, capped) — very high conviction
+            #   70–79%  → half size  (50% of base) — WATCH only, no bid
+            #   80–87%  → full size  (100% of base) — BID standard
+            #   88%+    → max size   (150% of base, capped) — BID full Kelly
             confidence = float(decision.get("confidence", 0))
             base       = scaler.current_size
             if confidence < settings.trading.min_ai_confidence:
                 logger.info("Best opportunity SKIPPED — confidence %.0f%% below min %.0f%%", confidence, settings.trading.min_ai_confidence)
                 daily_stats.record_skip(f"confidence_below_min:{confidence:.0f}%")
                 best = None
-            if confidence >= 90:
+            if confidence >= 88:
                 size_multiplier = 1.5
-                size_tier       = "MAX (90%+ conf)"
+                size_tier       = "MAX (88%+ conf)"
             elif confidence >= 80:
                 size_multiplier = 1.0
-                size_tier       = "FULL (80–89% conf)"
+                size_tier       = "FULL (80–87% conf)"
             else:
                 size_multiplier = 0.5
-                size_tier       = "HALF (70–79% conf)"
+                size_tier       = "HALF (70–79% conf — WATCH)"
             if best is None:
                 planned_size_usd = 0
             else:
@@ -1079,21 +1079,30 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         platform = best.get("platform", "kalshi")
                         active_trader = kalshi_trader if platform == "kalshi" else poly_trader
 
-                        rec = await active_trader.execute(
-                            ticker=ticker,
-                            action=decision["action"],
-                            side=side,
-                            price_cents=price,
-                            ai_confidence=decision["confidence"],
-                            ai_reasoning=decision["reasoning"],
-                            signal_source=decision.get("model", "ai"),
-                            net_ev=net_ev,
-                            true_prob=decision.get("true_prob"),
-                            market_title=market.get("title", ""),
-                            close_time=market.get("close_time", "") or market.get("expiration_time", ""),
-                            **({"poly_token_id": market.get("_yes_token") if side == "yes" else market.get("_no_token")}
-                               if platform == "polymarket" else {}),
-                        )
+                        try:
+                            rec = await active_trader.execute(
+                                ticker=ticker,
+                                action=decision["action"],
+                                side=side,
+                                price_cents=price,
+                                ai_confidence=decision["confidence"],
+                                ai_reasoning=decision["reasoning"],
+                                signal_source=decision.get("model", "ai"),
+                                net_ev=net_ev,
+                                true_prob=decision.get("true_prob"),
+                                market_title=market.get("title", ""),
+                                close_time=market.get("close_time", "") or market.get("expiration_time", ""),
+                                **({"poly_token_id": market.get("_yes_token") if side == "yes" else market.get("_no_token")}
+                                   if platform == "polymarket" else {}),
+                            )
+                        except Exception as _exec_err:
+                            _err_str = str(_exec_err).lower()
+                            if any(k in _err_str for k in ("order book", "orderbook", "closed", "not tradeable", "trading halted", "market not open")):
+                                logger.warning("ORDER BOOK CLOSED — skipping %s: %s", ticker, _exec_err)
+                                daily_stats.record_skip(f"order_book_closed:{ticker}")
+                            else:
+                                logger.error("Trade execution failed for %s: %s", ticker, _exec_err)
+                            rec = None
                         if rec:
                             trades_this_cycle += 1
                             results.total_positions += 1
