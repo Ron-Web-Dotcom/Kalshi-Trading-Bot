@@ -274,16 +274,16 @@ class PolymarketTradingClient:
 
     async def get_live_now_markets(self, max_markets: int = 500) -> List[Dict]:
         """
-        Fetch ALL active Polymarket markets closing TODAY (ET).
-        No tag filtering — every category is included: sports, crypto,
-        politics, economics, weather, entertainment, everything.
+        Fetch ALL active Polymarket markets that are live RIGHT NOW —
+        closing within the next 2 hours. Every category included.
+        These are events actually happening at this moment.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime, timezone, timedelta
         from zoneinfo import ZoneInfo
         _now_et  = datetime.now(ZoneInfo("America/New_York"))
-        _eod_et  = _now_et.replace(hour=23, minute=59, second=59, microsecond=0)
+        _cut_et  = _now_et + timedelta(hours=2)          # 2h window — live events only
         _now_utc = _now_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        _eod_utc = _eod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _eod_utc = _cut_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         try:
             async with httpx.AsyncClient(
@@ -316,7 +316,7 @@ class PolymarketTradingClient:
                 live_markets.append(parsed)
 
             logger.info(
-                "Polymarket TODAY: %d live markets closing before midnight ET (from %d raw)",
+                "Polymarket LIVE NOW: %d markets closing within 2h (from %d raw)",
                 len(live_markets), len(items),
             )
             return live_markets

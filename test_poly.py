@@ -53,10 +53,10 @@ async def main():
         print(f"❌  Market fetch error: {e}")
     print()
 
-    print("=== All Live Events Today (every category) ===")
+    print("=== Live Right Now (closing within 2h, every category) ===")
     try:
         live = await c.get_live_now_markets(max_markets=500)
-        print(f"Today's markets (all categories): {len(live)}")
+        print(f"Live now (all categories): {len(live)}")
         for m in live[:10]:
             print(
                 f"  {m.get('close_time','?')[:16]}  "
