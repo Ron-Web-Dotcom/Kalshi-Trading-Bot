@@ -468,47 +468,223 @@ class KalshiClient:
             logger.warning("Failed to fetch Kalshi live markets: %s", e)
             return []
 
+    # ── Single market / event ─────────────────────────────────────────────────
+
     async def get_market(self, ticker: str) -> Dict:
+        """Fetch a single market by ticker."""
         return await self._request("GET", f"/markets/{ticker}")
 
     async def get_market_orderbook(self, ticker: str, depth: int = 10) -> Dict:
+        """Full order book for a market — bids and asks with sizes."""
         return await self._request("GET", f"/markets/{ticker}/orderbook", params={"depth": depth})
 
-    # ── Portfolio ─────────────────────────────────────────────────────────────
+    async def get_market_trades(self, ticker: str, limit: int = 50,
+                                 cursor: str = "") -> Dict:
+        """Recent trades for a specific market."""
+        params: Dict[str, Any] = {"ticker": ticker, "limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        return await self._request("GET", "/markets/trades", params=params)
+
+    async def get_market_candlesticks(self, series_ticker: str, ticker: str,
+                                      start_ts: int = 0, end_ts: int = 0,
+                                      period_interval: int = 1) -> Dict:
+        """
+        OHLCV candlestick data for a market.
+        period_interval: candle size in minutes (1, 5, 15, 60, 1440)
+        start_ts / end_ts: unix timestamps (seconds)
+        """
+        params: Dict[str, Any] = {"period_interval": period_interval}
+        if start_ts:
+            params["start_ts"] = start_ts
+        if end_ts:
+            params["end_ts"] = end_ts
+        return await self._request(
+            "GET", f"/series/{series_ticker}/markets/{ticker}/candlesticks", params=params
+        )
+
+    # ── Events ────────────────────────────────────────────────────────────────
+
+    async def get_event(self, event_ticker: str) -> Dict:
+        """Fetch a single event with all its markets."""
+        return await self._request("GET", f"/events/{event_ticker}")
+
+    async def get_events(self, limit: int = 200, cursor: str = "",
+                          status: str = "open", series_ticker: str = "") -> Dict:
+        """Fetch events list. status: open | closed | all."""
+        params: Dict[str, Any] = {"limit": limit, "status": status}
+        if cursor:
+            params["cursor"] = cursor
+        if series_ticker:
+            params["series_ticker"] = series_ticker
+        return await self._request("GET", "/events", params=params)
+
+    # ── Series ────────────────────────────────────────────────────────────────
+
+    async def get_series(self, series_ticker: str) -> Dict:
+        """Fetch metadata for a market series (e.g. NFL, NBA, BTC)."""
+        return await self._request("GET", f"/series/{series_ticker}")
+
+    # ── Portfolio — Balance & Positions ──────────────────────────────────────
 
     async def get_balance(self) -> Dict:
+        """Account balance including available and total USDC."""
         return await self._request("GET", "/portfolio/balance")
 
-    async def get_positions(self) -> Dict:
-        return await self._request("GET", "/portfolio/positions")
+    async def get_positions(self, limit: int = 200, cursor: str = "",
+                             ticker: str = "", event_ticker: str = "",
+                             settlement_status: str = "") -> Dict:
+        """
+        Open positions. Filter by ticker, event, or settlement_status.
+        settlement_status: all | unsettled | settled
+        """
+        params: Dict[str, Any] = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        if ticker:
+            params["ticker"] = ticker
+        if event_ticker:
+            params["event_ticker"] = event_ticker
+        if settlement_status:
+            params["settlement_status"] = settlement_status
+        return await self._request("GET", "/portfolio/positions", params=params)
 
-    async def get_orders(self, status: str = "") -> Dict:
-        params = {}
+    async def get_position(self, ticker: str) -> Dict:
+        """Fetch position for a single market ticker."""
+        return await self._request("GET", f"/portfolio/positions/{ticker}")
+
+    # ── Portfolio — Orders ────────────────────────────────────────────────────
+
+    async def get_orders(self, status: str = "", ticker: str = "",
+                          event_ticker: str = "", limit: int = 200,
+                          cursor: str = "") -> Dict:
+        """
+        Fetch orders. status: resting | canceled | executed | all
+        Filter by ticker or event_ticker.
+        """
+        params: Dict[str, Any] = {"limit": limit}
         if status:
             params["status"] = status
+        if ticker:
+            params["ticker"] = ticker
+        if event_ticker:
+            params["event_ticker"] = event_ticker
+        if cursor:
+            params["cursor"] = cursor
         return await self._request("GET", "/portfolio/orders", params=params)
+
+    async def get_order(self, order_id: str) -> Dict:
+        """Fetch a single order by order ID."""
+        return await self._request("GET", f"/portfolio/orders/{order_id}")
 
     async def create_order(self, ticker: str, side: str, action: str,
                            count: int, price: int,
                            order_type: str = "limit",
                            time_in_force: str = "gtc",
                            client_order_id: str = "") -> Dict:
-        # Kalshi API expects only the price key matching the side — not both
+        """
+        Place an order.
+        side: "yes" | "no"
+        action: "buy" | "sell"
+        count: number of contracts
+        price: price in cents (1–99)
+        order_type: "limit" | "market" | "fill_or_kill"
+        time_in_force: "gtc" | "ioc" | "fok"
+        """
         price_key = "yes_price" if side == "yes" else "no_price"
         body = {
-            "ticker": ticker,
-            "side": side,
-            "action": action,
-            "count": count,
-            "type": order_type,
-            price_key: price,
-            "time_in_force": time_in_force,
-            "client_order_id": client_order_id if client_order_id else f"bot_{int(time.time() * 1000)}",
+            "ticker":           ticker,
+            "side":             side,
+            "action":           action,
+            "count":            count,
+            "type":             order_type,
+            price_key:          price,
+            "time_in_force":    time_in_force,
+            "client_order_id":  client_order_id or f"bot_{int(time.time() * 1000)}",
         }
         return await self._request("POST", "/portfolio/orders", body=body)
 
     async def cancel_order(self, order_id: str) -> Dict:
+        """Cancel a single open order."""
         return await self._request("DELETE", f"/portfolio/orders/{order_id}")
+
+    async def cancel_all_orders(self, ticker: str = "", event_ticker: str = "") -> Dict:
+        """
+        Cancel all resting orders. Optionally filter to a single market or event.
+        Returns list of cancelled order IDs.
+        """
+        params: Dict[str, Any] = {}
+        if ticker:
+            params["ticker"] = ticker
+        if event_ticker:
+            params["event_ticker"] = event_ticker
+        return await self._request("DELETE", "/portfolio/orders", params=params)
+
+    async def decrease_order(self, order_id: str, reduce_by: int) -> Dict:
+        """
+        Decrease the size of a resting order without cancelling it.
+        reduce_by: number of contracts to remove from the order.
+        """
+        return await self._request(
+            "POST", f"/portfolio/orders/{order_id}/decrease",
+            body={"reduce_by": reduce_by},
+        )
+
+    async def batch_create_orders(self, orders: List[Dict]) -> Dict:
+        """
+        Place multiple orders in a single API call (more efficient for live trading).
+        Each dict: {ticker, side, action, count, yes_price/no_price, type, time_in_force}
+        """
+        return await self._request("POST", "/portfolio/orders/batched", body={"orders": orders})
+
+    async def batch_cancel_orders(self, order_ids: List[str]) -> Dict:
+        """Cancel multiple orders by ID in one call."""
+        return await self._request(
+            "DELETE", "/portfolio/orders/batched",
+            body={"order_ids": order_ids},
+        )
+
+    # ── Portfolio — Fills & Settlements ──────────────────────────────────────
+
+    async def get_fills(self, ticker: str = "", event_ticker: str = "",
+                         limit: int = 100, cursor: str = "",
+                         min_ts: int = 0, max_ts: int = 0) -> Dict:
+        """
+        Trade fills (executed orders). Shows actual fill price and quantity.
+        min_ts / max_ts: unix timestamps to filter by time range.
+        """
+        params: Dict[str, Any] = {"limit": limit}
+        if ticker:
+            params["ticker"] = ticker
+        if event_ticker:
+            params["event_ticker"] = event_ticker
+        if cursor:
+            params["cursor"] = cursor
+        if min_ts:
+            params["min_ts"] = min_ts
+        if max_ts:
+            params["max_ts"] = max_ts
+        return await self._request("GET", "/portfolio/fills", params=params)
+
+    async def get_settlements(self, limit: int = 100, cursor: str = "") -> Dict:
+        """
+        Settled positions — shows P&L for each resolved market.
+        Use this for win/loss accounting.
+        """
+        params: Dict[str, Any] = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        return await self._request("GET", "/portfolio/settlements", params=params)
+
+    # ── Exchange info (public) ─────────────────────────────────────────────────
+
+    async def get_exchange_status(self) -> Dict:
+        """Trading halt / maintenance status. Check before placing orders live."""
+        return await self._request("GET", "/exchange/status")
+
+    async def get_exchange_schedule(self) -> Dict:
+        """Exchange trading hours and holiday schedule."""
+        return await self._request("GET", "/exchange/schedule")
 
     # ── Aliases for backward-compat with cli.py ──────────────────────────────
 

@@ -118,6 +118,7 @@ class TradingConfig:
 class PolymarketConfig:
     api_key:              str   = field(default_factory=lambda: _env("POLY_API_KEY"))
     api_secret:           str   = field(default_factory=lambda: _env("POLY_API_SECRET"))
+    api_passphrase:       str   = field(default_factory=lambda: _env("POLY_API_PASSPHRASE", ""))
     wallet_address:       str   = field(default_factory=lambda: _env("POLY_WALLET_ADDRESS", ""))
     live_trading_enabled: bool  = field(default_factory=lambda: _env_bool("POLY_LIVE_TRADING", False))
     enabled:              bool  = field(default_factory=lambda: _env_bool("POLY_ENABLED", True))
