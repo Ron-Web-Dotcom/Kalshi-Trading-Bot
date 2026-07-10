@@ -272,120 +272,68 @@ class PolymarketTradingClient:
             logger.debug("Polymarket parse error: %s — %s", e, str(m)[:100])
             return None
 
-    async def get_live_now_markets(self, max_markets: int = 200) -> List[Dict]:
+    async def get_live_now_markets(self, max_markets: int = 500) -> List[Dict]:
         """
-        Fetch Polymarket markets for games/events happening RIGHT NOW.
-
-        Only returns actual in-progress sports/events — NOT prediction markets
-        that happen to be active. 'Rihanna album' is NOT a live event.
-
-        Uses sport-specific tags + strict game-context keyword filter.
+        Fetch ALL active Polymarket markets closing TODAY (ET).
+        No tag filtering — every category is included: sports, crypto,
+        politics, economics, weather, entertainment, everything.
         """
-        live_markets: List[Dict] = []
-        seen_tickers: set = set()
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+        _now_et  = datetime.now(ZoneInfo("America/New_York"))
+        _eod_et  = _now_et.replace(hour=23, minute=59, second=59, microsecond=0)
+        _now_utc = _now_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _eod_utc = _eod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        # Tags covering sports AND non-sport live events
-        # Polymarket Gamma API supports tag filtering
-        _LIVE_TAGS = [
-            # Major sports
-            "nhl", "mlb", "nba", "wnba", "nfl", "tennis", "golf", "ufc",
-            "soccer", "football", "boxing", "cricket", "rugby", "mls",
-            # World Cup / international soccer
-            "world-cup", "fifa", "champions-league", "euro",
-            "copa-america", "concacaf",
-            # Motor sports / other
-            "f1", "formula-1", "nascar", "esports",
-            # Non-sport real-time events
-            "politics", "elections", "debate", "congress", "government",
-            "weather", "news", "world", "economy",
-        ]
-
-        # Keywords that confirm an actual live event (game/match/hearing/debate/etc.)
-        _GAME_KEYWORDS = [
-            # Sports — game in progress
-            "vs ", " vs ", "vs.", "game ", "match ", "series ",
-            "quarter", "half", "inning", "period", "set ",
-            "overtime", "playoff", "championship", "finals",
-            "bout", "fight", "round ", "race ", "leg ",
-            "cover", "spread", "moneyline", "over/under",
-            "score", "goals", "points", "winner",
-            # Non-sport live events
-            "debate", "hearing", "testimony", "press conference",
-            "vote today", "voting today", "election day",
-            "live ", "right now", "in session", "today",
-            "hurricane", "tornado", "storm today",
-            "fed meeting", "fomc", "rate decision",
-            "trial today", "verdict", "sentencing",
-        ]
-
-        for tag in _LIVE_TAGS:
-            if len(live_markets) >= max_markets:
-                break
-            try:
-                r = await self._client().get(
-                    f"{GAMMA_BASE}/markets",
-                    params={"active": "true", "closed": "false", "tag": tag, "limit": 200},
-                )
-                if r.status_code != 200:
-                    continue
-                raw = r.json()
-                items = raw if isinstance(raw, list) else (raw.get("data") or raw.get("markets") or [])
-                for m in items:
-                    parsed = self._parse_market(m)
-                    if not parsed or (parsed.get("yes_ask") or 0) <= 1:
-                        continue
-                    ticker = parsed.get("ticker") or ""
-                    if ticker in seen_tickers:
-                        continue
-                    seen_tickers.add(ticker)
-                    title = (parsed.get("title") or "").lower()
-                    # Must look like an actual game market — not a general prediction
-                    if any(kw in title for kw in _GAME_KEYWORDS):
-                        parsed["_poly_live"] = True
-                        live_markets.append(parsed)
-            except Exception as e:
-                logger.debug("Polymarket tag=%s fetch: %s", tag, e)
-
-        logger.info("Polymarket LIVE NOW: %d actual game markets", len(live_markets))
-        return live_markets[:max_markets]
-
-    async def get_live_markets(self, max_hours: float = 6.0, max_markets: int = 60) -> List[Dict]:
-        """
-        Fetch active Polymarket markets with valid prices (used for expiring pool).
-        """
         try:
-            from datetime import datetime, timedelta
-            all_markets = await self.get_markets(limit=100)
-            if not all_markets:
-                logger.warning("Polymarket live markets: get_markets returned 0 — API may be down")
+            async with httpx.AsyncClient(
+                timeout=_TIMEOUT,
+                headers={"User-Agent": random.choice(_USER_AGENTS), "Accept": "application/json"},
+                trust_env=False,
+            ) as _c:
+                r = await _c.get(
+                    f"{GAMMA_BASE}/markets",
+                    params={
+                        "active":       "true",
+                        "closed":       "false",
+                        "end_date_min": _now_utc,   # not already closed
+                        "end_date_max": _eod_utc,   # closes before midnight ET tonight
+                        "limit":        max_markets,
+                    },
+                )
+            if r.status_code != 200:
+                logger.warning("Polymarket live-now HTTP %d", r.status_code)
                 return []
 
-            cutoff = datetime.now(_ET) + timedelta(hours=max_hours)
-            live = []
-            for m in all_markets:
-                if not ((m.get("yes_ask") or 0) > 1 and (m.get("title") or "")):
+            raw   = r.json()
+            items = raw if isinstance(raw, list) else (raw.get("data") or raw.get("markets") or [])
+            live_markets = []
+            for m in items:
+                parsed = self._parse_market(m)
+                if not parsed or (parsed.get("yes_ask") or 0) <= 1:
                     continue
-                close_time_str = m.get("close_time") or ""
-                if close_time_str:
-                    try:
-                        ct = datetime.fromisoformat(close_time_str.replace("Z", "+00:00"))
-                        if ct > cutoff:
-                            continue
-                    except Exception:
-                        pass
-                live.append(m)
+                parsed["_poly_live"] = True
+                live_markets.append(parsed)
 
-            if not live and all_markets:
-                sample = all_markets[0]
-                logger.warning(
-                    "Polymarket live: 0/%d have valid price. Sample: yes_ask=%.1f title=%s",
-                    len(all_markets), sample.get("yes_ask", 0),
-                    (sample.get("title") or "")[:60],
-                )
-            else:
-                logger.info("Polymarket live markets: %d of %d active with valid price", len(live), len(all_markets))
+            logger.info(
+                "Polymarket TODAY: %d live markets closing before midnight ET (from %d raw)",
+                len(live_markets), len(items),
+            )
+            return live_markets
 
-            return live[:max_markets]
+        except Exception as e:
+            logger.warning("Polymarket get_live_now_markets failed: %s", e)
+            return []
+
+    async def get_live_markets(self, max_hours: float = 6.0, max_markets: int = 500) -> List[Dict]:
+        """
+        Return today's markets — get_live_now_markets already filters to today ET.
+        max_hours kept for API compatibility but today-only is the effective filter.
+        """
+        try:
+            markets = await self.get_live_now_markets(max_markets=max_markets)
+            logger.info("Polymarket get_live_markets: %d today markets", len(markets))
+            return markets
         except Exception as e:
             logger.warning("Failed to fetch Polymarket live markets: %s", e)
             return []
