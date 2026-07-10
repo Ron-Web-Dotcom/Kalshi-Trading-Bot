@@ -106,10 +106,19 @@ class PolymarketTradingClient:
 
     async def get_markets(self, limit: int = 100) -> List[Dict]:
         """
-        Fetch active Polymarket markets from the public Gamma API.
+        Fetch active Polymarket markets closing TODAY (ET) from the public Gamma API.
         Returns list of normalised market dicts ready for the opportunity hunter.
         """
-        logger.info("Polymarket: fetching markets from Gamma API (limit=%d)...", limit)
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        _now_et = datetime.now(ZoneInfo("America/New_York"))
+        # end_date_max = tonight midnight UTC (end of today ET)
+        _eod_et = _now_et.replace(hour=23, minute=59, second=59, microsecond=0)
+        from datetime import timezone
+        _eod_utc = _eod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _now_utc = _now_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        logger.info("Polymarket: fetching TODAY's markets from Gamma API (limit=%d, until %s UTC)...", limit, _eod_utc)
         try:
             # Use a fresh client per fetch — avoids stale proxy config / 407 errors
             async with httpx.AsyncClient(
@@ -119,7 +128,13 @@ class PolymarketTradingClient:
             ) as _c:
                 r = await _c.get(
                     f"{GAMMA_BASE}/markets",
-                    params={"active": "true", "closed": "false", "limit": limit},
+                    params={
+                        "active":        "true",
+                        "closed":        "false",
+                        "limit":         limit,
+                        "end_date_min":  _now_utc,    # must not have already closed
+                        "end_date_max":  _eod_utc,    # must close before midnight ET tonight
+                    },
                 )
             if r.status_code != 200:
                 logger.warning(
@@ -380,6 +395,10 @@ class PolymarketTradingClient:
     async def get_balance(self) -> Optional[float]:
         """Fetch USDC balance from CLOB API (requires valid credentials)."""
         if not self.key_id:
+            logger.warning("Polymarket balance: POLY_API_KEY not set")
+            return None
+        if not self.secret_b64:
+            logger.warning("Polymarket balance: POLY_API_SECRET not set — cannot authenticate")
             return None
         try:
             path = "/balance"
@@ -387,10 +406,16 @@ class PolymarketTradingClient:
                 f"{CLOB_BASE}{path}",
                 headers=self._auth_headers("GET", path),
             )
+            if r.status_code == 401:
+                logger.warning("Polymarket balance: 401 Unauthorized — check POLY_API_KEY + POLY_API_SECRET")
+                return None
             r.raise_for_status()
-            return float(r.json().get("balance", 0))
+            data = r.json()
+            bal = float(data.get("balance", 0))
+            logger.info("Polymarket USDC balance: $%.2f", bal)
+            return bal
         except Exception as e:
-            logger.debug("Polymarket balance check failed: %s", e)
+            logger.warning("Polymarket balance check failed: %s", e)
             return None
 
     async def get_market_by_token(self, token_id: str) -> Optional[Dict]:

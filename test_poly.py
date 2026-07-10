@@ -19,11 +19,15 @@ async def main():
     print()
 
     print("=== Balance / Deposit ===")
+    print(f"POLY_API_SECRET set: {bool(settings.polymarket.api_secret)}")
     bal = await c.get_balance()
     if bal is not None:
         print(f"✅  USDC Balance: ${bal:.2f}")
     else:
-        print("❌  Balance returned None — check POLY_API_KEY + POLY_API_SECRET in .env")
+        if not settings.polymarket.api_secret:
+            print("❌  POLY_API_SECRET is missing from .env — add it to authenticate")
+        else:
+            print("❌  Balance returned None — API key/secret may be wrong or wallet not linked")
     print()
 
     print("=== Live Markets (today ET only) ===")
