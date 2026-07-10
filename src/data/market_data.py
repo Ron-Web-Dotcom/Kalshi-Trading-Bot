@@ -20,27 +20,89 @@ class MarketDataFetcher:
         self.db = db
         self._running = False
 
+    # All Kalshi series prefixes — covers every sport, category, and sub-category
+    _KALSHI_SERIES = [
+        # Sports
+        "NFL", "NBA", "MLB", "NHL", "SOCCER", "FIFA", "MLS", "UEFA",
+        "UFC", "MMA", "BOXING", "TENNIS", "GOLF", "PGA", "F1", "NASCAR",
+        "RUGBY", "CRICKET", "WNBA", "NCAAF", "NCAAB", "ESPORTS",
+        "EPL", "LALIGA", "BUNDESLIGA", "SERIEA", "LIGUE1",
+        # Politics / Elections
+        "ELECTION", "VOTE", "SENATE", "HOUSE", "CONGRESS", "PRESIDENT",
+        "TRUMP", "BIDEN", "SCOTUS", "GOVERNOR",
+        # Finance / Economics
+        "FED", "FOMC", "CPI", "GDP", "JOBS", "INFLATION",
+        "SP500", "NASDAQ", "STOCKS", "OIL", "GOLD", "SILVER", "FOREX",
+        # Crypto
+        "BTC", "ETH", "SOL", "CRYPTO",
+        # Geopolitics / World
+        "IRAN", "RUSSIA", "UKRAINE", "CHINA", "TAIWAN", "NATO",
+        "ISRAEL", "NORTHKOREA", "INDIA",
+        # Tech / Science
+        "SPACEX", "NASA", "AI", "OPENAI", "APPLE", "GOOGLE", "META",
+        # Weather
+        "HURRICANE", "TORNADO", "WEATHER",
+        # Culture / Entertainment
+        "OSCARS", "GRAMMYS", "EMMYS",
+        # Misc
+        "DEBATE", "HEARING", "FED",
+    ]
+
     async def fetch_and_store(self) -> List[Dict]:
         """
-        Fetch all open Kalshi markets, persist to DB, return raw list.
-
-        Price convention: Kalshi API returns prices as integer cents (0–99).
-        We store them AS-IS (cents) so all downstream code works in cents.
+        Fetch ALL open Kalshi markets across every category and series.
+        Sweeps: /markets by volume, /markets by close_time, /events,
+        and every sport/category series prefix in parallel.
         """
         logger.info("━━━ MARKET INGEST START ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        # Two pools: top-1000 by volume + top-200 soonest-closing (for short-duration markets)
-        markets_by_vol   = await self.kalshi.get_all_markets(status="open", max_markets=300)
-        markets_by_close = await self.kalshi.get_all_markets(status="open", max_markets=50, sort_by_close=True)
 
-        # Merge — deduplicate by ticker, volume pool first
-        seen = {m.get("ticker") for m in markets_by_vol}
-        short_duration = [m for m in markets_by_close if m.get("ticker") not in seen]
-        markets = markets_by_vol + short_duration
+        # Fetch by volume, by close_time, events endpoint, and all series in parallel
+        async def _fetch_series(prefix: str) -> List[Dict]:
+            try:
+                data = await self.kalshi._request("GET", "/markets", params={
+                    "status": "open", "series_ticker": prefix, "limit": 100,
+                })
+                return data.get("markets") or [] if isinstance(data, dict) else []
+            except Exception:
+                return []
 
-        logger.info(
-            "Fetched %d open markets from Kalshi API (%d by volume + %d short-duration unique)",
-            len(markets), len(markets_by_vol), len(short_duration),
+        async def _fetch_events() -> List[Dict]:
+            try:
+                data = await self.kalshi._request("GET", "/events", params={"status": "open", "limit": 200})
+                result = []
+                for ev in (data.get("events") or []):
+                    for m in (ev.get("markets") or []):
+                        if isinstance(m, dict):
+                            m.setdefault("category", ev.get("category", ""))
+                            m.setdefault("title", ev.get("title", ""))
+                            result.append(m)
+                return result
+            except Exception:
+                return []
+
+        vol_task, close_task, events_task, *series_tasks = await asyncio.gather(
+            self.kalshi.get_all_markets(status="open", max_markets=300),
+            self.kalshi.get_all_markets(status="open", max_markets=100, sort_by_close=True),
+            _fetch_events(),
+            *[_fetch_series(p) for p in self._KALSHI_SERIES],
+            return_exceptions=True,
         )
+
+        # Merge all — deduplicate by ticker
+        seen: set = set()
+        markets: List[Dict] = []
+        for source in [vol_task, close_task, events_task, *series_tasks]:
+            if not isinstance(source, list):
+                continue
+            for m in source:
+                if not isinstance(m, dict):
+                    continue
+                ticker = m.get("ticker", "")
+                if ticker and ticker not in seen:
+                    seen.add(ticker)
+                    markets.append(m)
+
+        logger.info("Fetched %d unique open markets from Kalshi (all categories + series)", len(markets))
 
         now = datetime.now(_ET).isoformat()
         stored = 0
