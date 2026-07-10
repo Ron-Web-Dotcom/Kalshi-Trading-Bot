@@ -1968,9 +1968,138 @@ class TradingBot:
                     logger.error("Weekly health check loop error: %s", e)
                     await asyncio.sleep(3600)
 
+        async def settlement_watcher_loop():
+            """
+            Runs every 10 s. When a position's close_time arrives, immediately
+            hit the Kalshi/Poly API, settle it, and fire Discord — no waiting
+            for the 60-second track cycle.
+            """
+            from src.clients.kalshi_client import KalshiClient as _KCsw
+            from src.alerts.discord import DiscordAlerter as _DAsw
+            from src.utils.eastern_time import now_et as _now_et_sw
+            _settled: set = set()   # pos ids already settled here
+
+            while not self._shutdown.is_set():
+                await asyncio.sleep(10)
+                try:
+                    _now_str = _now_et_sw().strftime("%Y-%m-%dT%H:%M:%S")
+                    # Positions whose close_time has passed and haven't been settled yet
+                    expiring = await self.db.fetchall(
+                        "SELECT p.id, p.ticker, p.side, p.avg_price, p.contracts, "
+                        "p.platform, p.title, m.close_time "
+                        "FROM positions p "
+                        "LEFT JOIN markets m ON m.ticker = p.ticker "
+                        "WHERE p.status='open' "
+                        "AND m.close_time IS NOT NULL "
+                        "AND m.close_time <= ? ",
+                        (_now_str,)
+                    ) or []
+
+                    if not expiring:
+                        continue
+
+                    wins, losses, exits = [], [], []
+                    paper = not settings.trading.live_trading_enabled
+
+                    for pos in expiring:
+                        pos_id   = pos["id"]
+                        if pos_id in _settled:
+                            continue
+                        ticker   = pos["ticker"]
+                        side     = pos.get("side", "yes")
+                        avg_price = float(pos.get("avg_price", 0))
+                        contracts = int(pos.get("contracts", 0))
+                        platform  = pos.get("platform", "kalshi")
+                        title     = pos.get("title") or ticker
+                        now_ts    = _now_et_sw().strftime("%Y-%m-%dT%H:%M:%S")
+
+                        try:
+                            if platform == "kalshi":
+                                _kc = _KCsw()
+                                try:
+                                    resp   = await _kc.get_market(ticker)
+                                    mkt    = resp.get("market", resp)
+                                    status = mkt.get("status", "open")
+                                    if status not in ("resolved", "settled", "finalized"):
+                                        continue   # not settled yet — wait
+                                    result  = mkt.get("result", "")
+                                    won     = (side == "yes" and (result or "").lower() == "yes") or \
+                                              (side == "no"  and (result or "").lower() == "no")
+                                    final   = 100.0 if won else 0.0
+                                    pnl     = (final - avg_price) * contracts / 100
+                                    reason  = f"resolved:{result}"
+                                finally:
+                                    await _kc.close()
+                            else:
+                                # Polymarket — check live API
+                                from src.clients.polymarket_client import PolymarketTradingClient as _PTCsw
+                                _pc = _PTCsw()
+                                try:
+                                    live_mkt = await _pc.get_market_by_token(ticker)
+                                finally:
+                                    await _pc.close()
+                                if not live_mkt:
+                                    continue
+                                mkt_status = live_mkt.get("status", "open")
+                                if mkt_status not in ("resolved", "settled", "finalized", "closed"):
+                                    continue
+                                cur_price = float(live_mkt.get("yes_ask" if side == "yes" else "no_ask", 0) or 0)
+                                final = 100.0 if cur_price >= 95 else (0.0 if cur_price <= 5 else cur_price)
+                                pnl   = (final - avg_price) * contracts / 100
+                                reason = f"resolved:{mkt_status}"
+
+                            # Close the position in DB
+                            await self.db.execute(
+                                "UPDATE positions SET status='closed', current_price=?, pnl=?, "
+                                "closed_at=?, close_reason=? WHERE id=?",
+                                (final, pnl, now_ts, reason, pos_id)
+                            )
+                            _tl = await self.db.fetchone(
+                                "SELECT id FROM trade_logs WHERE ticker=? AND side=? AND pnl IS NULL "
+                                "ORDER BY executed_at DESC LIMIT 1",
+                                (ticker, side)
+                            )
+                            if _tl and _tl.get("id"):
+                                await self.db.execute(
+                                    "UPDATE trade_logs SET pnl=?, result=?, resolved_at=? WHERE id=?",
+                                    (pnl, "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "BREAK_EVEN"), now_ts, _tl["id"])
+                                )
+                            self.risk.record_result(ticker, pnl, platform)
+                            _settled.add(pos_id)
+                            item = {
+                                "title": title[:50], "ticker": ticker,
+                                "side": side.upper(), "platform": platform,
+                                "entry": avg_price, "exit": final,
+                                "pnl": pnl, "contracts": contracts,
+                                "reason": reason,
+                            }
+                            if pnl >= 0:
+                                wins.append(item)
+                            else:
+                                losses.append(item)
+                            logger.info(
+                                "INSTANT SETTLE %s %s → %s  PnL=$%.2f",
+                                ticker[:35], side.upper(), "WIN" if pnl > 0 else "LOSS", pnl
+                            )
+                        except Exception as _sw_err:
+                            logger.debug("Settlement watcher error %s: %s", ticker, _sw_err)
+
+                    if wins or losses or exits:
+                        try:
+                            await _DAsw().live_results_summary(
+                                wins=wins, losses=losses, exits=exits,
+                                mode="📝 PAPER" if paper else "💰 LIVE",
+                            )
+                        except Exception as _df:
+                            logger.debug("Settlement Discord flush error: %s", _df)
+
+                except Exception as _loop_err:
+                    logger.debug("Settlement watcher loop error: %s", _loop_err)
+
         tasks = [
             asyncio.create_task(ingest_loop(),                name="ingest"),
             asyncio.create_task(track_loop(),                 name="track"),
+            asyncio.create_task(settlement_watcher_loop(),    name="settlement_watcher"),
             asyncio.create_task(trade_loop(),                 name="trade"),
             asyncio.create_task(hourly_heartbeat_loop(),      name="hourly_heartbeat"),
             asyncio.create_task(daytime_summary_loop(),       name="daytime_summary"),
