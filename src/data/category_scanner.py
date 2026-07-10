@@ -399,10 +399,6 @@ class CategoryScanner:
         if not self.db:
             return []
         try:
-            # Window: now → 7 days out (UTC) — excludes already-closed and far-future markets
-            from datetime import timezone as _tz_db, timedelta as _td
-            _now_utc      = datetime.now(_tz_db.utc).strftime("%Y-%m-%dT%H:%M:%S")
-            _week_utc     = (datetime.now(_tz_db.utc) + _td(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
             rows = await self.db.fetchall(
                 "SELECT ticker, title, category, yes_ask, no_ask, yes_bid, no_bid, "
                 "volume, open_interest, close_time, last_price, platform "
@@ -410,11 +406,8 @@ class CategoryScanner:
                 "WHERE (status='open' OR status='') "
                 "AND (platform='kalshi' OR platform IS NULL) "
                 "AND (yes_ask > 0 OR last_price > 0) "
-                "AND close_time IS NOT NULL AND close_time != '' "
-                "AND close_time > ? AND close_time <= ? "
                 "AND title IS NOT NULL AND title != '' "
-                "ORDER BY volume DESC LIMIT 500",
-                (_now_utc, _week_utc)
+                "ORDER BY volume DESC LIMIT 500"
             ) or []
 
             def _norm_price(v):
