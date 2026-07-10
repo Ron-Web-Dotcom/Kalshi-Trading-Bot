@@ -79,7 +79,10 @@ class KalshiClient:
         base_path = urlparse(self.cfg.base_url).path.rstrip("/")
         full_path = base_path + path if not path.startswith(base_path) else path
         msg = ts + method.upper() + full_path
-        sig = self._private_key.sign(msg.encode(), padding.PKCS1v15(), hashes.SHA256())
+        sig = self._private_key.sign(msg.encode(), padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.MAX_LENGTH,
+        ), hashes.SHA256())
         return {
             "KALSHI-ACCESS-KEY": self.cfg.api_key_id,
             "KALSHI-ACCESS-SIGNATURE": base64.b64encode(sig).decode(),
