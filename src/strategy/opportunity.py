@@ -153,10 +153,10 @@ class OpportunityHunter:
             if is_junk(title):
                 continue
 
-            # Apply quality guards here so guaranteed slots are always valid markets
-            if volume < 50 and volume > 0:
+            # Apply quality guards — keep volume floor low to catch fresh daily markets
+            if 0 < volume < 10:
                 continue
-            if yes_ask < 15:  # long-shot — near-impossible bets
+            if yes_ask < 10:  # near-certain NO — skip extreme long-shots
                 continue
             # Skip markets closing in < 30 min
             ct = market.get("close_time") or market.get("expiration_time") or ""
@@ -219,8 +219,6 @@ class OpportunityHunter:
             ))
             if is_weather or is_esports:
                 market_min_conf = 88.0
-            elif yes_ask > 55:
-                market_min_conf = 85.0
             else:
                 market_min_conf = None
 

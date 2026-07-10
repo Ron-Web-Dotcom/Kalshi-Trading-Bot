@@ -192,30 +192,59 @@ class MarketDataFetcher:
 
     async def get_cached_markets(self, min_volume: float = 0,
                                   max_age_minutes: int = 15,
-                                  limit: int = 200) -> List[Dict]:
-        """Return markets from DB. Prices in cents.
+                                  limit: int = 500) -> List[Dict]:
+        """Return markets from DB prioritising those closing within 48 h.
 
         Fetches Kalshi and Polymarket separately so high-volume Polymarket
         markets never crowd out Kalshi (which reports volume in cents, not USD).
+        Returns today-and-tomorrow markets first; falls back to all open markets
+        so the pool is never empty.
         """
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        _ET = ZoneInfo("America/New_York")
+        now_et   = datetime.now(_ET)
+        cutoff48 = (now_et + timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%S")
+        now_str  = now_et.strftime("%Y-%m-%dT%H:%M:%S")
+
         base = "SELECT * FROM markets WHERE status='open' OR status=''"
-        vol_clause = " AND volume >= ?" if min_volume > 0 else ""
+        vol_clause  = " AND volume >= ?" if min_volume > 0 else ""
         vol_params: tuple = (min_volume,) if min_volume > 0 else ()
 
-        kalshi_q  = base + " AND (platform='kalshi' OR platform IS NULL)" + vol_clause
-        kalshi_q += f" ORDER BY volume DESC LIMIT {int(limit)}"
-        poly_q    = base + " AND platform='polymarket'" + vol_clause
-        poly_q   += f" ORDER BY volume DESC LIMIT {int(limit)}"
+        def _q48(platform_clause):
+            return (
+                base + platform_clause + vol_clause
+                + " AND close_time > ? AND close_time <= ?"
+                + f" ORDER BY close_time ASC LIMIT {int(limit)}"
+            )
 
-        kalshi_rows = await self.db.fetchall(kalshi_q, vol_params) or []
-        poly_rows   = await self.db.fetchall(poly_q,   vol_params) or []
+        def _qall(platform_clause):
+            return (
+                base + platform_clause + vol_clause
+                + f" ORDER BY volume DESC LIMIT {int(limit)}"
+            )
+
+        k_plat  = " AND (platform='kalshi' OR platform IS NULL)"
+        p_plat  = " AND platform='polymarket'"
+
+        # Try 48h window first
+        k48_p = (*vol_params, now_str, cutoff48)
+        p48_p = (*vol_params, now_str, cutoff48)
+        kalshi_rows = await self.db.fetchall(_q48(k_plat), k48_p) or []
+        poly_rows   = await self.db.fetchall(_q48(p_plat), p48_p) or []
+
+        # If 48h window is empty fall back to all open markets by volume
+        if not kalshi_rows:
+            kalshi_rows = await self.db.fetchall(_qall(k_plat), vol_params) or []
+        if not poly_rows:
+            poly_rows = await self.db.fetchall(_qall(p_plat), vol_params) or []
+
         rows = kalshi_rows + poly_rows
-
         if not rows:
             logger.warning("No markets in cache — DB may be empty on first startup")
 
         logger.info(
-            "get_cached_markets: %d Kalshi + %d Polymarket = %d total (min_vol=%g)",
+            "get_cached_markets: %d Kalshi + %d Polymarket = %d total (min_vol=%g, window=48h)",
             len(kalshi_rows), len(poly_rows), len(rows), min_volume,
         )
         return rows

@@ -823,7 +823,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
                 # live_trades_alert is owned by live_market_manager — skip here to avoid duplicate alerts
 
-        # Scan pool: markets closing TODAY only — live events, same-day results
+        # Scan pool: markets closing TODAY — live events, same-day results
         long_term = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
@@ -833,7 +833,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             and m.get("volume", 0) >= max(min_vol, 10)
             and (m.get("title") or "")
             and m.get("close_time")
-            and _closes_today(m)                          # today only — live events
+            and _closes_today(m)
             and not is_junk(m.get("title", ""))
         ]
 
@@ -845,11 +845,27 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             and 2 < _tradeable_price(m) < 98
             and m.get("volume", 0) > 0                    # hard reject zero-volume markets
             and m.get("ticker") not in {x.get("ticker") for x in long_term}
-            and m.get("close_time")                       # must have a close time set
+            and m.get("close_time")
             and _closes_today(m)
             and (m.get("title") or "")
             and not is_junk(m.get("title", ""))
         ]
+
+        # Fallback pool: if today has no markets, widen to 48h so we're never idle
+        if not long_term and not short_term:
+            long_term = [
+                m for m in markets
+                if m.get("ticker") not in arb_tickers
+                and not _already_open(m)
+                and 2 < _tradeable_price(m) < 98
+                and m.get("volume", 0) > 0
+                and (m.get("title") or "")
+                and m.get("close_time")
+                and _closes_within(m, 48)
+                and not is_junk(m.get("title", ""))
+            ]
+            if long_term:
+                logger.info("No today-only markets — widened scan to 48h (%d candidates)", len(long_term))
 
         # ── Category-wide sweep: scan ALL categories + sub-categories ─────────
         # Runs in background and merges into candidate pools for broader coverage.

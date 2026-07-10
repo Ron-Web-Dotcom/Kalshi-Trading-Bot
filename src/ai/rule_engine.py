@@ -185,9 +185,10 @@ def score(
     if (side == "yes" and yes_sent > no_sent + 0.2) or (side == "no" and no_sent > yes_sent + 0.2):
         base_conf = min(base_conf + 4, 88.0)
 
-    # Penalty: no probability sources at all — cannot reach 77 on sentiment alone
+    # Penalty: no external probability sources — apply a modest discount but still
+    # allow edge-based signals to reach the minimum confidence threshold.
     if n_prob_sources == 0:
-        base_conf = min(base_conf, 65.0)
+        base_conf *= 0.92   # ~8% haircut: e.g. 80→74, 74→68, 66→61
 
     # Penalty: conflicting probability sources
     if n_prob_sources >= 2 and max(prob_estimates) - min(prob_estimates) > 20:

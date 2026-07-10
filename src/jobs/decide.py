@@ -228,12 +228,10 @@ async def make_decision_for_market(
         except Exception:
             pass
 
-    # Override min_confidence for risky market types
+    # Override min_confidence only for genuinely unpredictable market types
     if min_confidence is None:
         if is_weather or is_esports:
             min_confidence = 88.0
-        elif yes_ask > 55:
-            min_confidence = 85.0
 
     tcfg     = settings.trading
     hard_cap = getattr(tcfg, "daily_ai_hard_cap", 15.0)
