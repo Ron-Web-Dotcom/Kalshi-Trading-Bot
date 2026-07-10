@@ -61,6 +61,9 @@ async def run_tracking(db_manager, risk=None) -> None:
             len(positions)
         )
         closed = 0
+        _batch_wins:  List[Dict] = []
+        _batch_losses: List[Dict] = []
+        _batch_exits:  List[Dict] = []
 
         for pos in positions:
             reeval    = None  # reset per iteration — prevents cross-position contamination
@@ -210,18 +213,20 @@ async def run_tracking(db_manager, risk=None) -> None:
                                 (pnl, pnl_sign, now, _tl_poly["id"])
                             )
                         risk.record_result(ticker, pnl, platform)
-                        try:
-                            await discord.position_closed(
-                                ticker=ticker, side=side,
-                                contracts=int(contracts),
-                                avg_price=float(avg_price),
-                                close_price=float(close_price_used),
-                                pnl=float(pnl),
-                                reason=close_reason,
-                                platform="polymarket",
-                            )
-                        except Exception as _disc_err:
-                            logger.debug("Discord alert failed: %s", _disc_err)
+                        _batch_item = {
+                            "title": (pos.get("title") or ticker)[:50],
+                            "ticker": ticker, "side": side.upper(),
+                            "platform": "polymarket",
+                            "entry": float(avg_price), "exit": float(close_price_used),
+                            "pnl": float(pnl), "contracts": int(contracts),
+                            "reason": close_reason,
+                        }
+                        if close_reason.startswith("ai_reeval"):
+                            _batch_exits.append(_batch_item)
+                        elif pnl >= 0:
+                            _batch_wins.append(_batch_item)
+                        else:
+                            _batch_losses.append(_batch_item)
                         closed += 1
                     else:
                         await db_manager.execute(
@@ -350,15 +355,21 @@ async def run_tracking(db_manager, risk=None) -> None:
                     if close_reason.startswith("ai_reeval") and "reeval" in locals():
                         logger.info("  AI opted out: %s", reeval.get("reasoning", "")[:120])
 
-                    # Discord: position closed (all triggers)
-                    market_result = mkt.get("result", "") if close_reason.startswith("resolved") else ""
-                    await discord.position_closed(
-                        ticker=ticker, side=side, contracts=contracts,
-                        entry_cents=avg_price, exit_cents=final_price,
-                        pnl=pnl, reason=close_reason, paper=paper,
-                        market_result=market_result,
-                        market_title=mkt.get("title", "") or mkt.get("question", ""),
-                    )
+                    # Batch for end-of-cycle grouped Discord summary
+                    _mkt_title = mkt.get("title", "") or mkt.get("question", "") or ticker
+                    _batch_item = {
+                        "title": _mkt_title[:50], "ticker": ticker,
+                        "side": side.upper(), "platform": "kalshi",
+                        "entry": float(avg_price), "exit": float(final_price),
+                        "pnl": float(pnl), "contracts": int(contracts),
+                        "reason": close_reason,
+                    }
+                    if close_reason.startswith("ai_reeval"):
+                        _batch_exits.append(_batch_item)
+                    elif pnl >= 0:
+                        _batch_wins.append(_batch_item)
+                    else:
+                        _batch_losses.append(_batch_item)
                 else:
                     await db_manager.execute(
                         "UPDATE positions SET current_price=?, pnl=? WHERE id=?",
@@ -393,6 +404,17 @@ async def run_tracking(db_manager, risk=None) -> None:
 
         if closed:
             logger.info("Tracking: closed %d of %d position(s)", closed, len(positions))
+            # One grouped Discord embed for all closes this cycle
+            if _batch_wins or _batch_losses or _batch_exits:
+                try:
+                    await discord.live_results_summary(
+                        wins=_batch_wins,
+                        losses=_batch_losses,
+                        exits=_batch_exits,
+                        mode="📝 PAPER" if paper else "💰 LIVE",
+                    )
+                except Exception as _flush_err:
+                    logger.debug("Batch Discord flush failed: %s", _flush_err)
         else:
             logger.info("Tracking: %d position(s) marked to market", len(positions))
 
