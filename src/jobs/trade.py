@@ -823,49 +823,53 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
                 # live_trades_alert is owned by live_market_manager — skip here to avoid duplicate alerts
 
-        # Scan pool: markets closing TODAY — live events, same-day results
+        # ── IMMINENT pool: closes within 60 min — live in-play events (highest priority)
+        imminent = [
+            m for m in markets
+            if m.get("ticker") not in arb_tickers
+            and not _already_open(m)
+            and 2 < _tradeable_price(m) < 98
+            and m.get("volume", 0) >= max(min_vol, 10)
+            and (m.get("title") or "")
+            and m.get("close_time")
+            and _closes_within(m, 1)           # closing in ≤ 60 min
+            and not is_junk(m.get("title", ""))
+        ]
+
+        # ── TODAY pool: closes before midnight ET today (same-day results)
         long_term = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
             and not _already_open(m)
             and 2 < _tradeable_price(m) < 98
-            and m.get("volume", 0) > 0                    # hard reject zero-volume markets
+            and m.get("volume", 0) > 0
             and m.get("volume", 0) >= max(min_vol, 10)
             and (m.get("title") or "")
             and m.get("close_time")
             and _closes_today(m)
+            and not _closes_within(m, 1)       # already in imminent — no duplicates
             and not is_junk(m.get("title", ""))
         ]
 
-        # Short-duration pool: closes within 24h — lower volume ok (new daily markets)
+        # ── Short-duration: today, any volume (catches fresh/new daily markets)
         short_term = [
             m for m in markets
             if m.get("ticker") not in arb_tickers
             and not _already_open(m)
             and 2 < _tradeable_price(m) < 98
-            and m.get("volume", 0) > 0                    # hard reject zero-volume markets
-            and m.get("ticker") not in {x.get("ticker") for x in long_term}
+            and m.get("volume", 0) > 0
+            and m.get("ticker") not in {x.get("ticker") for x in long_term + imminent}
             and m.get("close_time")
             and _closes_today(m)
             and (m.get("title") or "")
             and not is_junk(m.get("title", ""))
         ]
 
-        # Fallback pool: if today has no markets, widen to 48h so we're never idle
-        if not long_term and not short_term:
-            long_term = [
-                m for m in markets
-                if m.get("ticker") not in arb_tickers
-                and not _already_open(m)
-                and 2 < _tradeable_price(m) < 98
-                and m.get("volume", 0) > 0
-                and (m.get("title") or "")
-                and m.get("close_time")
-                and _closes_within(m, 48)
-                and not is_junk(m.get("title", ""))
-            ]
-            if long_term:
-                logger.info("No today-only markets — widened scan to 48h (%d candidates)", len(long_term))
+        logger.info(
+            "Scan pools: %d imminent (≤1h) + %d today + %d short = %d total",
+            len(imminent), len(long_term), len(short_term),
+            len(imminent) + len(long_term) + len(short_term),
+        )
 
         # ── Category-wide sweep: scan ALL categories + sub-categories ─────────
         # Runs in background and merges into candidate pools for broader coverage.
@@ -917,7 +921,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
 
         # Expiring markets (closing soon but NOT confirmed live) → regular scan pool
         # Must pass the same today-only + volume filters as the main pools
-        existing_all_tickers = {m.get("ticker") for m in long_term + short_term + live_kalshi + poly_markets}
+        existing_all_tickers = {m.get("ticker") for m in imminent + long_term + short_term + live_kalshi + poly_markets}
         for m in expiring_kalshi_raw:
             if (m.get("ticker") not in existing_all_tickers
                     and not _already_open(m)
@@ -935,11 +939,12 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 poly_markets.append(m)
                 existing_all_tickers.add(m.get("ticker"))
 
-        # Live markets go FIRST — they're time-sensitive and get AI evaluated before regular markets
+        # Order: imminent (≤1h) → live now → today → short  — most time-sensitive first
         live_kalshi_tickers = {m.get("ticker") for m in live_kalshi}
-        long_term  = [m for m in long_term  if m.get("ticker") not in live_kalshi_tickers]
-        short_term = [m for m in short_term if m.get("ticker") not in live_kalshi_tickers]
-        kalshi_candidates = live_kalshi + long_term + short_term
+        imminent_tickers    = {m.get("ticker") for m in imminent}
+        long_term  = [m for m in long_term  if m.get("ticker") not in live_kalshi_tickers | imminent_tickers]
+        short_term = [m for m in short_term if m.get("ticker") not in live_kalshi_tickers | imminent_tickers]
+        kalshi_candidates = imminent + live_kalshi + long_term + short_term
 
         # Merge live Polymarket into poly_markets (deduplicate)
         poly_tickers_existing = {m.get("ticker") for m in poly_markets}

@@ -150,14 +150,28 @@ def score(
             consensus = 50.0  # no signal
 
     # ── 6. Determine side and edge ───────────────────────────────────────────
-    if consensus >= 50:
+    # Price-based side: whichever side the market prices at ≥ min_confidence
+    # is the "crowd-confident" side — follow it.
+    # YES=75¢ → bet YES.  NO=75¢ (YES=25¢) → bet NO.
+    from src.config.settings import settings as _scfg
+    _min_c = _scfg.trading.min_ai_confidence
+    no_ask = 100.0 - yes_ask
+    if yes_ask >= _min_c:
+        side      = "yes"
+        true_prob = yes_ask
+        edge      = yes_ask - market_mid
+    elif no_ask >= _min_c:
+        side      = "no"
+        true_prob = no_ask
+        edge      = no_ask - (100.0 - market_mid)
+    elif consensus >= 50:
         side      = "yes"
         true_prob = consensus
-        edge      = consensus - market_mid          # positive = YES underpriced
+        edge      = consensus - market_mid
     else:
         side      = "no"
         true_prob = consensus
-        edge      = (100 - consensus) - (100 - market_mid)  # NO edge
+        edge      = (100 - consensus) - (100 - market_mid)
 
     net_ev = edge * 0.98  # in cents, after 2% fee
 
