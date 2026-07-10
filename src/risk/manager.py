@@ -185,9 +185,12 @@ class RiskManager:
         # Check 2: consecutive loss streak
         # Streak resets at 3am ET (bot sleep/rest period) — fresh start each morning
         try:
+            from datetime import timedelta as _td
             now_et = datetime.now(_ET)
             today_3am = now_et.replace(hour=3, minute=0, second=0, microsecond=0)
-            # Only count losses that happened AFTER today's 3am reset window
+            # Before 3am: use yesterday's 3am as the window start (today's 3am is in the future)
+            if now_et < today_3am:
+                today_3am -= _td(days=1)
             streak_since = today_3am.isoformat()
             rows = await db.fetchall(
                 "SELECT result FROM trade_logs WHERE result IN ('WIN','LOSS') "

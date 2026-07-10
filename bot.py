@@ -848,7 +848,7 @@ class TradingBot:
                     logger.error("Eval loop error: %s", e)
                 await asyncio.sleep(EVAL_INTERVAL)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _on_signal(signum, frame):
             logger.info("Shutdown signal %s — stopping bot...", signum)

@@ -192,6 +192,11 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         markets = await fetcher.get_cached_markets(min_volume=min_vol)
         if not markets:
             logger.warning("No markets in DB (run ingest first) — cycle skipped")
+            # Still resolve expired positions even when market cache is empty
+            try:
+                await _resolve_expired_positions(db, live_mode, risk=risk)
+            except Exception as _re:
+                logger.debug("Real-time resolve error (empty cache path): %s", _re)
             return results
         logger.info("Markets loaded: %d available (volume ≥ %g)", len(markets), min_vol)
         from src.utils.daily_stats import stats as daily_stats
@@ -245,6 +250,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     "INTERNAL ARB %s | YES=%g¢ + NO=%g¢ = %g¢ | Net edge=%.1f¢",
                     ticker, yes_p, no_p, yes_p + no_p, net,
                 )
+                _arb_blocked = False
                 for side, price in [("yes", yes_p), ("no", no_p)]:
                     allowed, reason = risk.check_trade(
                         ticker + f"_{side}", scaler.current_size,
@@ -254,12 +260,15 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                     )
                     if not allowed:
                         logger.info(
-                            "SKIP internal-arb %s leg=%s | Reason: %s",
+                            "SKIP internal-arb %s leg=%s | Reason: %s — aborting both legs",
                             ticker, side, reason,
                         )
                         results.skipped += 1
                         daily_stats.record_skip(f"risk_gate:{reason}")
-                        continue
+                        _arb_blocked = True
+                        break
+                    if _arb_blocked:
+                        break
                     rec = await kalshi_trader.execute(
                         ticker=ticker, action="BUY", side=side,
                         price_cents=price, ai_confidence=99.0,
@@ -921,21 +930,22 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         live_poly_new = [m for m in live_poly if m.get("ticker") not in poly_tickers_existing]
         poly_markets = live_poly_new + poly_markets   # live first
 
-        # Step 6: cross-platform dedup — same event on Kalshi + Polymarket → keep best scored one
+        # Step 6: cross-platform dedup — same event on Kalshi + Polymarket → keep Kalshi
         import re as _xre
         def _event_key(title: str) -> str:
-            """Strip platform-specific noise, return normalized event words for cross-platform matching."""
             t = _xre.sub(r'[^a-z0-9 ]', ' ', (title or "").lower())
             words = [w for w in t.split() if len(w) > 3 and w not in
                      {"will","that","this","with","from","have","been","they","were","when","what","which"}]
             return " ".join(sorted(words[:8]))
-        _kalshi_event_keys = {_event_key(m.get("title","")): m.get("ticker","") for m in kalshi_candidates}
+        # Use a set to avoid dict-collision dropping valid Kalshi keys
+        _kalshi_event_key_set = {ek for m in kalshi_candidates
+                                  if (ek := _event_key(m.get("title",""))) and len(ek) > 4}
         _deduped_poly = []
         for m in poly_markets:
             ek = _event_key(m.get("title",""))
-            if ek and ek in _kalshi_event_keys:
-                logger.debug("Cross-platform dedup: Poly %s matches Kalshi %s — keeping Kalshi",
-                             m.get("ticker","")[:30], _kalshi_event_keys[ek][:30])
+            if ek and len(ek) > 4 and ek in _kalshi_event_key_set:
+                logger.debug("Cross-platform dedup: Poly %s matches Kalshi event — keeping Kalshi",
+                             m.get("ticker","")[:30])
             else:
                 _deduped_poly.append(m)
         poly_markets = _deduped_poly
@@ -978,11 +988,12 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             _best_conf   = float(best.get("decision", {}).get("confidence", 0))
             _best_ct     = _best_market.get("close_time", "")
             _hours_out   = 999.0
+            _now_et_fresh = _dt.now(_ET)  # fresh timestamp — cycle may have taken 10-30s
             try:
                 _close_dt = _dt.fromisoformat(str(_best_ct).replace("Z", "+00:00"))
                 if _close_dt.tzinfo is None:
                     _close_dt = _close_dt.replace(tzinfo=_tz.utc).astimezone(_ET)
-                _hours_out = (_close_dt - now_et).total_seconds() / 3600
+                _hours_out = (_close_dt - _now_et_fresh).total_seconds() / 3600
             except Exception:
                 pass
             # Bid on markets closing within 48h — not just today
@@ -1031,7 +1042,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 best = None
                 results.skipped += 1
                 daily_stats.record_skip(f"watch_only:{confidence:.0f}%")
-            if confidence >= 88:
+            elif confidence >= 88:
                 size_multiplier = 1.5
                 size_tier       = "MAX (88%+ conf)"
             elif confidence >= 80:

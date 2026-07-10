@@ -132,14 +132,15 @@ class MarketDataFetcher:
                 m.get("close_time", ""),
                 float(m.get("last_price") or 0),
                 now,
+                "kalshi",
             ))
 
         if rows:
             await self.db.executemany("""
                 INSERT OR REPLACE INTO markets
                 (ticker, title, category, status, yes_bid, yes_ask, no_bid, no_ask,
-                 volume, open_interest, close_time, last_price, fetched_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 volume, open_interest, close_time, last_price, fetched_at, platform)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, rows)
             stored = len(rows)
 

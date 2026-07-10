@@ -76,9 +76,9 @@ async def run_tracking(db_manager, risk=None) -> None:
 
             # Polymarket positions: fetch current price from the cached markets table
             if platform == "polymarket":
+                close_reason     = ""
+                close_price_used = 0.0
                 try:
-                    close_reason     = ""   # must initialize before any conditional sets it
-                    close_price_used = 0.0
                     mkt_row = await db_manager.fetchone(
                         "SELECT yes_ask, no_ask, status, close_time FROM markets WHERE ticker=?", (ticker,)
                     )
@@ -264,7 +264,7 @@ async def run_tracking(db_manager, risk=None) -> None:
                 final_price  = cur_price
 
                 # ── 1. Market resolved ────────────────────────────────────
-                if status in ("resolved", "settled", "finalized"):
+                if status in ("resolved", "settled", "finalized", "closed"):
                     result = mkt.get("result", "")
                     result_lower = (result or "").lower().strip()
                     won    = (side == "yes" and result_lower == "yes") or \
@@ -352,7 +352,7 @@ async def run_tracking(db_manager, risk=None) -> None:
                         avg_price, final_price,
                         sign, abs(pnl), trigger,
                     )
-                    if close_reason.startswith("ai_reeval") and "reeval" in locals():
+                    if close_reason.startswith("ai_reeval") and reeval is not None:
                         logger.info("  AI opted out: %s", reeval.get("reasoning", "")[:120])
 
                     # Batch for end-of-cycle grouped Discord summary

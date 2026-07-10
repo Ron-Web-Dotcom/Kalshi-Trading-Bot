@@ -75,7 +75,7 @@ class AIDecisionEngine:
 
                     # Recent last 5 closed trades
                     recent = await self.db.fetchall(
-                        "SELECT ticker, side, pnl, result, avg_price, close_price "
+                        "SELECT ticker, side, pnl, result, price, exit_price "
                         "FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN') "
                         "ORDER BY resolved_at DESC LIMIT 5"
                     ) or []
@@ -85,7 +85,7 @@ class AIDecisionEngine:
                             outcome = r.get("result", "LOSS")
                             lines.append(
                                 f"  {outcome} | {r.get('ticker','')} {(r.get('side') or '').upper()} "
-                                f"| entry={r.get('avg_price',0):.0f}¢ exit={r.get('close_price',0):.0f}¢ "
+                                f"| entry={r.get('price',0):.0f}¢ exit={r.get('exit_price',0):.0f}¢ "
                                 f"| PnL=${r.get('pnl',0):+.2f} | result={outcome}"
                             )
 

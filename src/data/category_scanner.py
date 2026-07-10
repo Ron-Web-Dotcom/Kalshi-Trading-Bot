@@ -436,7 +436,7 @@ class CategoryScanner:
                 m = dict(r)
                 # Normalise prices to 0-1 range regardless of storage format
                 ya = _norm_price(m.get("yes_ask") or m.get("last_price") or m.get("yes_bid"))
-                if ya <= 0 or ya >= 1:
+                if ya <= 0 or ya > 1:
                     continue
                 m["yes_ask"] = round(ya * 100, 2)   # store as cents for downstream compat
                 m["no_ask"]  = round((1 - ya) * 100, 2)
