@@ -145,6 +145,21 @@ class DatabaseManager:
                         operator TEXT DEFAULT 'bot',
                         logged_at TEXT
                     );
+
+                    -- Single-row config table: stores era_start for W/L reset
+                    CREATE TABLE IF NOT EXISTS bot_config (
+                        key TEXT PRIMARY KEY,
+                        value TEXT
+                    );
+
+                    -- Weekly snapshots for history browsing
+                    CREATE TABLE IF NOT EXISTS weekly_stats (
+                        week_start TEXT PRIMARY KEY,
+                        wins INTEGER DEFAULT 0,
+                        losses INTEGER DEFAULT 0,
+                        pnl REAL DEFAULT 0,
+                        trades INTEGER DEFAULT 0
+                    );
                 """)
                 await db.commit()
                 # Idempotent migrations for existing databases
@@ -158,6 +173,10 @@ class DatabaseManager:
                     "ALTER TABLE positions  ADD COLUMN last_alerted_price REAL",
                     "ALTER TABLE positions  ADD COLUMN close_time TEXT DEFAULT ''",
                     "ALTER TABLE markets    ADD COLUMN platform TEXT DEFAULT 'kalshi'",
+                    "ALTER TABLE trade_logs ADD COLUMN result TEXT",
+                    "ALTER TABLE trade_logs ADD COLUMN resolved_at TEXT",
+                    "ALTER TABLE trade_logs ADD COLUMN exit_price REAL",
+                    "ALTER TABLE trade_logs ADD COLUMN title TEXT DEFAULT ''",
                 ]:
                     try:
                         await db.execute(migration)

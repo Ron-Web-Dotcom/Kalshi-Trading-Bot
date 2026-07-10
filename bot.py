@@ -391,7 +391,13 @@ class TradingBot:
                     )
                     unrealised_pnl = (unrealised_row or {}).get("pnl", 0.0) or 0.0
 
-                    # All-time win rate — exclude cleanup-closed positions
+                    # Era start — W/L counts from this date forward (reset via DB)
+                    _era_row = await self.db.fetchone(
+                        "SELECT value FROM bot_config WHERE key='era_start'"
+                    )
+                    _era_start = (_era_row or {}).get("value") or "2000-01-01T00:00:00"
+
+                    # Current-era win rate — from era_start onward
                     wl_row = await self.db.fetchone(
                         "SELECT "
                         "  COUNT(*) as total, "
@@ -399,7 +405,10 @@ class TradingBot:
                         "  SUM(CASE WHEN result='LOSS' THEN 1 ELSE 0 END) as losses, "
                         "  SUM(CASE WHEN result='BREAK_EVEN' THEN 1 ELSE 0 END) as break_even, "
                         "  COALESCE(SUM(pnl), 0) as total_pnl "
-                        "FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN')"
+                        "FROM trade_logs WHERE resolved_at IS NOT NULL "
+                        "AND resolved_at >= ? "
+                        "AND result IN ('WIN','LOSS','BREAK_EVEN')",
+                        (_era_start,)
                     )
                     wl = wl_row or {}
                     total_closed = wl.get("total", 0) or 0
@@ -685,12 +694,20 @@ class TradingBot:
                     kalshi_count = (kal_row  or {}).get("n", 0)
                     poly_count   = (poly_row or {}).get("n", 0)
 
+                    _era_row2 = await self.db.fetchone(
+                        "SELECT value FROM bot_config WHERE key='era_start'"
+                    )
+                    _era_start2 = (_era_row2 or {}).get("value") or "2000-01-01T00:00:00"
+
                     wl = await self.db.fetchone(
                         "SELECT COUNT(*) as total, "
                         "SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, "
                         "SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses, "
                         "COALESCE(SUM(pnl),0) as total_pnl "
-                        "FROM trade_logs WHERE resolved_at IS NOT NULL AND result IN ('WIN','LOSS','BREAK_EVEN')"
+                        "FROM trade_logs WHERE resolved_at IS NOT NULL "
+                        "AND resolved_at >= ? "
+                        "AND result IN ('WIN','LOSS','BREAK_EVEN')",
+                        (_era_start2,)
                     ) or {}
                     total_closed = wl.get("total", 0) or 0
                     total_wins   = wl.get("wins",  0) or 0

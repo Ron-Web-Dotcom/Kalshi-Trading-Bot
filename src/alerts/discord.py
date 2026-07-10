@@ -1105,7 +1105,7 @@ class DiscordAlerter:
         if paper_pnl != 0.0:
             locked_s = "+" if paper_pnl >= 0 else ""
             p_emoji  = "💰" if paper_pnl >= 0 else "💸"
-            pnl_lines.append(f"{p_emoji} **Locked in:** ${locked_s}{paper_pnl:.2f} ← _money already banked from closed bets_")
+            pnl_lines.append(f"{p_emoji} **Today's PnL:** ${locked_s}{paper_pnl:.2f} ← _banked from today's closed bets_")
         if unrealised_pnl != 0.0:
             paper_s = "+" if unrealised_pnl >= 0 else ""
             u_emoji = "📈" if unrealised_pnl >= 0 else "📉"
@@ -1126,8 +1126,8 @@ class DiscordAlerter:
                 "inline": False,
             },
             {
-                "name":   "📡 Markets Evaluated",
-                "value":  f"🟦 {kalshi_count} Kalshi + 🟣 {poly_count} Polymarket = **{markets_scanned} evaluated**",
+                "name":   "📡 Markets in DB (cached)",
+                "value":  f"🟦 {kalshi_count} Kalshi + 🟣 {poly_count} Polymarket = **{markets_scanned} cached**",
                 "inline": False,
             },
             {
