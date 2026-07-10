@@ -399,6 +399,11 @@ class CategoryScanner:
         if not self.db:
             return []
         try:
+            # Today in ET: midnight → end of day
+            from datetime import timezone as _tz_db, timedelta as _td
+            _now_et       = datetime.now(_ET)
+            _today_start  = _now_et.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(_tz_db.utc).strftime("%Y-%m-%dT%H:%M:%S")
+            _today_end    = _now_et.replace(hour=23, minute=59, second=59, microsecond=0).astimezone(_tz_db.utc).strftime("%Y-%m-%dT%H:%M:%S")
             rows = await self.db.fetchall(
                 "SELECT ticker, title, category, yes_ask, no_ask, yes_bid, no_bid, "
                 "volume, open_interest, close_time, last_price, platform "
@@ -406,8 +411,11 @@ class CategoryScanner:
                 "WHERE (status='open' OR status='') "
                 "AND (platform='kalshi' OR platform IS NULL) "
                 "AND (yes_ask > 0 OR last_price > 0) "
+                "AND close_time IS NOT NULL AND close_time != '' "
+                "AND close_time >= ? AND close_time <= ? "
                 "AND title IS NOT NULL AND title != '' "
-                "ORDER BY volume DESC LIMIT 500"
+                "ORDER BY volume DESC LIMIT 500",
+                (_today_start, _today_end)
             ) or []
 
             def _norm_price(v):
