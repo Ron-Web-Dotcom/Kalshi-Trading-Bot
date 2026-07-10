@@ -402,7 +402,7 @@ class CategoryScanner:
             # Today in ET: midnight → end of day
             from datetime import timezone as _tz_db, timedelta as _td
             _now_et       = datetime.now(_ET)
-            _today_start  = _now_et.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(_tz_db.utc).strftime("%Y-%m-%dT%H:%M:%S")
+            _today_start  = _now_et.astimezone(_tz_db.utc).strftime("%Y-%m-%dT%H:%M:%S")
             _today_end    = _now_et.replace(hour=23, minute=59, second=59, microsecond=0).astimezone(_tz_db.utc).strftime("%Y-%m-%dT%H:%M:%S")
             rows = await self.db.fetchall(
                 "SELECT ticker, title, category, yes_ask, no_ask, yes_bid, no_bid, "
