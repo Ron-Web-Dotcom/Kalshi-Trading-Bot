@@ -190,7 +190,7 @@ async def _fetch_poly_tag(tag: str, limit: int = 30) -> List[Dict]:
 
 async def _fetch_poly_bulk(limit: int = 500) -> List[Dict]:
     """Bulk fetch without tag filter — today's active events only."""
-    from datetime import timezone as _utc, timedelta as _td
+    from datetime import timezone as _utc
     _now_et  = datetime.now(_ET)
     _eod_et  = _now_et.replace(hour=23, minute=59, second=59, microsecond=0)
     _eod_utc = _eod_et.astimezone(_utc).strftime("%Y-%m-%dT%H:%M:%SZ")

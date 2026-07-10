@@ -1118,6 +1118,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         active_trader = kalshi_trader if platform == "kalshi" else poly_trader
 
                         # GAP 2: proactive order book open check before placing bid
+                        _ob_blocked = False
                         if platform == "kalshi":
                             try:
                                 _mkt_check = await kalshi.get_market(ticker)
@@ -1126,34 +1127,36 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                                     logger.warning("ORDER BOOK CLOSED pre-check — %s status=%s, skipping", ticker, _mkt_status)
                                     daily_stats.record_skip(f"order_book_closed:{ticker}")
                                     results.skipped += 1
-                                    continue
+                                    _ob_blocked = True
                             except Exception as _ob_err:
                                 logger.debug("Order book pre-check error for %s: %s", ticker, _ob_err)
 
-                        try:
-                            rec = await active_trader.execute(
-                                ticker=ticker,
-                                action=decision["action"],
-                                side=side,
-                                price_cents=price,
-                                ai_confidence=decision["confidence"],
-                                ai_reasoning=decision["reasoning"],
-                                signal_source=decision.get("model", "ai"),
-                                net_ev=net_ev,
-                                true_prob=decision.get("true_prob"),
-                                market_title=market.get("title", ""),
-                                close_time=market.get("close_time", "") or market.get("expiration_time", ""),
-                                **({"poly_token_id": market.get("_yes_token") if side == "yes" else market.get("_no_token")}
-                                   if platform == "polymarket" else {}),
-                            )
-                        except Exception as _exec_err:
-                            _err_str = str(_exec_err).lower()
-                            if any(k in _err_str for k in ("order book", "orderbook", "closed", "not tradeable", "trading halted", "market not open")):
-                                logger.warning("ORDER BOOK CLOSED — skipping %s: %s", ticker, _exec_err)
-                                daily_stats.record_skip(f"order_book_closed:{ticker}")
-                            else:
-                                logger.error("Trade execution failed for %s: %s", ticker, _exec_err)
-                            rec = None
+                        rec = None
+                        if not _ob_blocked:
+                            try:
+                                rec = await active_trader.execute(
+                                    ticker=ticker,
+                                    action=decision["action"],
+                                    side=side,
+                                    price_cents=price,
+                                    ai_confidence=decision["confidence"],
+                                    ai_reasoning=decision["reasoning"],
+                                    signal_source=decision.get("model", "ai"),
+                                    net_ev=net_ev,
+                                    true_prob=decision.get("true_prob"),
+                                    market_title=market.get("title", ""),
+                                    close_time=market.get("close_time", "") or market.get("expiration_time", ""),
+                                    **({"poly_token_id": market.get("_yes_token") if side == "yes" else market.get("_no_token")}
+                                       if platform == "polymarket" else {}),
+                                )
+                            except Exception as _exec_err:
+                                _err_str = str(_exec_err).lower()
+                                if any(k in _err_str for k in ("order book", "orderbook", "closed", "not tradeable", "trading halted", "market not open")):
+                                    logger.warning("ORDER BOOK CLOSED — skipping %s: %s", ticker, _exec_err)
+                                    daily_stats.record_skip(f"order_book_closed:{ticker}")
+                                else:
+                                    logger.error("Trade execution failed for %s: %s", ticker, _exec_err)
+                                rec = None
                         if rec:
                             trades_this_cycle += 1
                             results.total_positions += 1
