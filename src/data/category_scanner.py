@@ -186,7 +186,11 @@ async def _fetch_poly_tag(tag: str, limit: int = 30) -> List[Dict]:
 
 
 async def _fetch_poly_bulk(limit: int = 500) -> List[Dict]:
-    """Bulk fetch without tag filter — catches markets not tagged with a slug."""
+    """Bulk fetch without tag filter — today's active events only."""
+    from datetime import timezone as _utc, timedelta as _td
+    _now_et  = datetime.now(_ET)
+    _eod_et  = _now_et.replace(hour=23, minute=59, second=59, microsecond=0)
+    _eod_utc = _eod_et.astimezone(_utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS,
                                      follow_redirects=True, trust_env=False) as client:
@@ -195,6 +199,7 @@ async def _fetch_poly_bulk(limit: int = 500) -> List[Dict]:
                 params={
                     "active": "true",
                     "closed": "false",
+                    "end_date_max": _eod_utc,
                     "limit": limit,
                     "order": "volume",
                     "ascending": "false",
@@ -399,8 +404,10 @@ class CategoryScanner:
         if not self.db:
             return []
         try:
-            # All open/active Kalshi markets — no close_time filter.
-            # Time-to-close is used only for scoring priority, not inclusion.
+            from datetime import timezone as _utc
+            _now_et    = datetime.now(_ET)
+            _now_utc   = _now_et.astimezone(_utc).strftime("%Y-%m-%dT%H:%M:%S")
+            _eod_utc   = _now_et.replace(hour=23, minute=59, second=59, microsecond=0).astimezone(_utc).strftime("%Y-%m-%dT%H:%M:%S")
             rows = await self.db.fetchall(
                 "SELECT ticker, title, category, yes_ask, no_ask, yes_bid, no_bid, "
                 "volume, open_interest, close_time, last_price, platform "
@@ -409,7 +416,9 @@ class CategoryScanner:
                 "AND (platform='kalshi' OR platform IS NULL) "
                 "AND (yes_ask > 0 OR last_price > 0) "
                 "AND title IS NOT NULL AND title != '' "
-                "ORDER BY volume DESC LIMIT 500"
+                "AND close_time >= ? AND close_time <= ? "
+                "ORDER BY volume DESC LIMIT 500",
+                (_now_utc, _eod_utc)
             ) or []
 
             def _norm_price(v):
