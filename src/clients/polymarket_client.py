@@ -421,14 +421,28 @@ class PolymarketTradingClient:
         if price_frac <= 0:
             logger.error("POLY LIVE: invalid price_cents=%s, aborting order", price_cents)
             return None
-        shares = round(size_usdc / price_frac, 2)
-        body_dict  = {
+
+        from src.config.settings import settings as _s
+        wallet = _s.polymarket.wallet_address
+        if not wallet:
+            logger.error("POLY LIVE: POLY_WALLET_ADDRESS not set in .env — cannot place order")
+            return None
+
+        shares     = round(size_usdc / price_frac, 2)
+        expiration = int(time.time()) + 300          # order expires in 5 min if unfilled
+        nonce      = int(time.time() * 1000)         # millisecond nonce
+
+        body_dict = {
             "order": {
-                "tokenID": token_id,
-                "price":   str(round(price_frac, 4)),
-                "size":    str(shares),
-                "side":    side.lower(),
-                "type":    "GTC",
+                "tokenID":     token_id,
+                "price":       str(round(price_frac, 4)),
+                "size":        str(shares),
+                "side":        side.upper(),          # "BUY" or "SELL"
+                "type":        "GTC",                 # Good-Till-Cancelled
+                "feeRateBps":  "0",
+                "nonce":       str(nonce),
+                "expiration":  str(expiration),
+                "maker":       wallet,
             }
         }
         body = json.dumps(body_dict)
@@ -439,7 +453,12 @@ class PolymarketTradingClient:
                 content=body,
                 headers=self._auth_headers("POST", path, body),
             )
-            r.raise_for_status()
+            if r.status_code != 200:
+                logger.error(
+                    "POLY LIVE order HTTP %d — %s",
+                    r.status_code, r.text[:300],
+                )
+                return None
             resp = r.json()
             logger.info(
                 "POLY LIVE ORDER: %s @ %.0f¢ $%.2f → orderID=%s",
