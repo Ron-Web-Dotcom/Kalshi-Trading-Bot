@@ -188,12 +188,14 @@ class AIDecisionEngine:
         bot_block = f"\n\n{bot_context}" if bot_context else ""
 
         # Dynamic confidence ceiling based on how much context we have
+        from src.config.settings import settings as _s
+        _min_c = _s.trading.min_ai_confidence
         if has_rich_context and has_news and (has_pred_markets or has_wiki):
-            conf_ceiling = "You have RICH multi-source context — confidence up to 95% is justified when multiple independent sources clearly agree. 77% is your trade floor; aim for 82%+ when evidence is strong."
+            conf_ceiling = f"You have RICH multi-source context — confidence up to 95% is justified when multiple independent sources clearly agree. {_min_c:.0f}% is your trade floor; aim for 82%+ when evidence is strong."
         elif has_news or has_wiki or has_pred_markets:
-            conf_ceiling = "You have SOLID context — confidence up to 88% is justified. When 2+ independent sources agree (news + stats, OR prediction market + news), you CAN and SHOULD reach 77%+. Do not be shy — if the evidence is there, use it."
+            conf_ceiling = f"You have SOLID context — confidence up to 88% is justified. When 2+ independent sources agree (news + stats, OR prediction market + news), you CAN and SHOULD reach {_min_c:.0f}%+. Do not be shy — if the evidence is there, use it."
         else:
-            conf_ceiling = "Context is thin — cap at 65% and HOLD. Real evidence is needed to reach 77%+."
+            conf_ceiling = f"Context is thin — cap at 65% and HOLD. Real evidence is needed to reach {_min_c:.0f}%+."
 
         from src.utils.eastern_time import now_et as _now_et
         _et_now   = _now_et()
@@ -227,8 +229,8 @@ BUY NO  @ {no_ask:.0f}¢ → profit {no_ev_if_true:.1f}¢ if NO resolves   |  lo
 === HOW TO SCORE CONFIDENCE (based on evidence quality) ===
 90–100% → Multiple prediction markets + live data + news all clearly agree — slam dunk
 82–89%  → Live data (price/score/stat) directly answers the question OR 2+ prediction markets + news agree
-77–81%  → Single strong source (prediction market OR live data) + 1 corroborating source — minimum TRADE ZONE
-65–76%  → Some evidence but not conclusive enough — HOLD
+{_min_c:.0f}–81%  → Single strong source (prediction market OR live data) + 1 corroborating source — minimum TRADE ZONE
+65–{_min_c-1:.0f}%  → Some evidence but not conclusive enough — HOLD
 < 65%   → Weak/conflicting/no evidence — HOLD
 NOTE: Sports scores, crypto prices, economic indicators, and prediction market prices are HIGH-CONFIDENCE sources. When they directly answer the market question, confidence SHOULD reach 80%+.
 
@@ -331,7 +333,9 @@ HARD RULES:
 
             # EV guard — scale minimum with confidence: high conf = lower EV required
             if action == "BUY" and net_ev is not None:
-                min_ev = 0.5 if confidence >= 85 else 1.0 if confidence >= 75 else 2.0
+                from src.config.settings import settings as _s2
+                _min_conf = _s2.trading.min_ai_confidence
+                min_ev = 0.5 if confidence >= 85 else 1.0 if confidence >= _min_conf else 2.0
                 if net_ev < min_ev:
                     action = "HOLD"
                     reasoning = f"[EV guard: net_ev={net_ev:.1f}¢ < {min_ev:.1f}¢ min at conf={confidence:.0f}%] " + reasoning

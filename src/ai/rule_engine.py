@@ -199,8 +199,8 @@ def score(
 
     # ── 8. Action gate ───────────────────────────────────────────────────────
     from src.config.settings import settings
-    min_conf = settings.trading.min_ai_confidence  # 75
-    min_ev   = 2.0 if confidence < 75 else 1.0 if confidence < 85 else 0.5
+    min_conf = settings.trading.min_ai_confidence
+    min_ev   = 2.0 if confidence < min_conf else 1.0 if confidence < 85 else 0.5
 
     if confidence >= min_conf and net_ev >= min_ev:
         action = "BUY"
