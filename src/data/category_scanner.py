@@ -154,7 +154,9 @@ KALSHI_CATEGORY_PATTERNS = [
 
 
 async def _fetch_poly_tag(tag: str, limit: int = 30) -> List[Dict]:
-    """Fetch active Polymarket markets for a single tag slug. Returns [] on any error."""
+    """Fetch today's active Polymarket markets for a single tag slug."""
+    from datetime import timezone as _utc
+    _eod_utc = datetime.now(_ET).replace(hour=23, minute=59, second=59, microsecond=0).astimezone(_utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS,
                                      follow_redirects=True, trust_env=False) as client:
@@ -164,6 +166,7 @@ async def _fetch_poly_tag(tag: str, limit: int = 30) -> List[Dict]:
                     "active": "true",
                     "closed": "false",
                     "tag_slug": tag,
+                    "end_date_max": _eod_utc,
                     "limit": limit,
                     "order": "volume",
                     "ascending": "false",
@@ -464,24 +467,32 @@ class CategoryScanner:
         include_bulk: bool = True,
     ) -> List[Dict]:
         """
-        Single bulk request captures ALL Polymarket + ALL Kalshi markets at once.
-        One request to Polymarket Gamma API (limit=1000) + one Kalshi DB query.
-        Much faster and more complete than fetching 70+ tags individually.
+        Full sweep: bulk Polymarket fetch + every tag slug in parallel + Kalshi DB.
+        Bulk catches high-volume markets; tag sweep catches every sub-category
+        (esports, weather, health, culture, etc.) that bulk misses by volume rank.
         """
-        logger.info("Starting full category scan: 1 Polymarket bulk + Kalshi DB")
+        logger.info("Starting full category scan: Polymarket bulk+tags + Kalshi DB")
 
-        # Single request gets everything — no tag loop needed
-        poly_bulk, kalshi_result = await asyncio.gather(
-            _fetch_poly_bulk(1000),
+        # Bulk + all tag slugs in parallel + Kalshi DB — all at once
+        tag_coros = [_fetch_poly_tag(tag, 20) for tag in POLY_TAG_SLUGS]
+        all_results = await asyncio.gather(
+            _fetch_poly_bulk(500),
             self._kalshi_all_categories(500),
+            *tag_coros,
             return_exceptions=True,
         )
+        poly_bulk      = all_results[0]
+        kalshi_result  = all_results[1]
+        tag_results    = all_results[2:]
 
         all_tag_results = []
         if isinstance(poly_bulk, list):
             all_tag_results.append(poly_bulk)
         if isinstance(kalshi_result, list):
             all_tag_results.append(kalshi_result)
+        for tr in tag_results:
+            if isinstance(tr, list):
+                all_tag_results.append(tr)
 
         # Merge and deduplicate
         seen_tickers: set = set()
