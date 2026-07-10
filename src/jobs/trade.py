@@ -921,6 +921,25 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
         live_poly_new = [m for m in live_poly if m.get("ticker") not in poly_tickers_existing]
         poly_markets = live_poly_new + poly_markets   # live first
 
+        # Step 6: cross-platform dedup — same event on Kalshi + Polymarket → keep best scored one
+        import re as _xre
+        def _event_key(title: str) -> str:
+            """Strip platform-specific noise, return normalized event words for cross-platform matching."""
+            t = _xre.sub(r'[^a-z0-9 ]', ' ', (title or "").lower())
+            words = [w for w in t.split() if len(w) > 3 and w not in
+                     {"will","that","this","with","from","have","been","they","were","when","what","which"}]
+            return " ".join(sorted(words[:8]))
+        _kalshi_event_keys = {_event_key(m.get("title","")): m.get("ticker","") for m in kalshi_candidates}
+        _deduped_poly = []
+        for m in poly_markets:
+            ek = _event_key(m.get("title",""))
+            if ek and ek in _kalshi_event_keys:
+                logger.debug("Cross-platform dedup: Poly %s matches Kalshi %s — keeping Kalshi",
+                             m.get("ticker","")[:30], _kalshi_event_keys[ek][:30])
+            else:
+                _deduped_poly.append(m)
+        poly_markets = _deduped_poly
+
         logger.info(
             "── Best-Opportunity Hunt: %d Kalshi (%d live + %d long + %d short) + %d Polymarket ─",
             len(kalshi_candidates), len(live_kalshi), len(long_term),
@@ -996,6 +1015,22 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 logger.info("Best opportunity SKIPPED — confidence %.0f%% below min %.0f%%", confidence, settings.trading.min_ai_confidence)
                 daily_stats.record_skip(f"confidence_below_min:{confidence:.0f}%")
                 best = None
+            elif confidence < 80:
+                # 70-79%: WATCH only — fire Discord alert but DO NOT place a bid
+                logger.info("WATCH ONLY %.0f%% conf — no bid placed for %s", confidence, ticker)
+                try:
+                    await discord.bot_alert(
+                        picks=[{**market, "action": decision.get("action","BUY"),
+                                "side": side, "confidence": confidence,
+                                "reasoning": decision.get("reasoning",""),
+                                "price_cents": price, "is_live": bool(market.get("is_live"))}],
+                        mode="📝 PAPER" if not live_mode else "💰 LIVE",
+                    )
+                except Exception as _wa_err:
+                    logger.debug("Watch alert error: %s", _wa_err)
+                best = None
+                results.skipped += 1
+                daily_stats.record_skip(f"watch_only:{confidence:.0f}%")
             if confidence >= 88:
                 size_multiplier = 1.5
                 size_tier       = "MAX (88%+ conf)"
@@ -1004,7 +1039,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                 size_tier       = "FULL (80–87% conf)"
             else:
                 size_multiplier = 0.5
-                size_tier       = "HALF (70–79% conf — WATCH)"
+                size_tier       = "WATCH (70–79% conf — no bid)"
             if best is None:
                 planned_size_usd = 0
             else:
@@ -1081,6 +1116,19 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
                         # BOT ALERT fires inside execute() before BID PLACED
                         platform = best.get("platform", "kalshi")
                         active_trader = kalshi_trader if platform == "kalshi" else poly_trader
+
+                        # GAP 2: proactive order book open check before placing bid
+                        if platform == "kalshi":
+                            try:
+                                _mkt_check = await kalshi.get_market(ticker)
+                                _mkt_status = (_mkt_check.get("market") or _mkt_check).get("status", "open")
+                                if _mkt_status not in ("open", "active", ""):
+                                    logger.warning("ORDER BOOK CLOSED pre-check — %s status=%s, skipping", ticker, _mkt_status)
+                                    daily_stats.record_skip(f"order_book_closed:{ticker}")
+                                    results.skipped += 1
+                                    continue
+                            except Exception as _ob_err:
+                                logger.debug("Order book pre-check error for %s: %s", ticker, _ob_err)
 
                         try:
                             rec = await active_trader.execute(
