@@ -1634,7 +1634,7 @@ class DiscordAlerter:
             wr_str   = "No settled bets yet — track record in progress"
         else:
             wr_emoji = "🟢" if win_rate >= 55 else "🟡" if win_rate >= 45 else "🔴"
-            wr_str   = f"**{win_rate:.0f}% win rate** — {total_wins}W / {total_losses}L / {total_closed} settled"
+            wr_str   = f"**{win_rate:.0f}% win rate** — {total_wins}W / {total_losses}L"
         today_line = f"Today's settled PnL: **${pnl_s}{today_pnl:.2f}**\n" if today_pnl != 0 else ""
         fields.append({
             "name":   f"{wr_emoji} Track Record",
