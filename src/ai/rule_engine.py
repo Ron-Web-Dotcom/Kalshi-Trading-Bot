@@ -162,17 +162,18 @@ def score(
     net_ev = edge * 0.98  # in cents, after 2% fee
 
     # ── 7. Confidence ────────────────────────────────────────────────────────
-    # Start from edge size — shifted up so real edges clear the 77% floor
+    # Calibrated against the 75% bid threshold: after the 8% no-source haircut
+    # (× 0.92), edge ≥ 15 must still clear 75%  →  need base ≥ 81.5 → use 82.
     if abs(edge) >= 20:
-        base_conf = 85.0
+        base_conf = 90.0   # × 0.92 = 82.8% — clear BID
     elif abs(edge) >= 15:
-        base_conf = 80.0
+        base_conf = 82.0   # × 0.92 = 75.4% — just clears threshold
     elif abs(edge) >= 10:
-        base_conf = 74.0
+        base_conf = 74.0   # × 0.92 = 68.1% — below threshold, HOLD
     elif abs(edge) >= 7:
-        base_conf = 66.0
+        base_conf = 66.0   # weak — HOLD
     else:
-        base_conf = 50.0
+        base_conf = 50.0   # no signal — HOLD
 
     # Boost: more agreeing sources = higher confidence
     n_prob_sources = len(prob_estimates)
@@ -198,8 +199,8 @@ def score(
 
     # ── 8. Action gate ───────────────────────────────────────────────────────
     from src.config.settings import settings
-    min_conf = settings.trading.min_ai_confidence  # 77
-    min_ev   = 2.0 if confidence < 77 else 1.0 if confidence < 85 else 0.5
+    min_conf = settings.trading.min_ai_confidence  # 75
+    min_ev   = 2.0 if confidence < 75 else 1.0 if confidence < 85 else 0.5
 
     if confidence >= min_conf and net_ev >= min_ev:
         action = "BUY"
