@@ -191,59 +191,67 @@ class MarketDataFetcher:
         return markets
 
     async def get_cached_markets(self, min_volume: float = 0,
-                                  max_age_minutes: int = 15,
+                                  max_age_minutes: int = 30,
                                   limit: int = 500) -> List[Dict]:
-        """Return markets from DB closing TODAY (ET), ordered by close_time ASC.
+        """Return FRESH markets from DB closing TODAY (ET) only.
 
-        Fetches Kalshi and Polymarket separately so high-volume Polymarket
-        markets never crowd out Kalshi (which reports volume in cents, not USD).
-        Falls back to all open markets only when today has nothing.
+        - Rejects stale rows (fetched_at older than max_age_minutes)
+        - Rejects markets closing tomorrow or later
+        - Rejects markets that already closed (close_time <= now)
+        - Orders by close_time ASC so imminent markets appear first
+        - Falls back to any open markets if today has nothing yet (startup)
         """
-        from datetime import datetime
+        from datetime import datetime, timedelta
         from zoneinfo import ZoneInfo
         _ET = ZoneInfo("America/New_York")
         now_et      = datetime.now(_ET)
         now_str     = now_et.strftime("%Y-%m-%dT%H:%M:%S")
-        midnight_et = now_et.replace(hour=23, minute=59, second=59, microsecond=0)
-        eod_str     = midnight_et.strftime("%Y-%m-%dT%H:%M:%S")
+        eod_str     = now_et.replace(hour=23, minute=59, second=59, microsecond=0).strftime("%Y-%m-%dT%H:%M:%S")
+        fresh_since = (now_et - timedelta(minutes=max_age_minutes)).strftime("%Y-%m-%dT%H:%M:%S")
 
-        base = "SELECT * FROM markets WHERE status='open' OR status=''"
-        vol_clause  = " AND volume >= ?" if min_volume > 0 else ""
+        vol_clause   = " AND volume >= ?" if min_volume > 0 else ""
         vol_params: tuple = (min_volume,) if min_volume > 0 else ()
 
+        # Fresh + today only: fetched recently AND closes before midnight ET today
         def _q_today(platform_clause):
             return (
-                base + platform_clause + vol_clause
-                + " AND close_time > ? AND close_time <= ?"
+                "SELECT * FROM markets WHERE (status='open' OR status='')"
+                + platform_clause + vol_clause
+                + " AND close_time > ? AND close_time <= ?"    # must be open AND close today
+                + " AND (fetched_at IS NULL OR fetched_at >= ?)"  # not stale
                 + f" ORDER BY close_time ASC LIMIT {int(limit)}"
             )
 
+        # Fallback: any open market ordered by close_time (startup / off-hours)
         def _q_all(platform_clause):
             return (
-                base + platform_clause + vol_clause
+                "SELECT * FROM markets WHERE (status='open' OR status='')"
+                + platform_clause + vol_clause
+                + " AND close_time > ?"                         # not already closed
                 + f" ORDER BY close_time ASC LIMIT {int(limit)}"
             )
 
         k_plat = " AND (platform='kalshi' OR platform IS NULL)"
         p_plat = " AND platform='polymarket'"
 
-        today_params = (*vol_params, now_str, eod_str)
-        kalshi_rows  = await self.db.fetchall(_q_today(k_plat), today_params) or []
-        poly_rows    = await self.db.fetchall(_q_today(p_plat), today_params) or []
+        today_params   = (*vol_params, now_str, eod_str, fresh_since)
+        kalshi_rows    = await self.db.fetchall(_q_today(k_plat), today_params) or []
+        poly_rows      = await self.db.fetchall(_q_today(p_plat), today_params) or []
 
-        # Fallback — DB has no today markets yet (first startup or off-hours)
+        # Fallback — no fresh today markets yet (first startup or off-hours)
         if not kalshi_rows:
-            kalshi_rows = await self.db.fetchall(_q_all(k_plat), vol_params) or []
+            kalshi_rows = await self.db.fetchall(_q_all(k_plat), (*vol_params, now_str)) or []
         if not poly_rows:
-            poly_rows = await self.db.fetchall(_q_all(p_plat), vol_params) or []
+            poly_rows = await self.db.fetchall(_q_all(p_plat), (*vol_params, now_str)) or []
 
         rows = kalshi_rows + poly_rows
         if not rows:
             logger.warning("No markets in cache — DB may be empty on first startup")
 
         logger.info(
-            "get_cached_markets: %d Kalshi + %d Polymarket = %d total (today ET only)",
-            len(kalshi_rows), len(poly_rows), len(rows),
+            "get_cached_markets: %d Kalshi + %d Polymarket = %d total "
+            "(today ET, fresh ≤%dmin, no stale/next-day)",
+            len(kalshi_rows), len(poly_rows), len(rows), max_age_minutes,
         )
         return rows
 
