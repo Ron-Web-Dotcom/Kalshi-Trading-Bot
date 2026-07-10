@@ -317,25 +317,15 @@ class TradingBot:
                 await asyncio.sleep(TRADE_INTERVAL)
 
         async def hourly_heartbeat_loop():
-            """Send a heartbeat at 3am/9am/3pm/9pm ET — fills gaps between the 4 check-ins."""
+            """Send a Discord heartbeat every hour on the hour (ET)."""
             from src.alerts.discord import DiscordAlerter
             from src.utils.eastern_time import now_et as _now_et
-            from datetime import timedelta as _hb_td
-            # Fire at 3, 9, 15, 21 ET — halfway between the daytime_summary slots (0, 6, 12, 18)
-            _HB_HOURS = {3, 9, 15, 21}
             _et_now = _now_et()
-            # If we just missed a slot by ≤10 min (e.g. restart at 9:03 PM), fire immediately
-            _just_missed = any(
-                0 < (_et_now - _et_now.replace(hour=h, minute=0, second=0, microsecond=0)).total_seconds() <= 600
-                for h in _HB_HOURS
-            )
-            if not _just_missed:
-                _upcoming = [
-                    _et_now.replace(hour=h, minute=0, second=0, microsecond=0)
-                    for h in _HB_HOURS
-                ]
-                _upcoming = [t if t > _et_now else t + _hb_td(days=1) for t in _upcoming]
-                await asyncio.sleep(max(0.0, (min(_upcoming) - _et_now).total_seconds()))
+            # Sleep until the next top-of-hour; if we're within 60s, fire right away
+            _secs_into_hour = _et_now.minute * 60 + _et_now.second
+            _secs_to_next   = 3600 - _secs_into_hour
+            if _secs_to_next > 60:
+                await asyncio.sleep(_secs_to_next)
             while not self._shutdown.is_set():
                 try:
                     discord = DiscordAlerter()
@@ -564,15 +554,12 @@ class TradingBot:
                 except Exception as e:
                     logger.error("Hourly heartbeat error: %s", e, exc_info=True)
 
-                # Sleep until the next 3/9/15/21 ET slot
+                # Sleep until the next top-of-hour
                 try:
-                    _et_now   = _now_et()
-                    _upcoming = [
-                        _et_now.replace(hour=h, minute=0, second=0, microsecond=0)
-                        for h in _HB_HOURS
-                    ]
-                    _upcoming = [t if t > _et_now else t + _hb_td(days=1) for t in _upcoming]
-                    await asyncio.sleep(max(0.0, (min(_upcoming) - _et_now).total_seconds()))
+                    _et_now          = _now_et()
+                    _secs_into_hour  = _et_now.minute * 60 + _et_now.second
+                    _secs_to_next    = max(1.0, 3600 - _secs_into_hour)
+                    await asyncio.sleep(_secs_to_next)
                 except asyncio.CancelledError:
                     break
                 except Exception as _se:

@@ -294,11 +294,20 @@ def _parse_poly_market(m: Dict, tag: str) -> Optional[Dict]:
         return None
 
 
+_KEYWORD_MATCH_TERMS = frozenset([
+    "vs", " v ", "game", "match", "score", "win", "beat", "lose", "final",
+    "nfl", "nba", "mlb", "nhl", "ufc", "mma", "nascar", "f1", "golf", "tennis",
+    "btc", "eth", "sol", "bitcoin", "ethereum", "crypto", "fed", "fomc", "cpi",
+    "election", "senate", "house", "president", "governor", "primary",
+    "earnings", "gdp", "inflation", "unemployment", "jobs", "ipo",
+])
+
+
 def _pre_score(market: Dict) -> float:
     """
     Fast rule-based pre-score — no API calls.
     Higher = more promising for AI evaluation.
-    Factors: price distance from 50¢, volume, time-to-close.
+    Factors: price distance from 50¢, volume, time-to-close, keyword match.
     """
     yes_ask = float(market.get("yes_ask") or market.get("last_price") or 0)
     no_ask  = float(market.get("no_ask")  or (100 - yes_ask) if yes_ask else 0)
@@ -314,6 +323,10 @@ def _pre_score(market: Dict) -> float:
     liquidity = min(volume / 1000.0, 1.0)
     if volume == 0:
         liquidity = 0.03
+
+    # Keyword match — live-event / high-signal markets score higher
+    title_lower = (market.get("title") or market.get("question") or "").lower()
+    keyword_match = 1.3 if any(kw in title_lower for kw in _KEYWORD_MATCH_TERMS) else 1.0
 
     # Time bonus — sweet spot is 1–48h to close
     time_bonus = 1.0
@@ -338,7 +351,7 @@ def _pre_score(market: Dict) -> float:
     spread = abs(yes_ask + no_ask - 100)
     spread_factor = max(0.5, 1.0 - spread / 25.0)
 
-    return price_score * max(liquidity, 0.03) * time_bonus * spread_factor
+    return price_score * max(liquidity, 0.03) * time_bonus * spread_factor * keyword_match
 
 
 def _normalize_cat(cat: str) -> str:

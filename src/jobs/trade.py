@@ -1048,9 +1048,6 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             elif confidence >= 80:
                 size_multiplier = 1.0
                 size_tier       = "FULL (80–87% conf)"
-            else:
-                size_multiplier = 0.5
-                size_tier       = "WATCH (70–79% conf — no bid)"
             if best is None:
                 planned_size_usd = 0
             else:
