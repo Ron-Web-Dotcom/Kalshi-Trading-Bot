@@ -117,7 +117,7 @@ def _merge(ai_result: Optional[Dict], rule_result: Optional[Dict]) -> Optional[D
             winner = dict(ai_result)
             winner["confidence"] = min(99.0, ai_conf + bonus)
             winner["reasoning"]  = (
-                f"[double-confirmed] "
+                "[double-confirmed] "
                 + winner["reasoning"]
                 + f" | rules: {rule_result.get('reasoning','')[:80]}"
             )
@@ -125,7 +125,7 @@ def _merge(ai_result: Optional[Dict], rule_result: Optional[Dict]) -> Optional[D
             winner = dict(rule_result)
             winner["confidence"] = min(99.0, rule_conf + bonus)
             winner["reasoning"]  = (
-                f"[double-confirmed] "
+                "[double-confirmed] "
                 + winner["reasoning"]
                 + f" | AI: {ai_result.get('reasoning','')[:80]}"
             )
