@@ -592,14 +592,16 @@ class TradingBot:
                     # Remember what we showed so next hour rotates to fresh ones
                     self._hb_shown_tickers = {c["ticker"] for c in top_candidates}
 
-                    # Today's closed trades with outcomes — skip $0.00 ghost closes and cleanup
+                    # Recent closed trades (last 2 hours) — prevents same trades appearing every scan
+                    from src.utils.eastern_time import now_et as _hb_now
+                    _two_hrs_ago = (_hb_now() - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S")
                     closed_rows = await self.db.fetchall(
                         "SELECT ticker, title, side, pnl, close_reason, platform FROM positions "
                         "WHERE status='closed' AND closed_at >= ? "
                         "AND pnl IS NOT NULL AND pnl != 0 "
                         "AND (close_reason IS NULL OR close_reason NOT LIKE 'cleanup:%') "
-                        "ORDER BY closed_at DESC LIMIT 10",
-                        (today + "T00:00:00",)
+                        "ORDER BY closed_at DESC LIMIT 8",
+                        (_two_hrs_ago,)
                     )
                     closed_trades = [dict(r) for r in (closed_rows or [])]
 
@@ -1171,8 +1173,8 @@ class TradingBot:
                             continue
                         hl = _hours_left(ev)
                         # hl == -1 means close_time unknown — don't skip, treat as ≤24h
-                        # Skip if already closed or fewer than 15 min left (untradeable)
-                        if hl != -1 and hl <= 0.25:
+                        # Skip if already closed or fewer than 5 min left (untradeable)
+                        if hl != -1 and hl <= 0.083:
                             continue
                         if hl == -1:
                             hl = 12  # assume same-day if close_time missing

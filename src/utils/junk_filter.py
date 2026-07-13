@@ -55,6 +55,23 @@ JUNK_PHRASES = [
     "will the announcer", "say 'aggressive'", "say 'clutch'",
     "say 'impressive'", "say 'incredible'", "say 'unbelievable'",
     "announcer say", "commentator say",
+    # YouTube / content creator word-count markets — unverifiable, low quality
+    "mrbeast", "mcbeast", "will mcbeast",
+    "say 'dollar'", "say 'sponsored'", "say 'faustable'", "say 'faustables'",
+    "say 'merch'", "say 'subscribe'", "say 'like and subscribe'",
+    "during his next youtube", "during his next video",
+    "youtube video", "in his next video",
+    # Crypto Up/Down scalp markets — highly volatile, consistent stop-losses
+    "bitcoin up or down", "btc up or down",
+    "ethereum up or down", "eth up or down",
+    "solana up or down", "sol up or down",
+    "xrp up or down", "doge up or down",
+    "hype up or down", "bnb up or down",
+    # Multi-week / tournament-winner markets in today's pool
+    "win the 2026 wimbledon", "win wimbledon",
+    "win the 2026 us open", "win the 2026 french open",
+    "win the 2026 australian open",
+    "lpl win msi", "lck win msi", "win msi 2026",
     # Meme / low-liquidity crypto
     "meme coin", "rug pull", "all-time high by",
     "pump to", "moon by",

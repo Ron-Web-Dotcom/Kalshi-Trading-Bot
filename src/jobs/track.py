@@ -133,26 +133,51 @@ async def run_tracking(db_manager, risk=None) -> None:
                     if not mkt_row:
                         logger.debug("TRACK SKIP Polymarket %s — not in markets cache (ticker mismatch?)", ticker)
                         continue
+
+                    # Determine resolution status BEFORE touching prices
+                    mkt_status  = mkt_row.get("status", "open")
+                    _is_resolved = (
+                        mkt_status in ("resolved", "settled", "finalized", "closed")
+                        or str(mkt_status or "").lower().startswith("_market")
+                    )
+
                     bid_key   = "yes_ask" if side == "yes" else "no_ask"
+                    alt_key   = "no_ask"  if side == "yes" else "yes_ask"
                     cur_price = float(mkt_row.get(bid_key, 0) or 0)
-                    # Fall back to the other side's price if primary is 0
                     if cur_price == 0:
-                        alt_key   = "no_ask" if side == "yes" else "yes_ask"
                         alt_price = float(mkt_row.get(alt_key, 0) or 0)
                         if alt_price > 0:
                             cur_price = 100.0 - alt_price
-                    if cur_price == 0:
-                        logger.warning("TRACK SKIP Polymarket %s — %s price=0 in cache (stale data?)", ticker, bid_key)
+
+                    if cur_price == 0 and _is_resolved:
+                        # Market fully settled — both prices may be 0 post-settlement.
+                        # Infer winner from the last known pre-settlement DB values.
+                        _raw_yes = float(mkt_row.get("yes_ask", 0) or 0)
+                        _raw_no  = float(mkt_row.get("no_ask",  0) or 0)
+                        if _raw_yes >= 90:
+                            cur_price = 100.0 if side == "yes" else 0.0
+                        elif _raw_no >= 90:
+                            cur_price = 100.0 if side == "no" else 0.0
+                        else:
+                            # Winner unknown from cache — close at avg_price (break-even)
+                            logger.warning(
+                                "POLY RESOLVED winner unclear %s (yes=%.0f no=%.0f) — closing at entry",
+                                ticker[:40], _raw_yes, _raw_no,
+                            )
+                            cur_price = avg_price
+                    elif cur_price == 0:
+                        logger.warning(
+                            "TRACK SKIP Polymarket %s — %s price=0 in cache (stale data?)",
+                            ticker, bid_key,
+                        )
                         continue
-                    # cur_price is the side's own price (no_ask for NO, yes_ask for YES)
-                    # so PnL formula is the same: profit when our side's price rises
+
                     pnl = (cur_price - avg_price) * contracts / 100
                     pct_change = ((cur_price - avg_price) / avg_price * 100) if avg_price else 0
-                    mkt_status = mkt_row.get("status", "open")
-                    if mkt_status in ("resolved", "settled", "finalized", "closed"):
+
+                    if _is_resolved:
                         close_reason = f"resolved:{mkt_status}"
-                        # Our side wins when that side's price → 100 at resolution
-                        # (yes_ask→100 = YES won; no_ask→100 = NO won)
+                        # Side wins when its price reaches 100 at resolution
                         final_price  = 100.0 if cur_price >= 95 else 0.0
                         pnl = (final_price - avg_price) * contracts / 100
                         close_price_used = final_price

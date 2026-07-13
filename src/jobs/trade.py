@@ -1069,6 +1069,14 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             elif confidence >= 80:
                 size_multiplier = 1.0
                 size_tier       = "FULL (80–87% conf)"
+            # Hard block: negative EV — AI says we lose on average, never trade
+            if best is not None and net_ev is not None and float(net_ev) < 0:
+                skip_reason = f"negative EV gate: EV={net_ev:+.1f}¢ — not trading negative edge"
+                logger.info("Best opportunity BLOCKED — %s", skip_reason)
+                results.skipped += 1
+                daily_stats.record_skip("negative_ev")
+                best = None
+
             if best is None:
                 planned_size_usd = 0
             else:

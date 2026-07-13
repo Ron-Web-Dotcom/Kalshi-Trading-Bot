@@ -215,15 +215,15 @@ class DiscordAlerter:
         if not self.cfg.alert_on_trade:
             return
         mode_tag   = "📝 PAPER" if paper else "💰 LIVE"
-        max_payout = contracts * (100 - price) / 100
+        max_profit = contracts * (100 - price) / 100   # net gain if correct
         ev_s       = f" | EV {net_ev:+.1f}¢" if net_ev is not None else ""
         exp_s      = f" | Expected profit **${exp_profit:.2f}**" if exp_profit else ""
         display    = self._display_ticker(ticker, market_title)
 
         body = (
             f"**{display}**\n"
-            f"Side: **{side.upper()}** @ **{price:.0f}¢** | {contracts} contracts | Capital: **${size_dollars:.2f}**\n"
-            f"Max payout: **${max_payout:.2f}**{ev_s}{exp_s}\n"
+            f"Side: **{side.upper()}** @ **{price:.0f}¢** | {contracts} contracts | Capital in: **${size_dollars:.2f}**\n"
+            f"Max profit if correct: **${max_profit:.2f}**{ev_s}{exp_s}\n"
             f"Confidence: **{f'{ai_confidence:.0f}' if ai_confidence is not None else 'N/A'}%**\n"
         )
         if reasoning:
@@ -463,18 +463,14 @@ class DiscordAlerter:
         from src.utils.eastern_time import format_et, et_label
         now_et_str = format_et(fmt="%I:%M %p") + f" {et_label()}"
         color = 0x00C853 if total_pnl > 0 else 0xFF1744 if total_pnl < 0 else 0x888888
-        payload = self._embed(
-            title=f"📊 LIVE BID RESULTS — {total} closed  [{mode_tag}]  {now_et_str}",
-            description=(
-                f"**Net: ${pnl_sign}{total_pnl:.2f}** across {total} position{'s' if total > 1 else ''} "
-                f"({len(wins)} win{'s' if len(wins)!=1 else ''}, "
-                f"{len(losses)} loss{'es' if len(losses)!=1 else ''}, "
-                f"{len(exits)} opt-out{'s' if len(exits)!=1 else ''})\n\n"
-                + "\n".join(lines)
-            ),
-            color=color,
+        # Log to server only — not posted to Discord per user preference
+        logger.info(
+            "LIVE BID RESULTS [%s]: net=%s$%.2f  %dW/%dL/%d-exits  — %d positions",
+            mode_tag, pnl_sign, total_pnl,
+            len(wins), len(losses), len(exits), total,
         )
-        await self._post(payload)
+        for line in lines:
+            logger.info("  %s", line)
 
     async def live_trades_alert(self, trades: List[Dict], mode: str = "PAPER") -> None:
         """
@@ -779,12 +775,13 @@ class DiscordAlerter:
             f"Only showing live-event misses. Rotates every hour — no repeats.\n\n"
         )
 
-        payload = self._embed(
-            title=f"👀 MISSED TRADES — Live Events This Hour  [{mode_tag}]  {et_time}",
-            description=summary + "\n\n".join(lines),
-            color=0xFF6B00,
+        # Log to server only — not posted to Discord per user preference
+        logger.info(
+            "MISSED TRADES [%s] %s: %d live-event miss(es), ~$%.2f left on table",
+            mode_tag, et_time, len(misses), total_left,
         )
-        await self._post(payload)
+        for line in lines:
+            logger.info("  %s", line.replace("**", "").replace("_", ""))
         live_miss_tracker.mark_digest_sent([m["ticker"] for m in misses])
 
     async def near_miss_digest(self, paper: bool = True) -> None:
