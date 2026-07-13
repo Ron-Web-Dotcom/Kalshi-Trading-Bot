@@ -399,9 +399,9 @@ class TradingBot:
             if _secs_to_next > 60:
                 await asyncio.sleep(_secs_to_next)
             while not self._shutdown.is_set():
-                # Skip heartbeat during sleep hours (3–5 AM ET)
+                # Skip heartbeat during sleep hours (2:45–5 AM ET) — mirrors _sleep_mode_wait
                 _hb_et = _now_et()
-                if 3 <= _hb_et.hour < 5:
+                if (_hb_et.hour == 2 and _hb_et.minute >= 45) or (3 <= _hb_et.hour < 5):
                     await asyncio.sleep(300)
                     continue
                 try:
@@ -1134,6 +1134,9 @@ class TradingBot:
                         conf  = float(slot.get("confidence", 0) or 0)
                         price = float(slot.get("price_cents") or slot.get("yes_ask") or 0)
                         if not (5 <= price <= 95):
+                            continue
+                        # Same confidence floor as the trade engine — no low-conf live alerts
+                        if conf < MIN_CONF:
                             continue
                         pick = {**slot, "is_live": True, "ticker": ticker}
                         if _should_skip_alert(pick):
@@ -1892,6 +1895,19 @@ class TradingBot:
                             else:
                                 # Bot COULD have traded but daily limit / risk gate blocked it
                                 skip_reason = "daily trade limit or risk gate"
+
+                            # Record evaluation so Best Pick + WATCHING status shows in heartbeat
+                            try:
+                                from src.utils.daily_stats import stats as _lm_stats
+                                _lm_stats.record_evaluation(
+                                    ticker=ticker, action=action, side=side, confidence=conf,
+                                    net_ev=ev, true_prob=decision.true_prob, reasoning=decision.reasoning[:200],
+                                    title=title, platform=m.get("platform", "kalshi"),
+                                    close_time=m.get("close_time", ""),
+                                    yes_ask=float(m.get("yes_ask", 0)),
+                                )
+                            except Exception:
+                                pass
 
                             # Record as live miss regardless of outcome
                             # (we'll know if it was correct when it resolves)

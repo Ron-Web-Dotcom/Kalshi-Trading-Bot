@@ -656,6 +656,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             and m.get("ticker") not in arb_tickers
             and 2 < _tradeable_price(m) < 98
             and (m.get("title") or "")
+            and (_closes_today(m) or _closes_within(m, 2))  # today only — no tomorrow bleed
         ]
         if live_kalshi_raw and not live_kalshi:
             no_price = [m.get("ticker","?") for m in live_kalshi_raw if not (2 < _tradeable_price(m) < 98)]
@@ -667,6 +668,7 @@ async def run_trading_job(db=None, risk=None, scaler=None, arb_det=None) -> Trad
             and m.get("ticker") not in open_tickers
             and m.get("yes_ask", 0) > 1
             and (m.get("title") or "")
+            and (_closes_today(m) or _closes_within(m, 2))  # today only — no tomorrow bleed
         ]
 
         # Log confirmed live events separately from expiring markets

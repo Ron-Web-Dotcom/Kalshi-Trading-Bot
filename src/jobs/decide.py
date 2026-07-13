@@ -117,15 +117,15 @@ def _merge(ai_result: Optional[Dict], rule_result: Optional[Dict]) -> Optional[D
             winner = dict(ai_result)
             winner["confidence"] = min(99.0, ai_conf + bonus)
             winner["reasoning"]  = (
-                f"[AI+rule agree{'+' + str(int(bonus)) + '%' if bonus else ''}] "
+                f"[double-confirmed] "
                 + winner["reasoning"]
-                + f" | rule_engine: {rule_result.get('reasoning','')[:80]}"
+                + f" | rules: {rule_result.get('reasoning','')[:80]}"
             )
         else:
             winner = dict(rule_result)
             winner["confidence"] = min(99.0, rule_conf + bonus)
             winner["reasoning"]  = (
-                f"[AI+rule agree{'+' + str(int(bonus)) + '%' if bonus else ''}] "
+                f"[double-confirmed] "
                 + winner["reasoning"]
                 + f" | AI: {ai_result.get('reasoning','')[:80]}"
             )
@@ -351,6 +351,18 @@ async def make_decision_for_market(
 
 
 def _log_hold(market: Dict, context: str, min_conf: float, signals: List[Dict], confidence: float = 0) -> None:
-    """Log a HOLD — skipped silently, never surfaces in best pick."""
+    """Log a HOLD — recorded in daily_stats so Best Pick section shows evaluated markets."""
     ticker = market.get("ticker", "?")
     logger.debug("⬜ SKIP  %s  conf=%.0f%% (below %.0f%% threshold)", ticker, confidence, min_conf)
+    # Record HOLDs too so hourly heartbeat can show "WATCHING — X% conf" instead of "not yet evaluated"
+    try:
+        from src.utils.daily_stats import stats as _ds
+        _ds.record_evaluation(
+            ticker=ticker, action="HOLD", side="yes", confidence=confidence,
+            net_ev=None, true_prob=None, reasoning=f"Below {min_conf:.0f}% threshold",
+            title=market.get("title", ""), platform=market.get("platform", "kalshi"),
+            close_time=market.get("close_time", "") or market.get("expiration_time", ""),
+            yes_ask=float(market.get("yes_ask") or market.get("last_price") or 0),
+        )
+    except Exception:
+        pass

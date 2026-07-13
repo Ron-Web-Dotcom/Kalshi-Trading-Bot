@@ -1814,11 +1814,15 @@ class DiscordAlerter:
                           total_trades: int, scale_factor: float) -> None:
         color = 0x00FF00 if total_pnl >= 0 else 0xFF4444
         payload = self._embed(
-            title="📊 Performance Update",
-            description=f"Total PnL: **${total_pnl:+.2f}**",
+            title="📊 Performance Update (all-time trade log)",
+            description=(
+                f"Total PnL: **${total_pnl:+.2f}** | Scale factor updated to **{scale_factor:.2f}x**\n"
+                f"_Note: this rate covers ALL trade logs since bot inception. "
+                f"Track Record in hourly scan shows era-based rate (since last reset)._"
+            ),
             color=color,
             fields=[
-                {"name": "Win Rate", "value": f"{win_rate:.1f}%", "inline": True},
+                {"name": "All-time Win Rate", "value": f"{win_rate:.1f}%", "inline": True},
                 {"name": "Total Trades", "value": str(total_trades), "inline": True},
                 {"name": "Scale Factor", "value": f"{scale_factor:.2f}x", "inline": True},
             ],
