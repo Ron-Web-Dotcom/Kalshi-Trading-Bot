@@ -12,6 +12,17 @@ _ET = ZoneInfo("America/New_York")
 logger = logging.getLogger("trading.discord")
 
 
+import time as _time_module
+
+# Global Discord rate limiter — shared across ALL DiscordAlerter instances
+# Prevents rapid-fire posting when multiple loops fire simultaneously
+_DISCORD_LAST_POST:   float = 0.0
+_DISCORD_POST_COUNT:  int   = 0          # posts in the current minute window
+_DISCORD_WINDOW_START: float = 0.0
+_DISCORD_MIN_INTERVAL: float = 2.5       # minimum seconds between any two posts
+_DISCORD_MAX_PER_MIN:  int   = 12        # hard cap: 12 posts per 60s window
+
+
 class DiscordAlerter:
     def __init__(self):
         from src.config.settings import settings
@@ -20,9 +31,37 @@ class DiscordAlerter:
         self.enabled = self.cfg.discord_enabled
 
     async def _post(self, payload: Dict) -> bool:
+        global _DISCORD_LAST_POST, _DISCORD_POST_COUNT, _DISCORD_WINDOW_START
         if not self.enabled or not self.webhook_url:
             logger.debug("Discord not configured — skipping alert")
             return False
+
+        # ── Rate limiting ─────────────────────────────────────────────────────
+        now = _time_module.monotonic()
+
+        # Reset per-minute counter when window expires
+        if now - _DISCORD_WINDOW_START >= 60.0:
+            _DISCORD_POST_COUNT  = 0
+            _DISCORD_WINDOW_START = now
+
+        # Hard cap: if we've hit the per-minute limit, drop this post
+        if _DISCORD_POST_COUNT >= _DISCORD_MAX_PER_MIN:
+            logger.warning(
+                "Discord rate limit reached (%d/min) — dropping message to prevent spam",
+                _DISCORD_MAX_PER_MIN,
+            )
+            return False
+
+        # Enforce minimum interval between posts
+        since_last = now - _DISCORD_LAST_POST
+        if since_last < _DISCORD_MIN_INTERVAL:
+            wait = _DISCORD_MIN_INTERVAL - since_last
+            await asyncio.sleep(wait)
+
+        _DISCORD_LAST_POST  = _time_module.monotonic()
+        _DISCORD_POST_COUNT += 1
+        # ─────────────────────────────────────────────────────────────────────
+
         try:
             async def _send():
                 async with httpx.AsyncClient(timeout=4) as client:
@@ -34,7 +73,6 @@ class DiscordAlerter:
             logger.warning("Discord alert timed out (>5s) — trade cycle unaffected")
             return False
         except Exception as e:
-            # Log 400s at error level — these are usually "message too long"
             lvl = "error" if "400" in str(e) else "warning"
             getattr(logger, lvl)("Discord alert failed: %s", e)
             return False

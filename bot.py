@@ -96,7 +96,61 @@ class TradingBot:
         self._print_startup_banner()
         logger.info("Initializing database...")
         await self.db.initialize()
-        await self.db.cleanup_old_rows(days=90)
+
+        # ── Stats era reset — fresh W/L without deleting history ─────────────
+        import os as _os
+        if _os.environ.get("RESET_STATS", "").lower() in ("true", "1", "yes"):
+            _era_now = datetime.now(_ET).strftime("%Y-%m-%dT%H:%M:%S")
+            try:
+                await self.db.execute(
+                    "INSERT OR REPLACE INTO bot_config (key, value) VALUES ('era_start', ?)",
+                    (_era_now,)
+                )
+                logger.info("Stats era reset — W/L counting from %s", _era_now)
+            except Exception as _er:
+                logger.warning("Stats era reset failed: %s", _er)
+        else:
+            _existing = await self.db.fetchone("SELECT value FROM bot_config WHERE key='era_start'")
+            if not _existing:
+                _era_now = datetime.now(_ET).strftime("%Y-%m-%dT%H:%M:%S")
+                try:
+                    await self.db.execute(
+                        "INSERT OR REPLACE INTO bot_config (key, value) VALUES ('era_start', ?)",
+                        (_era_now,)
+                    )
+                    logger.info("First run — era_start set to %s", _era_now)
+                except Exception:
+                    pass
+
+        # ── Memory & storage safety ───────────────────────────────────────────
+        # Cap Polymarket cache at 2000 rows — purge oldest closed first
+        try:
+            await self.db.execute(
+                "DELETE FROM markets WHERE platform='polymarket' "
+                "AND status='closed' AND ticker NOT IN ("
+                "  SELECT ticker FROM markets WHERE platform='polymarket' "
+                "  ORDER BY fetched_at DESC LIMIT 2000"
+                ")"
+            )
+            await self.db.execute(
+                "DELETE FROM markets WHERE platform='polymarket' "
+                "AND ticker NOT IN ("
+                "  SELECT ticker FROM markets WHERE platform='polymarket' "
+                "  ORDER BY fetched_at DESC LIMIT 2000"
+                ")"
+            )
+            logger.info("Market cache capped at 2000 Polymarket rows")
+        except Exception as _mc:
+            logger.debug("Market cache cap: %s", _mc)
+
+        # Prune old data and VACUUM to reclaim disk
+        await self.db.cleanup_old_rows(days=30)
+        try:
+            await self.db.execute("VACUUM")
+            logger.info("DB VACUUM complete")
+        except Exception:
+            pass
+
         logger.info("Running initial market ingestion...")
         try:
             count = await run_ingestion(self.db)
@@ -282,7 +336,8 @@ class TradingBot:
 
         async def ingest_loop():
             """Kalshi ingestion every 3 min; Polymarket every 30 min to conserve proxy bandwidth."""
-            _poly_last = 0.0
+            _poly_last   = 0.0
+            _vacuum_last = 0.0
             import time as _time
             while not self._shutdown.is_set():
                 await asyncio.sleep(INGEST_INTERVAL)
@@ -292,6 +347,24 @@ class TradingBot:
                     count = await run_ingestion(self.db, run_polymarket=_run_poly)
                     if _run_poly:
                         _poly_last = _time.monotonic()
+                        # After every Poly ingest, enforce 2000-row cap to prevent memory growth
+                        try:
+                            await self.db.execute(
+                                "DELETE FROM markets WHERE platform='polymarket' "
+                                "AND ticker NOT IN ("
+                                "  SELECT ticker FROM markets WHERE platform='polymarket' "
+                                "  ORDER BY fetched_at DESC LIMIT 2000"
+                                ")"
+                            )
+                        except Exception:
+                            pass
+                    # Hourly VACUUM to keep SQLite file small
+                    if _now - _vacuum_last >= 3600:
+                        try:
+                            await self.db.execute("VACUUM")
+                            _vacuum_last = _time.monotonic()
+                        except Exception:
+                            pass
                     logger.info("Market refresh: %d markets", count)
                 except Exception as e:
                     logger.error("Ingest error: %s", e)
@@ -321,12 +394,16 @@ class TradingBot:
             from src.alerts.discord import DiscordAlerter
             from src.utils.eastern_time import now_et as _now_et
             _et_now = _now_et()
-            # Sleep until the next top-of-hour; if we're within 60s, fire right away
             _secs_into_hour = _et_now.minute * 60 + _et_now.second
             _secs_to_next   = 3600 - _secs_into_hour
             if _secs_to_next > 60:
                 await asyncio.sleep(_secs_to_next)
             while not self._shutdown.is_set():
+                # Skip heartbeat during sleep hours (3–5 AM ET)
+                _hb_et = _now_et()
+                if 3 <= _hb_et.hour < 5:
+                    await asyncio.sleep(300)
+                    continue
                 try:
                     discord = DiscordAlerter()
                     today = _now_et().date().isoformat()
