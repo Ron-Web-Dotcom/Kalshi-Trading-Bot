@@ -61,14 +61,10 @@ JUNK_PHRASES = [
     "say 'merch'", "say 'subscribe'", "say 'like and subscribe'",
     "during his next youtube", "during his next video",
     "youtube video", "in his next video",
-    # Crypto Up/Down scalp markets — highly volatile, consistent stop-losses
-    "bitcoin up or down", "btc up or down",
-    "ethereum up or down", "eth up or down",
-    "solana up or down", "sol up or down",
-    "xrp up or down", "doge up or down",
-    "hype up or down", "bnb up or down",
+    # Up/Down scalp markets — all assets (crypto, stocks, commodities) — noisy, low edge
+    "up or down",
     # Multi-week / tournament-winner markets in today's pool
-    "win the 2026 wimbledon", "win wimbledon",
+    "win the 2026 wimbledon", "win wimbledon", "wimbledon winner",
     "win the 2026 us open", "win the 2026 french open",
     "win the 2026 australian open",
     "lpl win msi", "lck win msi", "win msi 2026",

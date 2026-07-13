@@ -1132,11 +1132,16 @@ class TradingBot:
                     # 1. All active live slots — any open position in live manager
                     for ticker, slot in list(_ls.items()):
                         conf  = float(slot.get("confidence", 0) or 0)
+                        # Use entry price for display — but skip if market is already resolving
                         price = float(slot.get("price_cents") or slot.get("yes_ask") or 0)
                         if not (5 <= price <= 95):
                             continue
                         # Same confidence floor as the trade engine — no low-conf live alerts
                         if conf < MIN_CONF:
+                            continue
+                        # Skip markets past their close time (resolving now / price collapsed)
+                        _slot_hl = _hours_left(slot)
+                        if _slot_hl != -1 and _slot_hl <= 0:
                             continue
                         pick = {**slot, "is_live": True, "ticker": ticker}
                         if _should_skip_alert(pick):
@@ -1190,18 +1195,20 @@ class TradingBot:
                             min_c = 88                # far out — 88%+ only
                         if conf < min_c:
                             continue
-                        # Re-alert if: never seen, price moved ≥5¢, or timing bucket changed
-                        # (e.g. market moved from "future" → "tomorrow" → "today")
+                        # Re-alert if: never seen, timing bucket changed, or ≥60 min since last
+                        # (60-min cooldown prevents live-match price-tick spam)
                         def _hl_bucket(h: float) -> str:
                             if h <= 24: return "today"
                             if h <= 48: return "tomorrow"
                             return "future"
                         prev = _alerted.get(ticker, {})
-                        prev_price = float(prev.get("pick", {}).get("price_cents") or prev.get("pick", {}).get("yes_ask") or 0)
-                        cur_price  = float(ev.get("price_cents") or ev.get("yes_ask") or 0)
-                        price_moved    = cur_price > 0 and prev_price > 0 and abs(cur_price - prev_price) >= 5
+                        _prev_alerted_at = prev.get("alerted_at")
+                        _mins_since = (
+                            (now_et - _prev_alerted_at).total_seconds() / 60
+                            if _prev_alerted_at else float("inf")
+                        )
                         timing_changed = _hl_bucket(hl) != _hl_bucket(float(prev.get("hl", float("inf"))))
-                        if ticker not in _alerted or price_moved or timing_changed:
+                        if ticker not in _alerted or timing_changed or _mins_since >= 60:
                             pick = {**ev, "is_live": hl <= 24}
                             new_picks.append(pick)
                             _alerted[ticker] = {

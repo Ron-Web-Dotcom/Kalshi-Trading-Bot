@@ -543,31 +543,10 @@ async def _send_resolution_alert(discord, slot: Dict, final_price: Optional[floa
 
         max_payout = contracts * (100 - entry) / 100  # max profit = contracts × (1 - entry_cost)
 
-        payload = {
-            "embeds": [{
-                "title": f"{result_emoji} LIVE RESULT — {result_label}",
-                "description": f"{plat_icon} **{title[:90]}**",
-                "color": color,
-                "fields": [
-                    {"name": "📌 Ticker",      "value": ticker[:30],        "inline": True},
-                    {"name": "🎯 Our Bet",     "value": f"BUY {side}",      "inline": True},
-                    {"name": "🏦 Platform",    "value": plat.capitalize(),   "inline": True},
-                    {"name": "💵 Capital In",  "value": f"${size_usd:.2f}", "inline": True},
-                    {"name": "📈 Entry Price", "value": f"{entry:.0f}¢",    "inline": True},
-                    {"name": "🏁 Exit Price",  "value": exit_str,           "inline": True},
-                    {"name": "💰 Result",      "value": pnl_line,           "inline": True},
-                    {"name": "🎰 Max Payout",  "value": f"${max_payout:.2f}", "inline": True},
-                    {"name": "🤖 AI Conf",     "value": f"{conf:.0f}%",     "inline": True},
-                ],
-                "timestamp": _now_et().isoformat(),
-                "footer": {"text": f"Opted in — held to resolution • {et_time} • Scanning for next opportunity…"},
-            }]
-        }
-        await discord._post(payload)
         logger.info(
-            "LIVE RESULT %s | %s | entry=%.0f¢ exit=%s pnl=%s",
+            "LIVE RESULT %s | %s | entry=%.0f¢ exit=%s pnl=%s | %s",
             ticker, "WIN" if won else "LOSS" if won is False else "PENDING",
-            entry, exit_str, pnl_line,
+            entry, exit_str, pnl_line, result_label,
         )
     except Exception as e:
         logger.warning("Resolution alert error: %s", e)
