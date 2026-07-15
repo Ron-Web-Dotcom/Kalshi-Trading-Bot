@@ -354,6 +354,14 @@ async def _fetch_kalshi_live(days: int = 3) -> tuple:
             if not cursor or not batch:
                 break
 
+        def _cents(v):
+            """Convert Kalshi price to cents (handles fractions 0-1 or integers 1-99)."""
+            try:
+                f = float(v)
+                return round(f * 100, 1) if 0 < f < 1.0 else round(f, 1)
+            except (TypeError, ValueError):
+                return 0.0
+
         result = []
         for m in all_raw:
             ct = m.get("close_time") or m.get("expiration_time") or ""
@@ -362,12 +370,14 @@ async def _fetch_kalshi_live(days: int = 3) -> tuple:
                 continue
             if not (today <= dt.date() <= end_date):
                 continue
+            yes_ask = _cents(m.get("yes_ask") or m.get("last_price") or m.get("yes_bid") or 0)
+            no_ask  = _cents(m.get("no_ask")  or m.get("no_bid")  or 0) or round(100 - yes_ask, 1)
             result.append({
                 "ticker":     m.get("ticker", ""),
                 "title":      m.get("title", ""),
                 "close_time": ct,
-                "yes_ask":    float(m.get("yes_ask") or 0),
-                "no_ask":     float(m.get("no_ask")  or 0),
+                "yes_ask":    yes_ask,
+                "no_ask":     no_ask if yes_ask else 0.0,
                 "volume":     float(m.get("volume")  or 0),
                 "status":     m.get("status", "open"),
                 "platform":   "kalshi",
@@ -427,32 +437,43 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
                         continue
                     seen.add(key)
 
-                    # Parse yes/no prices
+                    def _p(v):
+                        try:
+                            f = float(v)
+                            return round(f * 100, 1) if 0 < f <= 1.0 else round(f, 1)
+                        except (TypeError, ValueError):
+                            return 0.0
+
+                    # Parse yes/no prices from tokens list
                     yes_ask = no_ask = 0.0
                     tokens  = m.get("tokens") or []
                     for tok in tokens:
                         if not isinstance(tok, dict):
                             continue
                         name  = (tok.get("outcome") or tok.get("name") or "").lower()
-                        price = float(tok.get("price") or 0) * 100
+                        price = _p(tok.get("price") or 0)
                         if "yes" in name:
                             yes_ask = price
                         elif "no" in name:
                             no_ask  = price
 
-                    # Fallback: outcomePrices list of "0.xx" strings
+                    # Fallback: outcomePrices list ["0.65", "0.35"]
                     if yes_ask == 0:
                         op = m.get("outcomePrices") or []
                         if len(op) >= 2:
                             try:
-                                yes_ask = float(op[0]) * 100
-                                no_ask  = float(op[1]) * 100
+                                yes_ask = _p(op[0])
+                                no_ask  = _p(op[1])
                             except (ValueError, TypeError):
                                 pass
 
+                    # Final fallback: lastTradePrice
                     if yes_ask == 0:
-                        lp = m.get("lastTradePrice") or m.get("last_trade_price") or 0
-                        yes_ask = float(lp) * 100
+                        yes_ask = _p(m.get("lastTradePrice") or m.get("last_trade_price") or 0)
+
+                    # Derive no_ask from yes_ask if still missing
+                    if yes_ask > 0 and no_ask == 0:
+                        no_ask = round(100 - yes_ask, 1)
 
                     ticker = m.get("conditionId") or m.get("id") or ""
                     volume = 0.0
@@ -507,7 +528,10 @@ async def _run(args):
     print(f"  Now: {_now_et().strftime('%A %B %d %Y %I:%M:%S %p ET')}")
 
     db_markets, ai_map = _load_db(db_path) if db_path else ({}, {})
-    print(f"  Bot evaluations in DB today: {len(ai_map)} tickers")
+    if ai_map:
+        print(f"  Bot evaluations in DB today: {len(ai_map)} tickers")
+    else:
+        print("  Bot evaluations in DB today: 0  (CONF will show '-' — bot hasn't evaluated these markets yet or is stopped)")
 
     platforms = ["kalshi", "polymarket"]
     if args.platform:
