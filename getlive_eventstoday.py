@@ -7,7 +7,7 @@ Falls back to DB cache if live API unavailable (bot stopped).
 Usage (on VPS):
   cd /root/trading-bot
   python3 getlive_eventstoday.py
-  python3 getlive_eventstoday.py --all           # include tomorrow's markets too
+  python3 getlive_eventstoday.py --days 3        # look ahead N days (default 3)
   python3 getlive_eventstoday.py --platform kalshi
   python3 getlive_eventstoday.py --platform polymarket
   python3 getlive_eventstoday.py --all-markets   # show junk/skipped rows too
@@ -17,6 +17,7 @@ Usage (on VPS):
 
 import argparse
 import asyncio
+import shutil
 import sqlite3
 import os
 import sys
@@ -25,17 +26,18 @@ from zoneinfo import ZoneInfo
 
 _ET = ZoneInfo("America/New_York")
 
-# ── Column widths — designed for 132-char terminal ────────────────────────────
-_NUM_W    = 3
-_TITLE_W  = 50
-_CLOSE_W  = 21
-_YES_W    = 5
-_NO_W     = 5
-_VOL_W    = 8
-_CONF_W   = 7
-_BID_W    = 9
-_REASON_W = 22
-# Total = 3+50+21+5+5+8+7+9+22 + separators = ~140 chars — pipe-separated
+# ── Column widths — auto-scaled to terminal width at runtime ──────────────────
+# Fixed columns: #(3) CLOSES(21) YES(5) NO(5) VOL(8) CONF(7) BID(9) REASON(20)
+# = 78 fixed chars + 8 separators*3 + 2 outer pipes = 78 + 26 = 104 overhead
+# Remaining space goes to TITLE.
+_FIXED_OVERHEAD = 78 + 26   # fixed cols + all pipe+space padding
+
+def _col_widths(term_w: int = 0) -> tuple:
+    if term_w <= 0:
+        term_w = shutil.get_terminal_size(fallback=(120, 40)).columns
+    title_w  = max(28, min(60, term_w - _FIXED_OVERHEAD))
+    reason_w = 20
+    return (3, title_w, 21, 5, 5, 8, 7, 9, reason_w)
 
 # ── Sub-market patterns to skip (keep only main outcomes) ─────────────────────
 _SUBMARKET_SKIP = [
@@ -88,10 +90,6 @@ def _closes_today(ct_str: str) -> bool:
     dt = _parse_close(ct_str)
     return dt is not None and dt.date() == _now_et().date()
 
-
-def _closes_tomorrow(ct_str: str) -> bool:
-    dt = _parse_close(ct_str)
-    return dt is not None and dt.date() == (_now_et() + timedelta(days=1)).date()
 
 
 def _fmt_close(ct_str: str) -> str:
@@ -191,7 +189,9 @@ def _drow(vals: list, widths: list) -> str:
 def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
                  show_skip: bool, source: str) -> None:
     icon = "KALSHI" if platform == "kalshi" else "POLYMARKET"
-    bar  = "=" * 132
+    widths = _col_widths()
+    term_w = sum(widths) + len(widths) * 3 + 1   # each col: " val " + "|"
+    bar    = "=" * term_w
     print(f"\n{bar}")
     print(f"  [{icon}]  {source}  —  {_now_et().strftime('%a %b %d %Y %I:%M %p ET')}")
     print(bar)
@@ -200,11 +200,8 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         print("  No markets found for today.\n")
         return
 
-    cols   = ["#",    "TITLE",   "CLOSES (ET)", "YES",  "NO",  "VOL",
-               "CONF", "BID?",   "REASON"]
-    widths = [_NUM_W, _TITLE_W, _CLOSE_W,      _YES_W, _NO_W, _VOL_W,
-               _CONF_W, _BID_W, _REASON_W]
-    div = _div(widths)
+    cols = ["#", "TITLE", "CLOSES (ET)", "YES", "NO", "VOL", "CONF", "BID?", "REASON"]
+    div  = _div(widths)
 
     print(div)
     print(_hrow(cols, widths))
@@ -256,28 +253,31 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         reason_col = gate_reason if gate == "SKIP" else bid_reason
         conf_str   = f"{bot_conf:.0f}%" if bot_conf > 0 else "-"
 
+        _nw, _tw, _cw, _yw, _now2, _vw, _cfw, _bw, _rw = widths
         vals = [
             str(i),
-            _trunc(title, _TITLE_W),
-            _trunc(close_str, _CLOSE_W),
+            _trunc(title, _tw),
+            _trunc(close_str, _cw),
             f"{yes_ask:.0f}c" if yes_ask else "-",
             f"{no_ask:.0f}c"  if no_ask  else "-",
             f"{volume:.0f}"   if volume   else "-",
             conf_str,
             bid_col,
-            _trunc(reason_col, _REASON_W),
+            _trunc(reason_col, _rw),
         ]
         print(_drow(vals, widths))
 
         # Bot reasoning on second line (only when evaluated)
         if bot_rsn and gate == "PASS":
-            print(f"     > {bot_rsn[:124]}")
+            rsn_w = sum(widths) + len(widths) * 3 - 6
+            print(f"     > {bot_rsn[:rsn_w]}")
 
     print(div)
     print(
         f"  Shown: {shown}  | [BID] {bid_count}  | [WATCH] {watch_count}  | [SKIP] {skip_count}"
         + ("  (--all-markets to show skipped)" if skip_count and not show_skip else "")
     )
+    print(bar)
     print()
 
 
@@ -335,14 +335,14 @@ def _load_db(db_path: str) -> tuple:
 # Live API fetchers
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _fetch_kalshi_live(include_tomorrow: bool) -> tuple:
-    """Fetch ALL of today's Kalshi markets across all categories via pagination."""
+async def _fetch_kalshi_live(days: int = 3) -> tuple:
+    """Fetch Kalshi markets closing within the next `days` days."""
     try:
         from src.clients.kalshi_client import KalshiClient
         client = KalshiClient()
 
-        today = _now_et().date()
-        tom   = today + timedelta(days=1)
+        today    = _now_et().date()
+        end_date = today + timedelta(days=days - 1)
 
         all_raw: list = []
         cursor = ""
@@ -360,9 +360,7 @@ async def _fetch_kalshi_live(include_tomorrow: bool) -> tuple:
             dt = _parse_close(ct)
             if dt is None:
                 continue
-            if not include_tomorrow and dt.date() != today:
-                continue
-            if include_tomorrow and dt.date() not in (today, tom):
+            if not (today <= dt.date() <= end_date):
                 continue
             result.append({
                 "ticker":     m.get("ticker", ""),
@@ -381,15 +379,13 @@ async def _fetch_kalshi_live(include_tomorrow: bool) -> tuple:
         return [], f"API error: {e}"
 
 
-async def _fetch_poly_live(include_tomorrow: bool) -> tuple:
-    """Fetch ALL of today's Polymarket markets via pagination of Gamma API."""
+async def _fetch_poly_live(days: int = 3) -> tuple:
+    """Fetch Polymarket markets closing within the next `days` days via Gamma API."""
     try:
         import httpx
         _now_et_dt = _now_et()
-        _eod_et    = _now_et_dt.replace(hour=23, minute=59, second=59)
-        if include_tomorrow:
-            _eod_et = _eod_et + timedelta(days=1)
-        _now_utc = _now_et_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _eod_et    = _now_et_dt.replace(hour=23, minute=59, second=59) + timedelta(days=days - 1)
+        _now_utc   = _now_et_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         _eod_utc = _eod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         GAMMA  = "https://gamma-api.polymarket.com"
@@ -524,18 +520,20 @@ async def _run(args):
         if not args.db_only:
             print(f"\n  Fetching {plat.upper()} from live API...", end="", flush=True)
             if plat == "kalshi":
-                markets, source = await _fetch_kalshi_live(args.all)
+                markets, source = await _fetch_kalshi_live(args.days)
             else:
-                markets, source = await _fetch_poly_live(args.all)
+                markets, source = await _fetch_poly_live(args.days)
             print(f" {source}")
 
         # Fallback to DB cache
         if not markets:
-            cache    = db_markets.get(plat, [])
-            filtered = [
+            cache     = db_markets.get(plat, [])
+            cutoff    = _now_et().date() + timedelta(days=args.days - 1)
+            filtered  = [
                 r for r in cache
-                if _closes_today(r.get("close_time") or "")
-                or (args.all and _closes_tomorrow(r.get("close_time") or ""))
+                if (lambda dt: dt is not None and _now_et().date() <= dt.date() <= cutoff)(
+                    _parse_close(r.get("close_time") or "")
+                )
             ]
             if filtered:
                 markets = filtered
@@ -550,11 +548,11 @@ async def _run(args):
         _print_table(plat, markets, ai_map, args.min_conf, args.all_markets, source)
 
     print("  Tips:")
-    print("    --all-markets     show junk/skipped rows with reason")
-    print("    --all             include tomorrow's markets")
-    print("    --platform kalshi | polymarket   one platform only")
-    print("    --db-only         skip live API, use DB cache only")
-    print("    --min-conf 80     change BID threshold (default 75)\n")
+    print("    --all-markets       show junk/skipped rows with reason")
+    print("    --days 1            today only  |  --days 7  full week")
+    print("    --platform kalshi | polymarket  one platform only")
+    print("    --db-only           skip live API, use DB cache only")
+    print("    --min-conf 80       change BID threshold (default 75)\n")
 
 
 def main():
@@ -562,7 +560,8 @@ def main():
         description="Show today's live events with bot confidence + BID/WATCH/SKIP"
     )
     parser.add_argument("--platform",    choices=["kalshi", "polymarket"])
-    parser.add_argument("--all",         action="store_true", help="Include tomorrow too")
+    parser.add_argument("--days",        type=int, default=3,
+                        help="Look-ahead window in days (default 3, covers today through day N)")
     parser.add_argument("--all-markets", action="store_true", help="Show junk/skipped rows")
     parser.add_argument("--min-conf",    type=float, default=75.0)
     parser.add_argument("--db",          default=None, help="Path to trading_system.db")
