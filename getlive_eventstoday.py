@@ -7,7 +7,7 @@ Falls back to DB cache if live API unavailable (bot stopped).
 Usage (on VPS):
   cd /root/trading-bot
   python3 getlive_eventstoday.py
-  python3 getlive_eventstoday.py --days 3        # look ahead N days (default 3)
+  python3 getlive_eventstoday.py --days 3        # look ahead N days (default 1 = today)
   python3 getlive_eventstoday.py --platform kalshi
   python3 getlive_eventstoday.py --platform polymarket
   python3 getlive_eventstoday.py --all-markets   # show junk/skipped rows too
@@ -549,7 +549,7 @@ async def _run(args):
 
     print("  Tips:")
     print("    --all-markets       show junk/skipped rows with reason")
-    print("    --days 1            today only  |  --days 7  full week")
+    print("    --days 3            today + next 2 days  |  --days 7  full week")
     print("    --platform kalshi | polymarket  one platform only")
     print("    --db-only           skip live API, use DB cache only")
     print("    --min-conf 80       change BID threshold (default 75)\n")
@@ -560,8 +560,8 @@ def main():
         description="Show today's live events with bot confidence + BID/WATCH/SKIP"
     )
     parser.add_argument("--platform",    choices=["kalshi", "polymarket"])
-    parser.add_argument("--days",        type=int, default=3,
-                        help="Look-ahead window in days (default 3, covers today through day N)")
+    parser.add_argument("--days",        type=int, default=1,
+                        help="Look-ahead window in days (default 1 = today only)")
     parser.add_argument("--all-markets", action="store_true", help="Show junk/skipped rows")
     parser.add_argument("--min-conf",    type=float, default=75.0)
     parser.add_argument("--db",          default=None, help="Path to trading_system.db")
