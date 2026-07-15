@@ -170,8 +170,7 @@ def _bid_label(gate: str, bot_action: str, bot_conf: float, min_conf: float, hl:
     if bot_action == "HOLD" and bot_conf > 0:
         return "WATCH", f"HOLD {bot_conf:.0f}%"
 
-    needed = 70 if hl <= 6 else (75 if hl <= 24 else 88)
-    return "WATCH", f"need {needed:.0f}% conf"
+    return "WATCH", "not evaluated"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -208,6 +207,16 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
     if not rows:
         print("  No markets found for today.\n")
         return
+
+    # Dedup rows by ticker before rendering
+    _seen: set = set()
+    _deduped = []
+    for r in rows:
+        key = r.get("ticker") or r.get("title", "")
+        if key not in _seen:
+            _seen.add(key)
+            _deduped.append(r)
+    rows = _deduped
 
     cols = ["#", "TITLE", "CLOSES (ET)", "YES", "NO", "VOL", "CONF", "BID?", "REASON"]
     div  = _div(widths)
@@ -396,6 +405,16 @@ async def _fetch_kalshi_live(days: int = 3) -> tuple:
                 "status":     m.get("status", "open"),
                 "platform":   "kalshi",
             })
+
+        # Dedup by ticker (open + finalized passes can return same market twice)
+        seen_tickers: set = set()
+        deduped = []
+        for r in result:
+            t = r.get("ticker", "")
+            if t and t not in seen_tickers:
+                seen_tickers.add(t)
+                deduped.append(r)
+        result = deduped
 
         result.sort(key=lambda r: (r.get("close_time") or "", -float(r.get("volume") or 0)))
         return result, f"LIVE API — {len(result)} markets (from {len(all_raw)} total)"
