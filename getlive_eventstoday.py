@@ -1,8 +1,8 @@
 """
 getlive_eventstoday.py — fetch live markets direct from Kalshi + Polymarket APIs
-and display them in two tables with bot confidence, reasoning, and BID/WATCH/SKIP.
+and display them in compact tables with bot confidence, reasoning, and BID/WATCH/SKIP.
 
-Falls back to DB cache if an API is unavailable (bot stopped, no credentials, etc.)
+Falls back to DB cache if an API is unavailable.
 
 Usage (on VPS):
   cd /root/trading-bot
@@ -25,15 +25,16 @@ from zoneinfo import ZoneInfo
 
 _ET = ZoneInfo("America/New_York")
 
-# ── Column widths ─────────────────────────────────────────────────────────────
-_TITLE_W  = 50
-_CLOSE_W  = 30
-_PRICE_W  = 6
+# ── Compact column widths (fits ~120 char terminal) ───────────────────────────
+_NUM_W    = 3
+_TITLE_W  = 44
+_CLOSE_W  = 22   # "07/15 02:00 PM (47m)"
+_YES_W    = 5
+_NO_W     = 5
 _VOL_W    = 7
-_CONF_W   = 8
-_BID_W    = 11
-_REASON_W = 28
-_NOTES_W  = 40
+_CONF_W   = 7
+_BID_W    = 9    # "✅ BID YES" / "👀 WATCH" / "⛔ SKIP"
+_REASON_W = 24   # gate reason or bid reason
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -74,28 +75,35 @@ def _closes_tomorrow(ct_str: str) -> bool:
 
 
 def _fmt_close(ct_str: str) -> str:
+    """Short close string: '07/15 02:00 PM (47m)' or '07/15 02:00 PM (3.2h)'"""
     dt = _parse_close(ct_str)
     if dt is None:
         return "unknown"
     hl = _hours_left(ct_str)
     if hl < 0:
-        urgency = "CLOSED"
+        tag = "CLOSED"
     elif hl < 1:
-        urgency = f"{hl*60:.0f}m left"
+        tag = f"{hl*60:.0f}m"
     else:
-        urgency = f"{hl:.1f}h left"
-    return f"{dt.strftime('%m/%d %I:%M %p')} ET  ({urgency})"
+        tag = f"{hl:.1f}h"
+    return f"{dt.strftime('%m/%d %I:%M %p')} ({tag})"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Gate check — mirrors bot's pre-AI quality gates
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Kalshi financial sub-market patterns — not real events, just options strikes
+_KALSHI_JUNK_TITLE = [
+    "target price:", "yes $", "no $", "or above,yes", "or above,no",
+    "$0.0", "$1,9", "above,yes", "above,no",
+]
+
 def _gate_check(row: dict) -> tuple:
     """Returns (gate_result, reason)  gate_result: PASS | SKIP | CLOSED"""
     from src.utils.junk_filter import is_junk
 
-    title   = row.get("title") or ""
+    title   = (row.get("title") or "").strip()
     yes_ask = float(row.get("yes_ask") or 0)
     volume  = float(row.get("volume") or 0)
     ct      = row.get("close_time") or ""
@@ -104,15 +112,24 @@ def _gate_check(row: dict) -> tuple:
     if hl < 0:
         return "CLOSED", "already closed"
     if 0 <= hl < 0.5:
-        return "SKIP", "resolving now (<30m)"
+        return "SKIP", "resolving (<30m)"
+
+    # Kalshi financial sub-market junk (options-style price targets)
+    title_l = title.lower()
+    for pat in _KALSHI_JUNK_TITLE:
+        if pat.lower() in title_l:
+            return "SKIP", "options sub-market"
+
     if is_junk(title):
         return "SKIP", "junk filter"
     if volume > 0 and volume < 50:
-        return "SKIP", f"vol={volume:.0f} < 50"
+        return "SKIP", f"vol={volume:.0f}<50"
     if yes_ask > 0 and yes_ask < 15:
         return "SKIP", f"long-shot {yes_ask:.0f}¢"
     if yes_ask > 0 and yes_ask > 95:
         return "SKIP", f"near-certain {yes_ask:.0f}¢"
+    if not ct:
+        return "SKIP", "no close_time"
     return "PASS", ""
 
 
@@ -122,24 +139,23 @@ def _gate_check(row: dict) -> tuple:
 
 def _bid_label(gate: str, bot_action: str, bot_conf: float, min_conf: float, hl: float) -> tuple:
     if gate == "CLOSED":
-        return "🔒 CLOSED", "already closed"
+        return "CLOSED", "already closed"
     if gate == "SKIP":
-        return "⛔ SKIP", ""
+        return "SKIP", ""
 
     if bot_action == "BUY" and bot_conf >= min_conf:
-        return "✅ BID YES", f"conf={bot_conf:.0f}%"
+        return "BID YES", f"conf={bot_conf:.0f}%"
     if bot_action == "BUY" and bot_conf > 0:
-        return "👀 WATCH", f"BUY conf={bot_conf:.0f}% < {min_conf:.0f}%"
+        return "WATCH", f"BUY {bot_conf:.0f}%<{min_conf:.0f}%"
     if bot_action == "HOLD" and bot_conf > 0:
-        return "👀 WATCH", f"HOLD conf={bot_conf:.0f}%"
+        return "WATCH", f"HOLD {bot_conf:.0f}%"
 
-    # Not evaluated — show what threshold is needed
     needed = 70 if hl <= 6 else (75 if hl <= 24 else 88)
-    return "👀 WATCH", f"not evaluated (need {needed:.0f}%)"
+    return "WATCH", f"need {needed:.0f}% conf"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Table helpers
+# Table rendering
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _trunc(s: str, w: int) -> str:
@@ -159,25 +175,23 @@ def _drow(vals: list, widths: list) -> str:
     return "|" + "|".join(f" {str(v).ljust(w)} " for v, w in zip(vals, widths)) + "|"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Print one platform table
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float, show_skip: bool, source: str) -> None:
-    icon = "🟦 KALSHI" if platform == "kalshi" else "🟣 POLYMARKET"
-    print(f"\n{'═'*130}")
-    print(f"  {icon}  [{source}]  —  {_now_et().strftime('%A %b %d %Y %I:%M %p ET')}")
-    print(f"{'═'*130}")
+def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
+                 show_skip: bool, source: str) -> None:
+    icon = "KALSHI" if platform == "kalshi" else "POLYMARKET"
+    bar  = "=" * 120
+    print(f"\n{bar}")
+    print(f"  [{icon}]  {source}  —  {_now_et().strftime('%a %b %d %Y %I:%M %p ET')}")
+    print(bar)
 
     if not rows:
         print("  No markets found for today.\n")
         return
 
-    cols = ["#", "TITLE", "CLOSES (ET)", "YES", "NO", "VOL",
-            "BOT CONF", "BID?", "GATE / REASON", "BOT REASONING (latest)"]
-    widths = [3, _TITLE_W, _CLOSE_W, _PRICE_W, _PRICE_W, _VOL_W,
-              _CONF_W, _BID_W, _REASON_W, _NOTES_W]
-    div = _div(widths)
+    cols   = ["#",    "TITLE",    "CLOSES (ET)", "YES",  "NO",   "VOL",
+               "CONF", "BID?",    "REASON"]
+    widths = [_NUM_W, _TITLE_W,  _CLOSE_W,      _YES_W, _NO_W,  _VOL_W,
+               _CONF_W, _BID_W,  _REASON_W]
+    div    = _div(widths)
 
     print(div)
     print(_hrow(cols, widths))
@@ -198,52 +212,68 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float, show_
         no_ask  = float(row.get("no_ask")  or 0)
         volume  = float(row.get("volume")  or 0)
         hl      = _hours_left(ct)
+        title   = (row.get("title") or ticker or "").strip()
 
         ai       = ai_map.get(ticker) or {}
         bot_act  = (ai.get("action") or "").upper()
         bot_conf = float(ai.get("confidence") or 0)
         bot_rsn  = (ai.get("reasoning") or "").strip()
 
-        label, bid_reason = _bid_label(gate, bot_act, bot_conf, min_conf, hl)
+        bid, bid_reason = _bid_label(gate, bot_act, bot_conf, min_conf, hl)
 
         if gate == "SKIP":
             skip_count += 1
-        elif "BID YES" in label:
+        elif bid == "BID YES":
             bid_count += 1
-        elif "WATCH" in label:
+        elif bid == "WATCH":
             watch_count += 1
 
         shown += 1
 
-        # Urgency prefix
+        # Urgency marker on close time
+        close_raw = _fmt_close(ct)
         if gate not in ("CLOSED", "SKIP") and 0 < hl <= 1:
-            close_str = f"⚡ {_fmt_close(ct)}"
+            close_str = "!!" + close_raw
         elif gate not in ("CLOSED", "SKIP") and 0 < hl <= 3:
-            close_str = f"🔴 {_fmt_close(ct)}"
+            close_str = "! " + close_raw
         else:
-            close_str = f"   {_fmt_close(ct)}"
+            close_str = "  " + close_raw
+
+        # BID column — add indicator
+        if bid == "BID YES":
+            bid_col = "[BID YES]"
+        elif bid == "WATCH":
+            bid_col = "[WATCH]"
+        elif bid == "CLOSED":
+            bid_col = "[CLOSED]"
+        else:
+            bid_col = "[SKIP]"
 
         reason_col = gate_reason if gate == "SKIP" else bid_reason
         conf_str   = f"{bot_conf:.0f}%" if bot_conf > 0 else "—"
 
         vals = [
             str(i),
-            _trunc(row.get("title") or ticker, _TITLE_W),
+            _trunc(title, _TITLE_W),
             _trunc(close_str, _CLOSE_W),
-            f"{yes_ask:.0f}¢" if yes_ask else "—",
-            f"{no_ask:.0f}¢"  if no_ask  else "—",
+            f"{yes_ask:.0f}c" if yes_ask else "—",
+            f"{no_ask:.0f}c"  if no_ask  else "—",
             f"{volume:.0f}"   if volume   else "—",
-            conf_str.ljust(_CONF_W),
-            _trunc(label, _BID_W),
+            conf_str,
+            bid_col,
             _trunc(reason_col, _REASON_W),
-            _trunc(bot_rsn, _NOTES_W),
         ]
         print(_drow(vals, widths))
 
+        # Second line: bot reasoning (only if evaluated)
+        if bot_rsn and gate == "PASS":
+            rsn_line = f"    > {bot_rsn[:110]}"
+            print(rsn_line)
+
     print(div)
     print(
-        f"  Shown: {shown}  |  ✅ {bid_count} BID  |  👀 {watch_count} WATCH  |  ⛔ {skip_count} SKIP"
-        + ("  (--all-markets to show skipped)" if skip_count and not show_skip else "")
+        f"  Shown: {shown}  |  [BID] {bid_count}  |  [WATCH] {watch_count}  |  [SKIP] {skip_count}"
+        + ("  (add --all-markets to show skipped)" if skip_count and not show_skip else "")
     )
     print()
 
@@ -253,15 +283,13 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float, show_
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _load_db(db_path: str) -> tuple:
-    """Returns (db_markets_by_platform, ai_map)"""
     if not os.path.exists(db_path):
         return {}, {}
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    cur  = conn.cursor()
 
-    # All open markets from cache
-    cur = conn.cursor()
     cur.execute(
         "SELECT ticker, title, close_time, yes_ask, no_ask, volume, "
         "       status, platform, last_price "
@@ -271,24 +299,22 @@ def _load_db(db_path: str) -> tuple:
     )
     db_markets: dict = {"kalshi": [], "polymarket": []}
     for r in cur.fetchall():
-        row = dict(r)
+        row  = dict(r)
         plat = (row.get("platform") or "kalshi").lower()
         if plat in db_markets:
             db_markets[plat].append(row)
 
-    # Today's AI decisions — most recent per ticker
     today_prefix = _now_et().date().isoformat()
     ai_map: dict = {}
-    for table, action_col, conf_col, rsn_col, ts_col in [
-        ("ai_decisions",  "action",       "confidence",    "reasoning",    "decided_at"),
-        ("paper_signals", "action",       "ai_confidence", "ai_reasoning", "created_at"),
+    for table, a_col, c_col, r_col, t_col in [
+        ("ai_decisions",  "action", "confidence",    "reasoning",    "decided_at"),
+        ("paper_signals", "action", "ai_confidence", "ai_reasoning", "created_at"),
     ]:
         try:
             cur.execute(
-                f"SELECT ticker, {action_col} AS action, {conf_col} AS confidence, "
-                f"       {rsn_col} AS reasoning, {ts_col} AS decided_at "
-                f"FROM {table} "
-                f"WHERE {ts_col} >= ? ORDER BY {ts_col} DESC",
+                f"SELECT ticker, {a_col} AS action, {c_col} AS confidence, "
+                f"       {r_col} AS reasoning, {t_col} AS decided_at "
+                f"FROM {table} WHERE {t_col} >= ? ORDER BY {t_col} DESC",
                 (today_prefix + "T00:00:00",)
             )
             for row in cur.fetchall():
@@ -308,26 +334,23 @@ def _load_db(db_path: str) -> tuple:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _fetch_kalshi_live(include_tomorrow: bool) -> tuple:
-    """Fetch today's Kalshi markets live from API. Returns (markets, source_label)."""
     try:
         from src.clients.kalshi_client import KalshiClient
         client = KalshiClient()
 
         all_markets: list = []
         cursor = ""
-        pages = 0
-        while pages < 10:
+        for _ in range(10):
             data   = await client.get_markets(limit=200, cursor=cursor, status="open")
             mkts   = data.get("markets") or []
             cursor = data.get("cursor") or ""
             all_markets.extend(mkts)
-            pages += 1
             if not cursor or not mkts:
                 break
 
-        # Normalise fields
-        today   = _now_et().date()
-        result  = []
+        today  = _now_et().date()
+        tom    = today + timedelta(days=1)
+        result = []
         for m in all_markets:
             ct = m.get("close_time") or m.get("expiration_time") or ""
             dt = _parse_close(ct)
@@ -335,7 +358,7 @@ async def _fetch_kalshi_live(include_tomorrow: bool) -> tuple:
                 continue
             if not include_tomorrow and dt.date() != today:
                 continue
-            if include_tomorrow and dt.date() not in (today, (datetime.now(_ET) + timedelta(days=1)).date()):
+            if include_tomorrow and dt.date() not in (today, tom):
                 continue
             result.append({
                 "ticker":     m.get("ticker", ""),
@@ -355,11 +378,10 @@ async def _fetch_kalshi_live(include_tomorrow: bool) -> tuple:
 
 
 async def _fetch_poly_live(include_tomorrow: bool) -> tuple:
-    """Fetch today's Polymarket markets live from Gamma API. Returns (markets, source_label)."""
     try:
         import httpx
-        _now_et_dt  = _now_et()
-        _eod_et     = _now_et_dt.replace(hour=23, minute=59, second=59)
+        _now_et_dt = _now_et()
+        _eod_et    = _now_et_dt.replace(hour=23, minute=59, second=59)
         if include_tomorrow:
             _eod_et = _eod_et + timedelta(days=1)
         _now_utc = _now_et_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -383,6 +405,8 @@ async def _fetch_poly_live(include_tomorrow: bool) -> tuple:
 
         result = []
         for m in items:
+            if not isinstance(m, dict):
+                continue
             ct = (m.get("endDate") or m.get("end_date") or
                   m.get("close_time") or m.get("closeTime") or "")
             title = (m.get("question") or m.get("title") or
@@ -390,27 +414,49 @@ async def _fetch_poly_live(include_tomorrow: bool) -> tuple:
             if not title:
                 continue
 
-            # Parse outcome prices (tokens list or direct fields)
+            # Parse yes/no prices from tokens list (each token is a dict)
             yes_ask = 0.0
             no_ask  = 0.0
             tokens  = m.get("tokens") or m.get("outcomes") or []
             for tok in tokens:
+                if not isinstance(tok, dict):
+                    continue
                 name  = (tok.get("outcome") or tok.get("name") or "").lower()
                 price = float(tok.get("price") or 0) * 100
                 if "yes" in name:
                     yes_ask = price
                 elif "no" in name:
                     no_ask  = price
+
+            # Fallback: outcomePrices field (list of "0.xx" strings)
             if yes_ask == 0:
-                yes_ask = float(m.get("lastTradePrice") or m.get("last_trade_price") or 0) * 100
+                op = m.get("outcomePrices") or []
+                if len(op) >= 2:
+                    try:
+                        yes_ask = float(op[0]) * 100
+                        no_ask  = float(op[1]) * 100
+                    except (ValueError, TypeError):
+                        pass
+
+            if yes_ask == 0:
+                lp = m.get("lastTradePrice") or m.get("last_trade_price") or 0
+                yes_ask = float(lp) * 100
+
+            ticker = m.get("conditionId") or m.get("id") or ""
+            volume = 0.0
+            try:
+                volume = float(m.get("volume") or m.get("volumeNum") or
+                               m.get("volume24hr") or 0)
+            except (ValueError, TypeError):
+                pass
 
             result.append({
-                "ticker":     m.get("conditionId") or m.get("id") or "",
+                "ticker":     ticker,
                 "title":      title,
                 "close_time": ct,
                 "yes_ask":    yes_ask,
                 "no_ask":     no_ask,
-                "volume":     float(m.get("volume") or m.get("volumeNum") or 0),
+                "volume":     volume,
                 "status":     "open",
                 "platform":   "polymarket",
             })
@@ -426,7 +472,6 @@ async def _fetch_poly_live(include_tomorrow: bool) -> tuple:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _run(args):
-    # ── Resolve DB path ───────────────────────────────────────────────────────
     db_path = args.db
     if db_path is None:
         for c in [
@@ -442,59 +487,52 @@ async def _run(args):
     print(f"\n  DB : {db_path or 'not found'}")
     print(f"  Now: {_now_et().strftime('%A %B %d %Y %I:%M:%S %p ET')}")
 
-    # ── Load AI decisions + DB fallback markets ────────────────────────────────
     db_markets, ai_map = _load_db(db_path) if db_path else ({}, {})
-    evaluated = len(ai_map)
-    print(f"  Bot evaluations in DB today: {evaluated} tickers")
+    print(f"  Bot evaluations in DB today: {len(ai_map)} tickers")
 
     platforms = ["kalshi", "polymarket"]
     if args.platform:
         platforms = [args.platform]
 
-    # ── Fetch markets ─────────────────────────────────────────────────────────
     for plat in platforms:
         markets = []
         source  = "DB cache"
 
         if not args.db_only:
-            print(f"\n  Fetching {plat.upper()} from live API…", end="", flush=True)
+            print(f"\n  Fetching {plat.upper()} from live API...", end="", flush=True)
             if plat == "kalshi":
                 markets, source = await _fetch_kalshi_live(args.all)
             else:
-                markets, poly_source = await _fetch_poly_live(args.all)
-                markets, source = markets, poly_source
+                markets, source = await _fetch_poly_live(args.all)
             print(f" {source}")
 
-        # Fallback to DB cache if API returned nothing
+        # Fallback to DB cache
         if not markets:
             cache = db_markets.get(plat, [])
-            if cache:
-                # Filter to today/tomorrow from DB cache
-                filtered = []
-                for r in cache:
-                    ct = r.get("close_time") or ""
-                    if args.all:
-                        if _closes_today(ct) or _closes_tomorrow(ct):
-                            filtered.append(r)
-                    else:
-                        if _closes_today(ct):
-                            filtered.append(r)
+            filtered = [
+                r for r in cache
+                if _closes_today(r.get("close_time") or "")
+                or (args.all and _closes_tomorrow(r.get("close_time") or ""))
+            ]
+            if filtered:
                 markets = filtered
-                source  = f"DB cache ({len(markets)} markets)"
-                if not markets and cache:
-                    # Cache has markets but wrong dates — show most recent
-                    markets = sorted(cache, key=lambda r: r.get("close_time") or "")[:50]
-                    source  = f"DB cache — stale (bot stopped, showing {len(markets)} cached)"
-            if not markets:
-                source = "no data — bot stopped + no DB cache"
+                source  = f"DB cache — {len(markets)} markets (bot stopped)"
+            elif cache:
+                # Stale cache — show anyway with warning, but only with known close dates
+                dated = [r for r in cache if r.get("close_time")]
+                markets = sorted(dated, key=lambda r: r.get("close_time") or "")[:50]
+                source  = f"DB cache — STALE (bot stopped, last known {len(markets)} markets)"
+            else:
+                source = "no data — restart bot to populate"
 
         _print_table(plat, markets, ai_map, args.min_conf, args.all_markets, source)
 
-    print("  💡 --all-markets     → show junk/skip rows")
-    print("  💡 --all             → include tomorrow's markets")
-    print("  💡 --platform kalshi | polymarket")
-    print("  💡 --db-only         → skip live API, use DB cache only")
-    print("  💡 --min-conf 80     → change BID threshold\n")
+    print("  Tips:")
+    print("    --all-markets   show junk/skipped rows")
+    print("    --all           include tomorrow's markets")
+    print("    --platform kalshi | polymarket")
+    print("    --db-only       skip live API, use DB cache")
+    print("    --min-conf 80   change BID threshold\n")
 
 
 def main():
