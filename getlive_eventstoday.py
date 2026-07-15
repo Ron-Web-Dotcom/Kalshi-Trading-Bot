@@ -282,10 +282,13 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
             print(f"     > {bot_rsn[:rsn_w]}")
 
     print(div)
-    print(
-        f"  Shown: {shown}  | [BID] {bid_count}  | [WATCH] {watch_count}  | [SKIP] {skip_count}"
-        + ("  (--all-markets to show skipped)" if skip_count and not show_skip else "")
-    )
+    summary = f"  Shown: {shown}  | [BID] {bid_count}  | [WATCH] {watch_count}  | [SKIP] {skip_count}"
+    if skip_count and not show_skip:
+        summary += "  (run --all-markets to see skip reasons)"
+    if shown == 0 and skip_count > 0:
+        summary += "\n  ⚠  All markets filtered out — likely sub-markets or resolving soon."
+        summary += " Run --all-markets to inspect, or check back later for new events."
+    print(summary)
     print(bar)
     print()
 
@@ -402,9 +405,11 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
     """Fetch Polymarket markets closing within the next `days` days via Gamma API."""
     try:
         import httpx
-        _now_et_dt = _now_et()
-        _eod_et    = _now_et_dt.replace(hour=23, minute=59, second=59) + timedelta(days=days - 1)
-        _now_utc   = _now_et_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _now_et_dt  = _now_et()
+        # Start of today ET → UTC so we get ALL of today's markets, not just future ones
+        _sod_et     = _now_et_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        _eod_et     = _now_et_dt.replace(hour=23, minute=59, second=59) + timedelta(days=days - 1)
+        _sod_utc    = _sod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         _eod_utc = _eod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         GAMMA  = "https://gamma-api.polymarket.com"
@@ -416,10 +421,9 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
             while True:
                 r = await client.get(f"{GAMMA}/markets", params={
                     "active":       "true",
-                    "closed":       "false",
                     "limit":        500,
                     "offset":       offset,
-                    "end_date_min": _now_utc,
+                    "end_date_min": _sod_utc,
                     "end_date_max": _eod_utc,
                 })
                 if r.status_code != 200:
