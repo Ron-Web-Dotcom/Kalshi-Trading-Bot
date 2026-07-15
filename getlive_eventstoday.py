@@ -44,17 +44,25 @@ _SUBMARKET_SKIP = [
     # Financial options
     "target price:", "yes $", "no $", "or above,yes", "or above,no",
     "$0.0", "above,yes", "above,no",
-    # In-game micro-markets
-    "leading at halftime", "at halftime", "halftime",
-    "to win the second half", "second half draw", "second half d",
+    # Exact score / multi-outcome
     "exact score:", "exact score ",
-    "first goal", "first blood", "first dragon", "first baron", "first tower",
+    "any other score",
+    # Halftime / period markets
+    "leading at halftime", "at halftime", "halftime",
+    "to win the second half", "second half draw", "second half",
     "to win the first half", "first half",
+    # In-game events
+    "first goal", "first blood", "first dragon", "first baron", "first tower",
     "to score first", "red card", "yellow card",
-    "corner kicks", "total goals", "both teams to score",
+    "corner kicks", "total goals",
+    "both teams to score", "both teams",
+    # Over/Under / spread / handicap
     "over/under", "o/u 0.", "o/u 1.", "o/u 2.", "o/u 3.", "o/u 4.", "o/u 5.",
-    "spread:", "handicap",
-    # Long-shot tournament winners already in junk filter but catch here too
+    "spread:", "handicap", "asian handicap",
+    # Polymarket soccer sub-markets (1st half result, draw, team score lines)
+    ": draw", ": 1st >", ": both", ": fk m", ": univ",
+    "to win on penalties", "extra time",
+    # Long-shot tournament winners
     "to win the 2026", "win the championship",
 ]
 
@@ -122,16 +130,17 @@ def _gate_check(row: dict) -> tuple:
 
     if hl < 0:
         return "CLOSED", "already closed"
-    if 0 <= hl < 0.5:
-        return "SKIP", "resolving (<30m)"
     if not ct:
         return "SKIP", "no close_time"
 
-    # Sub-market filter (halftime, exact score, options strikes, etc.)
+    # Sub-market filter first — label correctly before resolving check
     title_l = title.lower()
     for pat in _SUBMARKET_SKIP:
         if pat in title_l:
             return "SKIP", f"sub-market: {pat[:18]}"
+
+    if 0 <= hl < 0.5:
+        return "SKIP", "resolving (<30m)"
 
     if is_junk(title):
         return "SKIP", "junk filter"
