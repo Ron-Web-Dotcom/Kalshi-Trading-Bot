@@ -388,17 +388,15 @@ async def _fetch_kalshi_live(days: int = 3) -> tuple:
         today    = _now_et().date()
         end_date = today + timedelta(days=days - 1)
 
-        # Fetch both open AND finalized-today so running at 2 PM still shows morning events
         all_raw: list = []
-        for status in ("open", "finalized"):
-            cursor = ""
-            for _ in range(20):                   # up to 20 pages × 200 = 4000 per status
-                data   = await client.get_markets(limit=200, cursor=cursor, status=status)
-                batch  = data.get("markets") or []
-                cursor = data.get("cursor") or ""
-                all_raw.extend(batch)
-                if not cursor or not batch:
-                    break
+        cursor = ""
+        for _ in range(20):                       # up to 20 pages × 200 = 4000 markets
+            data   = await client.get_markets(limit=200, cursor=cursor, status="open")
+            batch  = data.get("markets") or []
+            cursor = data.get("cursor") or ""
+            all_raw.extend(batch)
+            if not cursor or not batch:
+                break
 
         def _cents(v):
             """Convert Kalshi price to cents (handles fractions 0-1 or integers 1-99)."""
