@@ -250,7 +250,8 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
 
     bid_count = watch_count = skip_count = shown = 0
 
-    for i, row in enumerate(rows, 1):
+    display_num = 0
+    for row in rows:
         gate, gate_reason = _gate_check(row)
 
         if gate == "CLOSED":
@@ -282,6 +283,7 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         elif bid == "WATCH":
             watch_count += 1
 
+        display_num += 1
         shown += 1
 
         # Urgency marker
@@ -299,7 +301,7 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
 
         _nw, _tw, _cw, _yw, _now2, _vw, _cfw, _bw, _rw = widths
         vals = [
-            str(i),
+            str(display_num),
             _trunc(title, _tw),
             _trunc(close_str, _cw),
             f"{yes_ask:.0f}c" if yes_ask else "-",
