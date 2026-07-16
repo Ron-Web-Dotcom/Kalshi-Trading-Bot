@@ -441,23 +441,34 @@ async def _fetch_kalshi_live(days: int = 2) -> tuple:
                 continue
             live_result.append(_norm(m))
 
-        # ── Pass 2: regular open markets filtered by close date ───────────────
+        # ── Pass 2: open + live markets, wider window (7 days) ───────────────
+        # Kalshi uses status=open for pre-match and status=live for in-play.
+        # World Cup / tournament markets can close up to 7 days out so we
+        # always look at least 7 days ahead regardless of --days flag.
+        kalshi_end = today + timedelta(days=max(days - 1, 6))
+
         all_raw: list = []
-        cursor = ""
-        for _ in range(20):
-            data   = await client.get_markets(limit=200, cursor=cursor, status="open")
-            batch  = data.get("markets") or []
-            cursor = data.get("cursor") or ""
-            all_raw.extend(batch)
-            if not cursor or not batch:
-                break
+        for status in ("open", "live"):
+            cursor = ""
+            for _ in range(20):
+                data   = await client.get_markets(limit=200, cursor=cursor, status=status)
+                batch  = data.get("markets") or []
+                cursor = data.get("cursor") or ""
+                all_raw.extend(batch)
+                if not cursor or not batch:
+                    break
 
         date_result = []
+        seen_date: set = set()
         for m in all_raw:
             ct = m.get("close_time") or m.get("expiration_time") or ""
             dt = _parse_close(ct)
-            if dt is None or dt.date() < today or dt.date() > end_date:
+            if dt is None or dt.date() < today or dt.date() > kalshi_end:
                 continue
+            t = m.get("ticker", "")
+            if t in seen_date:
+                continue
+            seen_date.add(t)
             date_result.append(_norm(m))
 
         # ── Merge: live markets first, then date-filtered, dedup by ticker ────
@@ -470,7 +481,7 @@ async def _fetch_kalshi_live(days: int = 2) -> tuple:
         result = sorted(merged.values(),
                         key=lambda r: (r.get("close_time") or "", -float(r.get("volume") or 0)))
         return result, (f"LIVE API — {len(result)} markets"
-                        f" ({len(live_result)} live-now + {len(date_result)} date-filtered)")
+                        f" ({len(live_result)} live-now + {len(date_result)} closing ≤7d)")
     except Exception as e:
         return [], f"API error: {e}"
 
