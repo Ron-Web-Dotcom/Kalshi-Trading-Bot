@@ -382,29 +382,16 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
             print(f"     > {bot_rsn[:rsn_w]}")
 
     print(div)
-    # Find next open market close time to hint when to check back
-    _next_open = None
-    for r in rows:
-        _hl = _hours_left(r.get("close_time") or "")
-        if _hl > 0:
-            _dt = _parse_close(r.get("close_time") or "")
-            if _dt and (_next_open is None or _dt < _next_open):
-                _next_open = _dt
-
     summary = f"  Shown: {shown}  | [BID] {bid_count}  | [WATCH] {watch_count}  | [SKIP] {skip_count}"
     if skip_count and not show_skip:
         summary += "  (run --all-markets to see skip reasons)"
     if shown == 0:
-        now_h = _now_et().hour
         if skip_count == 0:
-            summary += "\n  ℹ  No markets fetched — API may be unavailable or no events scheduled today."
-        elif _next_open:
-            summary += f"\n  ℹ  All open markets filtered (sub-markets/junk). Next event: {_next_open.strftime('%I:%M %p ET')} — check back then."
-        elif now_h >= 14:
-            summary += "\n  ℹ  Today's markets have all closed. New events typically load after 6 PM ET for the next day."
-            summary += " Run with --days 2 to see tomorrow's markets."
+            summary += "\n  ℹ  No markets returned from API — today's events may have all closed."
+            summary += " Run --days 2 to see tomorrow's markets."
         else:
-            summary += "\n  ℹ  All markets filtered (sub-markets/junk). Run --all-markets to inspect skip reasons."
+            summary += "\n  ℹ  All of today's markets are sub-markets, junk, or already closed."
+            summary += " Run --days 2 to see tomorrow's markets, or --all-markets to inspect."
     print(summary)
     print(bar)
     print()
@@ -536,9 +523,12 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
         _now_et_dt  = _now_et()
         _today      = _now_et_dt.date()
         _end_date   = _today + timedelta(days=days - 1)
-        # Fetch end_date_max = end of window so we don't pull all-time markets
-        _eod_et  = _now_et_dt.replace(hour=23, minute=59, second=59) + timedelta(days=days - 1)
-        _eod_utc = _eod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _eod_et     = _now_et_dt.replace(hour=23, minute=59, second=59) + timedelta(days=days - 1)
+        # Use start-of-today as min so we see all of today's markets (including ones
+        # that already closed — gate_check will label them CLOSED and hide them)
+        _sod_et     = _now_et_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        _sod_utc    = _sod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _eod_utc    = _eod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         GAMMA  = "https://gamma-api.polymarket.com"
         result = []
@@ -547,12 +537,12 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
 
         async with httpx.AsyncClient(timeout=30) as client:
             while True:
-                # No end_date_min — fetch ALL categories (crypto, politics, finance, sports)
-                # closing within the window. Filter to today client-side.
+                # end_date_min=start_of_today so we get ALL categories that closed
+                # or will close today. No active/closed filter — let gate_check decide.
                 r = await client.get(f"{GAMMA}/markets", params={
                     "limit":        500,
                     "offset":       offset,
-                    "closed":       "false",
+                    "end_date_min": _sod_utc,
                     "end_date_max": _eod_utc,
                 })
                 if r.status_code != 200:
