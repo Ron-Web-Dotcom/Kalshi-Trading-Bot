@@ -597,6 +597,7 @@ async def _run(args):
     for plat in platforms:
         markets = []
         source  = "DB cache"
+        api_ok  = False
 
         if not args.db_only:
             print(f"\n  Fetching {plat.upper()} from live API...", end="", flush=True)
@@ -604,24 +605,33 @@ async def _run(args):
                 markets, source = await _fetch_kalshi_live(args.days)
             else:
                 markets, source = await _fetch_poly_live(args.days)
-            print(f" {source}")
 
-        # Fallback to DB cache
+            api_ok = "API error" not in source and "error" not in source.lower()
+            print(f" {source}")
+            if not api_ok:
+                print(f"  ⚠  {plat.upper()} live API failed — check .env has API keys and network is up")
+
+        # Fallback to DB cache (same logic for both Kalshi and Polymarket)
         if not markets:
-            cache     = db_markets.get(plat, [])
-            cutoff    = _now_et().date() + timedelta(days=args.days - 1)
-            filtered  = [
+            cache  = db_markets.get(plat, [])
+            today  = _now_et().date()
+            cutoff = today + timedelta(days=args.days - 1)
+            filtered = [
                 r for r in cache
-                if (lambda dt: dt is not None and _now_et().date() <= dt.date() <= cutoff)(
+                if (lambda dt: dt is not None and today <= dt.date() <= cutoff)(
                     _parse_close(r.get("close_time") or "")
                 )
             ]
             if filtered:
                 markets = filtered
-                source  = f"DB cache — {len(markets)} markets (bot stopped)"
+                source  = f"DB cache — {len(markets)} markets (bot stopped, API unavailable)"
             else:
                 markets = []
-                source  = "no today's markets in cache — start the bot so it can fetch today's events"
+                source  = (
+                    "no today's markets in cache — "
+                    + ("live API also failed; check .env + network" if not api_ok and not args.db_only
+                       else "start the bot so it can fetch today's events")
+                )
 
         _print_table(plat, markets, ai_map, args.min_conf, args.all_markets, source)
 
