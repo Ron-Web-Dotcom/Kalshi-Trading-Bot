@@ -151,17 +151,17 @@ def _gate_check(row: dict) -> tuple:
     ct      = row.get("close_time") or ""
     hl      = _hours_left(ct)
 
-    if hl < 0:
-        return "CLOSED", "already closed"
     if not ct:
         return "SKIP", "no close_time"
 
-    # Sub-market filter first — label correctly before resolving check
+    # Sub-market filter FIRST — before closed/resolving so they label as sub-market not CLOSED
     title_l = title.lower()
     for pat in _SUBMARKET_SKIP:
         if pat in title_l:
             return "SKIP", f"sub-market: {pat[:18]}"
 
+    if hl < 0:
+        return "CLOSED", "already closed"
     if 0 <= hl < 0.5:
         return "SKIP", "resolving (<30m)"
 
@@ -253,7 +253,7 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
     for i, row in enumerate(rows, 1):
         gate, gate_reason = _gate_check(row)
 
-        if gate == "SKIP" and not show_skip:
+        if gate in ("SKIP", "CLOSED") and not show_skip:
             skip_count += 1
             continue
 
@@ -272,7 +272,7 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
 
         bid, bid_reason = _bid_label(gate, bot_act, bot_conf, min_conf, hl)
 
-        if gate == "SKIP":
+        if gate in ("SKIP", "CLOSED"):
             skip_count += 1
         elif bid == "BID YES":
             bid_count += 1
@@ -291,7 +291,7 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
             close_str = "  " + close_raw
 
         bid_col    = f"[{bid}]"
-        reason_col = gate_reason if gate == "SKIP" else bid_reason
+        reason_col = gate_reason if gate in ("SKIP", "CLOSED") else bid_reason
         conf_str   = f"{bot_conf:.0f}%" if bot_conf > 0 else "-"
 
         _nw, _tw, _cw, _yw, _now2, _vw, _cfw, _bw, _rw = widths
