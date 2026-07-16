@@ -379,14 +379,13 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         else:
             close_str = "  " + close_raw
 
-        bid_col    = f"[{bid}]"
+        bid_col  = f"[{bid}]"
+        # REASON column: show bid_reason (short, actionable) not long rule engine text
         if gate in ("SKIP", "CLOSED"):
             reason_col = gate_reason
-        elif bot_rsn:
-            reason_col = bot_rsn
         else:
             reason_col = bid_reason
-        conf_str   = f"{bot_conf:.0f}%" if bot_conf > 0 else "-"
+        conf_str = f"{bot_conf:.0f}%" if bot_conf > 0 else "-"
 
         _nw, _tw, _cw, _yw, _now2, _vw, _cfw, _bw, _rw = widths
         vals = [
@@ -402,8 +401,8 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         ]
         print(_drow(vals, widths))
 
-        # Bot reasoning on second line (only when evaluated)
-        if bot_rsn and gate == "PASS":
+        # Bot reasoning on second line — only for WATCH/BID rows, not BOT SKIP
+        if bot_rsn and bid in ("WATCH", "BID YES"):
             rsn_w = sum(widths) + len(widths) * 3 - 6
             print(f"     > {bot_rsn[:rsn_w]}")
 
@@ -411,14 +410,25 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
     summary = f"  Shown: {shown}  | [BID] {bid_count}  | [WATCH] {watch_count}  | [SKIP] {skip_count}"
     if skip_count and not show_skip:
         summary += "  (run --all-markets to see skip reasons)"
+    print(summary)
+
     if shown == 0:
         if skip_count == 0:
-            summary += "\n  ℹ  No markets returned from API — today's events may have all closed."
-            summary += " Run --days 2 to see tomorrow's markets."
+            print(f"  ℹ  No markets returned from API — today's events may have all closed.")
+            print(f"     Run --days 2 to see tomorrow's markets.")
         else:
-            summary += "\n  ℹ  All of today's markets are sub-markets, junk, or already closed."
-            summary += " Run --days 2 to see tomorrow's markets, or --all-markets to inspect."
-    print(summary)
+            print(f"  ℹ  All {skip_count} markets were filtered. Sample of what's being skipped:")
+            sample_shown = 0
+            for row in rows:
+                if sample_shown >= 10:
+                    break
+                gate2, reason2 = _gate_check(row)
+                if gate2 in ("SKIP", "CLOSED"):
+                    title2 = (row.get("title") or "")[:60]
+                    print(f"     [{gate2}:{reason2}] {title2}")
+                    sample_shown += 1
+            if sample_shown == 0:
+                print(f"     (all filtered by bid_label — run --all-markets)")
     print(bar)
     print()
 
