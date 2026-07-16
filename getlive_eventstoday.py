@@ -162,8 +162,8 @@ def _gate_check(row: dict) -> tuple:
 
     if hl < 0:
         return "CLOSED", "already closed"
-    if 0 <= hl < 0.5:
-        return "SKIP", "resolving (<30m)"
+    if 0 <= hl < 0.083:
+        return "SKIP", "resolving (<5m)"
 
     if is_junk(title):
         return "SKIP", "junk filter"
