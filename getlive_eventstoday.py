@@ -62,6 +62,10 @@ _SUBMARKET_SKIP = [
     # Financial options / strike prices
     "target price:", "yes $", "no $", "or above,yes", "or above,no",
     "$0.0", "above,yes", "above,no",
+    # Commodity / index close-price brackets (e.g. "Will GOLD close price be above $2300?")
+    "close price be", "close price ab", "close price be",
+    "close above $", "close below $", "settle above", "settle below",
+    "price be above", "price be below", "price above $", "price below $",
     # Exact score
     "exact score:", "exact score ", "any other score",
     # Halftime / period splits
@@ -164,6 +168,8 @@ def _bid_label(gate: str, bot_action: str, bot_conf: float, min_conf: float,
 
     if is_junk(title):
         return "BOT SKIP", "junk/unedgeable"
+    if yes_ask == 0 and no_ask == 0 and volume == 0:
+        return "BOT SKIP", "no price/volume"
     if volume > 0 and volume < 50:
         return "BOT SKIP", f"vol={volume:.0f}<50"
     # Long-shot only when BOTH price is tiny AND volume is thin
