@@ -253,7 +253,10 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
     for i, row in enumerate(rows, 1):
         gate, gate_reason = _gate_check(row)
 
-        if gate in ("SKIP", "CLOSED") and not show_skip:
+        if gate == "CLOSED":
+            skip_count += 1
+            continue
+        if gate == "SKIP" and not show_skip:
             skip_count += 1
             continue
 
@@ -272,7 +275,7 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
 
         bid, bid_reason = _bid_label(gate, bot_act, bot_conf, min_conf, hl)
 
-        if gate in ("SKIP", "CLOSED"):
+        if gate == "SKIP":
             skip_count += 1
         elif bid == "BID YES":
             bid_count += 1
