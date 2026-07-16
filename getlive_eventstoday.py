@@ -309,7 +309,10 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         print("  No markets available from API for today.\n")
         return
 
-    # 1. Dedup by ticker (catches API returning same market twice)
+    # Dedup by ticker — catches API returning same market twice across pages.
+    # Title-based dedup is intentionally NOT used here: markets that share many
+    # title tokens (e.g. "Will Spain win?" vs "Will Brazil win?") are separate
+    # markets and must not be collapsed.
     _seen: set = set()
     _deduped = []
     for r in rows:
@@ -317,8 +320,7 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         if key not in _seen:
             _seen.add(key)
             _deduped.append(r)
-    # 2. Dedup by event — same close time + similar title → keep highest volume
-    rows = _dedup_by_event(_deduped)
+    rows = _deduped
 
     cols = ["#", "TITLE", "CLOSES (ET)", "YES", "NO", "VOL", "CONF", "BID?", "REASON"]
     div  = _div(widths)
