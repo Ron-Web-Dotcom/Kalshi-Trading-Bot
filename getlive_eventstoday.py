@@ -86,8 +86,9 @@ def _title_tokens(title: str) -> set:
 
 def _dedup_by_event(rows: list) -> list:
     """
-    Group rows with same close_time and >55% title-token overlap.
-    Keep the one with highest volume within each group.
+    Group rows where title-token overlap >50% AND close within the same hour.
+    Keep the one with highest volume. Catches same event with slightly different
+    close times (e.g. 11:58 vs 11:59) or minor title variations.
     """
     kept = []
     used = [False] * len(rows)
@@ -96,18 +97,19 @@ def _dedup_by_event(rows: list) -> list:
             continue
         group = [a]
         tok_a = _title_tokens(a.get("title", ""))
-        ct_a  = (a.get("close_time") or "")[:16]   # match to minute
+        # Match to the hour so ±59 min variants collapse (same-day safety via date)
+        ct_a  = (a.get("close_time") or "")[:13]   # "YYYY-MM-DDTHH"
         for j, b in enumerate(rows):
             if j <= i or used[j]:
                 continue
-            ct_b = (b.get("close_time") or "")[:16]
+            ct_b = (b.get("close_time") or "")[:13]
             if ct_a != ct_b:
                 continue
             tok_b = _title_tokens(b.get("title", ""))
             if not tok_a or not tok_b:
                 continue
             overlap = len(tok_a & tok_b) / max(len(tok_a | tok_b), 1)
-            if overlap > 0.55:
+            if overlap > 0.50:
                 group.append(b)
                 used[j] = True
         used[i] = True
