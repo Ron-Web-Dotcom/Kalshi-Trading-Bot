@@ -761,8 +761,8 @@ def main():
         description="Show today's live events with bot confidence + BID/WATCH/SKIP"
     )
     parser.add_argument("--platform",    choices=["kalshi", "polymarket"])
-    parser.add_argument("--days",        type=int, default=1,
-                        help="Look-ahead window in days (default 1 = today only)")
+    parser.add_argument("--days",        type=int, default=2,
+                        help="Look-ahead window in days (default 2 = today + tomorrow)")
     parser.add_argument("--all-markets", action="store_true", help="Show junk/skipped rows")
     parser.add_argument("--min-conf",    type=float, default=75.0)
     parser.add_argument("--db",          default=None, help="Path to trading_system.db")
