@@ -196,37 +196,37 @@ def _fmt_close(ct_str: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _gate_check(row: dict) -> tuple:
-    """Returns (gate_result, reason)   gate_result: PASS | SKIP | CLOSED"""
-    from src.utils.junk_filter import is_junk
+    """
+    Returns (gate_result, reason)  gate_result: PASS | SKIP | CLOSED
 
-    title   = (row.get("title") or "").strip()
-    yes_ask = float(row.get("yes_ask") or 0)
-    volume  = float(row.get("volume") or 0)
-    ct      = row.get("close_time") or ""
-    hl      = _hours_left(ct)
+    Display filter — show everything live/open EXCEPT:
+      - True sub-markets (exact scores, options strikes, halftime lines)
+      - Already closed
+      - Resolving in <5 min (too late to act)
+      - No close_time at all
+
+    Junk / price / volume checks moved to BID label — user sees the market
+    but BID column says 'bot skip: reason'. This way World Cup Winner,
+    esports GAME 3, BTC daily etc. all appear.
+    """
+    title = (row.get("title") or "").strip()
+    ct    = row.get("close_time") or ""
+    hl    = _hours_left(ct)
 
     if not ct:
         return "SKIP", "no close_time"
 
-    # Sub-market filter FIRST — before closed/resolving so they label as sub-market not CLOSED
+    # Sub-market filter FIRST (options strikes, exact scores, halftime lines)
     title_l = title.lower()
     for pat in _SUBMARKET_SKIP:
         if pat in title_l:
-            return "SKIP", f"sub-market: {pat[:18]}"
+            return "SKIP", f"sub-market"
 
     if hl < 0:
         return "CLOSED", "already closed"
     if 0 <= hl < 0.083:
         return "SKIP", "resolving (<5m)"
 
-    if is_junk(title):
-        return "SKIP", "junk filter"
-    if volume > 0 and volume < 50:
-        return "SKIP", f"vol={volume:.0f}<50"
-    if yes_ask > 0 and yes_ask < 15:
-        return "SKIP", f"long-shot {yes_ask:.0f}c"
-    if yes_ask > 0 and yes_ask > 95:
-        return "SKIP", f"near-certain {yes_ask:.0f}c"
     return "PASS", ""
 
 
@@ -234,11 +234,28 @@ def _gate_check(row: dict) -> tuple:
 # BID label
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _bid_label(gate: str, bot_action: str, bot_conf: float, min_conf: float, hl: float) -> tuple:
+def _bid_label(gate: str, bot_action: str, bot_conf: float, min_conf: float,
+               hl: float, row: dict) -> tuple:
+    from src.utils.junk_filter import is_junk
+
     if gate == "CLOSED":
         return "CLOSED", "already closed"
     if gate == "SKIP":
         return "SKIP", ""
+
+    title   = (row.get("title") or "").strip()
+    yes_ask = float(row.get("yes_ask") or 0)
+    volume  = float(row.get("volume") or 0)
+
+    # Bot skip reasons — market shows but bot won't trade it
+    if is_junk(title):
+        return "BOT SKIP", "junk/unedgeable"
+    if volume > 0 and volume < 50:
+        return "BOT SKIP", f"vol={volume:.0f}<50"
+    if yes_ask > 0 and yes_ask < 15:
+        return "BOT SKIP", f"long-shot {yes_ask:.0f}c"
+    if yes_ask > 0 and yes_ask > 95:
+        return "BOT SKIP", f"near-certain {yes_ask:.0f}c"
 
     if bot_action == "BUY" and bot_conf >= min_conf:
         return "BID YES", f"conf={bot_conf:.0f}%"
@@ -312,7 +329,7 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         if gate == "CLOSED":
             skip_count += 1
             continue
-        if gate == "SKIP" and not show_skip:
+        if gate in ("SKIP",) and not show_skip:
             skip_count += 1
             continue
 
@@ -332,7 +349,7 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         bot_conf = float(ai.get("confidence") or 0)
         bot_rsn  = (ai.get("reasoning") or "").strip()
 
-        bid, bid_reason = _bid_label(gate, bot_act, bot_conf, min_conf, hl)
+        bid, bid_reason = _bid_label(gate, bot_act, bot_conf, min_conf, hl, row)
 
         if gate == "SKIP":
             skip_count += 1
