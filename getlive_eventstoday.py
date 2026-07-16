@@ -1,18 +1,16 @@
 """
-getlive_eventstoday.py — fetch live markets direct from Kalshi + Polymarket APIs
-and display them in tables with bot confidence, reasoning, and BID/WATCH/SKIP.
-
-Falls back to DB cache if live API unavailable (bot stopped).
+getlive_eventstoday.py — fetch live markets from Kalshi + Polymarket APIs
+and display them with bot confidence, BID/WATCH/SKIP labels.
 
 Usage (on VPS):
   cd /root/trading-bot
   python3 getlive_eventstoday.py
-  python3 getlive_eventstoday.py --days 3        # look ahead N days (default 1 = today)
+  python3 getlive_eventstoday.py --days 3        # today + next 2 days
   python3 getlive_eventstoday.py --platform kalshi
   python3 getlive_eventstoday.py --platform polymarket
-  python3 getlive_eventstoday.py --all-markets   # show junk/skipped rows too
-  python3 getlive_eventstoday.py --min-conf 80   # change confidence threshold
-  python3 getlive_eventstoday.py --db-only       # skip API, use DB cache only
+  python3 getlive_eventstoday.py --all-markets   # also show BOT SKIP rows
+  python3 getlive_eventstoday.py --min-conf 80   # change BID threshold
+  python3 getlive_eventstoday.py --db-only       # use DB cache only
 """
 
 import argparse
@@ -49,95 +47,28 @@ _load_dotenv()
 
 _ET = ZoneInfo("America/New_York")
 
-# ── Column widths — auto-scaled to terminal width at runtime ──────────────────
-# Fixed columns: #(3) CLOSES(21) YES(5) NO(5) VOL(8) CONF(7) BID(9) REASON(20)
-# = 78 fixed chars + 8 separators*3 + 2 outer pipes = 78 + 26 = 104 overhead
-# Remaining space goes to TITLE.
-_FIXED_OVERHEAD = 78 + 26   # fixed cols + all pipe+space padding
+# ── Column widths ─────────────────────────────────────────────────────────────
+_FIXED_OVERHEAD = 78 + 26
 
 def _col_widths(term_w: int = 0) -> tuple:
     if term_w <= 0:
         term_w = shutil.get_terminal_size(fallback=(120, 40)).columns
-    title_w  = max(28, min(60, term_w - _FIXED_OVERHEAD))
-    reason_w = 20
-    return (3, title_w, 21, 5, 5, 8, 7, 9, reason_w)
-
-# ── Rule engine — run live to score each PASS market ─────────────────────────
-
-def _rule_score(market: dict) -> dict:
-    """Run rule engine synchronously on a market. Returns action/confidence/reasoning."""
-    try:
-        from src.ai.rule_engine import score as _rs
-        rd = _rs(market, context="", manifold_text=None, metaculus_text=None)
-        return {"action": rd.action, "confidence": rd.confidence, "reasoning": rd.reasoning}
-    except Exception:
-        return {}
+    title_w = max(28, min(60, term_w - _FIXED_OVERHEAD))
+    return (3, title_w, 21, 5, 5, 8, 7, 9, 20)
 
 
-# ── Title similarity dedup — same event, keep highest volume ──────────────────
-
-def _title_tokens(title: str) -> set:
-    import re
-    words = re.sub(r"[^a-z0-9 ]", " ", (title or "").lower()).split()
-    stop = {"will", "on", "the", "a", "in", "to", "at", "vs", "win", "for",
-            "of", "and", "or", "is", "be", "by", "2026", "2025", "2027"}
-    return {w for w in words if len(w) > 2 and w not in stop}
-
-
-def _dedup_by_event(rows: list) -> list:
-    """
-    Two-pass dedup within the same platform list:
-      Pass 1 — same close_time to the minute ([:16]) + >65% title overlap
-               catches identical event with 1-2 min close-time variation
-      Pass 2 — same date ([:10]) + >80% title overlap
-               catches same event titled slightly differently (same day, high confidence)
-    Keep the row with highest volume in each group.
-    """
-    def _collapse(rows: list, ct_slice: int, threshold: float) -> list:
-        kept = []
-        used = [False] * len(rows)
-        for i, a in enumerate(rows):
-            if used[i]:
-                continue
-            group = [a]
-            tok_a = _title_tokens(a.get("title", ""))
-            ct_a  = (a.get("close_time") or "")[:ct_slice]
-            for j, b in enumerate(rows):
-                if j <= i or used[j]:
-                    continue
-                ct_b = (b.get("close_time") or "")[:ct_slice]
-                if ct_a != ct_b:
-                    continue
-                tok_b = _title_tokens(b.get("title", ""))
-                if not tok_a or not tok_b:
-                    continue
-                overlap = len(tok_a & tok_b) / max(len(tok_a | tok_b), 1)
-                if overlap > threshold:
-                    group.append(b)
-                    used[j] = True
-            used[i] = True
-            best = max(group, key=lambda r: float(r.get("volume") or 0))
-            kept.append(best)
-        return kept
-
-    rows = _collapse(rows, 16, 0.65)   # pass 1: minute-level, 65% overlap
-    rows = _collapse(rows, 10, 0.80)   # pass 2: date-level,   80% overlap
-    return rows
-
-
-# ── Sub-market patterns to skip (keep only main outcomes) ─────────────────────
+# ── Sub-market patterns — gate filter keeps table clean ──────────────────────
 _SUBMARKET_SKIP = [
-    # Financial options
+    # Financial options / strike prices
     "target price:", "yes $", "no $", "or above,yes", "or above,no",
     "$0.0", "above,yes", "above,no",
-    # Exact score / multi-outcome
-    "exact score:", "exact score ",
-    "any other score",
-    # Halftime / period markets
+    # Exact score
+    "exact score:", "exact score ", "any other score",
+    # Halftime / period splits
     "leading at halftime", "at halftime", "halftime",
     "to win the second half", "second half draw", "second half",
     "to win the first half", "first half",
-    # In-game events
+    # In-game micro-markets
     "first goal", "first blood", "first dragon", "first baron", "first tower",
     "to score first", "red card", "yellow card",
     "corner kicks", "total goals",
@@ -145,15 +76,13 @@ _SUBMARKET_SKIP = [
     # Over/Under / spread / handicap
     "over/under", "o/u 0.", "o/u 1.", "o/u 2.", "o/u 3.", "o/u 4.", "o/u 5.",
     "spread:", "handicap", "asian handicap",
-    # Polymarket soccer sub-markets (1st half result, draw, team score lines)
+    # Polymarket soccer sub-market title patterns
     ": draw", ": 1st >", ": both", ": fk m", ": univ",
     "to win on penalties", "extra time",
 ]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Time helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Time helpers ──────────────────────────────────────────────────────────────
 
 def _now_et() -> datetime:
     return datetime.now(_ET)
@@ -178,12 +107,6 @@ def _hours_left(ct_str: str) -> float:
     return (dt - _now_et()).total_seconds() / 3600
 
 
-def _closes_today(ct_str: str) -> bool:
-    dt = _parse_close(ct_str)
-    return dt is not None and dt.date() == _now_et().date()
-
-
-
 def _fmt_close(ct_str: str) -> str:
     dt = _parse_close(ct_str)
     if dt is None:
@@ -198,37 +121,26 @@ def _fmt_close(ct_str: str) -> str:
     return f"{dt.strftime('%m/%d %I:%M%p')} ({tag})"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Gate check
-# ─────────────────────────────────────────────────────────────────────────────
+def _fmt_price(v: float) -> str:
+    if not v:
+        return "-"
+    return "<1c" if v < 1 else f"{v:.0f}c"
+
+
+# ── Gate check — display filter ───────────────────────────────────────────────
 
 def _gate_check(row: dict) -> tuple:
-    """
-    Returns (gate_result, reason)  gate_result: PASS | SKIP | CLOSED
-
-    Display filter — show everything live/open EXCEPT:
-      - True sub-markets (exact scores, options strikes, halftime lines)
-      - Already closed
-      - Resolving in <5 min (too late to act)
-      - No close_time at all
-
-    Junk / price / volume checks moved to BID label — user sees the market
-    but BID column says 'bot skip: reason'. This way World Cup Winner,
-    esports GAME 3, BTC daily etc. all appear.
-    """
-    title = (row.get("title") or "").strip()
-    ct    = row.get("close_time") or ""
-    hl    = _hours_left(ct)
-
+    """PASS / SKIP / CLOSED — only filters sub-markets, closed, resolving <5m."""
+    ct = row.get("close_time") or ""
     if not ct:
         return "SKIP", "no close_time"
 
-    # Sub-market filter FIRST (options strikes, exact scores, halftime lines)
-    title_l = title.lower()
+    title_l = (row.get("title") or "").lower()
     for pat in _SUBMARKET_SKIP:
         if pat in title_l:
-            return "SKIP", f"sub-market"
+            return "SKIP", "sub-market"
 
+    hl = _hours_left(ct)
     if hl < 0:
         return "CLOSED", "already closed"
     if 0 <= hl < 0.083:
@@ -237,32 +149,26 @@ def _gate_check(row: dict) -> tuple:
     return "PASS", ""
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# BID label
-# ─────────────────────────────────────────────────────────────────────────────
+# ── BID label — trading filter ────────────────────────────────────────────────
 
 def _bid_label(gate: str, bot_action: str, bot_conf: float, min_conf: float,
-               hl: float, row: dict) -> tuple:
+               row: dict) -> tuple:
     from src.utils.junk_filter import is_junk
 
-    if gate == "CLOSED":
-        return "CLOSED", "already closed"
-    if gate == "SKIP":
-        return "SKIP", ""
+    if gate in ("CLOSED", "SKIP"):
+        return gate, ""
 
     title   = (row.get("title") or "").strip()
     yes_ask = float(row.get("yes_ask") or 0)
-    volume  = float(row.get("volume") or 0)
+    volume  = float(row.get("volume")  or 0)
 
-    # Bot skip reasons — market shows but bot won't trade it
     if is_junk(title):
         return "BOT SKIP", "junk/unedgeable"
     if volume > 0 and volume < 50:
         return "BOT SKIP", f"vol={volume:.0f}<50"
-    # Long-shot only if BOTH price is tiny AND volume is thin — big-volume markets
-    # (e.g. "US x Iran" at YES=1c vol=939k) are legitimate and should show as WATCH
+    # Long-shot only when BOTH price is tiny AND volume is thin
     if yes_ask > 0 and yes_ask < 5 and volume < 500:
-        return "BOT SKIP", f"long-shot {yes_ask:.0f}c low-vol"
+        return "BOT SKIP", f"long-shot <5c low-vol"
     if yes_ask > 0 and yes_ask > 97:
         return "BOT SKIP", f"near-certain {yes_ask:.0f}c"
 
@@ -276,72 +182,79 @@ def _bid_label(gate: str, bot_action: str, bot_conf: float, min_conf: float,
     return "WATCH", "not evaluated"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Table rendering
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Table rendering ───────────────────────────────────────────────────────────
 
 def _trunc(s: str, w: int) -> str:
     s = (s or "").strip()
     return (s[: w - 1] + ">") if len(s) > w else s.ljust(w)
 
 
-def _div(widths: list) -> str:
+def _div(widths):
     return "+" + "+".join("-" * (w + 2) for w in widths) + "+"
 
 
-def _hrow(cols: list, widths: list) -> str:
+def _hrow(cols, widths):
     return "|" + "|".join(f" {str(c).ljust(w)} " for c, w in zip(cols, widths)) + "|"
 
 
-def _drow(vals: list, widths: list) -> str:
+def _drow(vals, widths):
     return "|" + "|".join(f" {str(v).ljust(w)} " for v, w in zip(vals, widths)) + "|"
 
 
 def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
-                 show_skip: bool, source: str) -> None:
-    icon = "KALSHI" if platform == "kalshi" else "POLYMARKET"
+                 show_all: bool, source: str, bot_active: bool) -> None:
+    icon   = "KALSHI" if platform == "kalshi" else "POLYMARKET"
     widths = _col_widths()
-    term_w = sum(widths) + len(widths) * 3 + 1   # each col: " val " + "|"
+    term_w = sum(widths) + len(widths) * 3 + 1
     bar    = "=" * term_w
+
     print(f"\n{bar}")
     print(f"  [{icon}]  {source}  —  {_now_et().strftime('%a %b %d %Y %I:%M %p ET')}")
     print(bar)
 
     if not rows:
-        print("  No markets available from API for today.\n")
+        print("  No markets returned from API.\n")
+        print(bar)
         return
 
-    # Dedup by ticker — catches API returning same market twice across pages.
-    # Title-based dedup is intentionally NOT used here: markets that share many
-    # title tokens (e.g. "Will Spain win?" vs "Will Brazil win?") are separate
-    # markets and must not be collapsed.
-    _seen: set = set()
-    _deduped = []
+    # Ticker dedup — removes same market returned twice across API pages
+    seen: set = set()
+    deduped   = []
     for r in rows:
         key = r.get("ticker") or r.get("title", "")
-        if key not in _seen:
-            _seen.add(key)
-            _deduped.append(r)
-    rows = _deduped
+        if key not in seen:
+            seen.add(key)
+            deduped.append(r)
+    rows = deduped
 
     cols = ["#", "TITLE", "CLOSES (ET)", "YES", "NO", "VOL", "CONF", "BID?", "REASON"]
     div  = _div(widths)
-
     print(div)
     print(_hrow(cols, widths))
     print(div)
 
-    bid_count = watch_count = skip_count = shown = 0
-
+    bid_count = watch_count = skip_count = bot_skip_count = shown = 0
     display_num = 0
+
     for row in rows:
         gate, gate_reason = _gate_check(row)
 
-        if gate == "CLOSED":
+        if gate in ("CLOSED", "SKIP"):
             skip_count += 1
-            continue
-        if gate in ("SKIP",) and not show_skip:
-            skip_count += 1
+            if show_all:
+                # Show skipped rows when --all-markets
+                display_num += 1
+                ct2    = row.get("close_time") or ""
+                title2 = (row.get("title") or row.get("ticker") or "").strip()
+                vals   = [
+                    str(display_num),
+                    _trunc(title2, widths[1]),
+                    _trunc("  " + _fmt_close(ct2), widths[2]),
+                    "-", "-", "-", "-",
+                    f"[{gate}]",
+                    _trunc(gate_reason, widths[8]),
+                ]
+                print(_drow(vals, widths))
             continue
 
         ct      = row.get("close_time") or ""
@@ -352,18 +265,25 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         hl      = _hours_left(ct)
         title   = (row.get("title") or ticker or "").strip()
 
-        # Use DB evaluation if available, otherwise run rule engine live
+        # Only use rule engine when bot is active (has evaluations in DB)
         ai = ai_map.get(ticker) or {}
-        if not ai and gate == "PASS":
-            ai = _rule_score(row)
+        if not ai and bot_active:
+            try:
+                from src.ai.rule_engine import score as _rs
+                rd = _rs(row, context="", manifold_text=None, metaculus_text=None)
+                ai = {"action": rd.action, "confidence": rd.confidence}
+            except Exception:
+                pass
+
         bot_act  = (ai.get("action") or "").upper()
         bot_conf = float(ai.get("confidence") or 0)
-        bot_rsn  = (ai.get("reasoning") or "").strip()
 
-        bid, bid_reason = _bid_label(gate, bot_act, bot_conf, min_conf, hl, row)
+        bid, bid_reason = _bid_label(gate, bot_act, bot_conf, min_conf, row)
 
-        if gate == "SKIP":
-            skip_count += 1
+        if bid == "BOT SKIP":
+            bot_skip_count += 1
+            if not show_all:
+                continue
         elif bid == "BID YES":
             bid_count += 1
         elif bid == "WATCH":
@@ -372,21 +292,15 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         display_num += 1
         shown += 1
 
-        # Urgency marker
+        hl = _hours_left(ct)
         close_raw = _fmt_close(ct)
-        if gate == "PASS" and 0 < hl <= 1:
+        if 0 < hl <= 1:
             close_str = "!!" + close_raw
-        elif gate == "PASS" and 0 < hl <= 3:
+        elif 0 < hl <= 3:
             close_str = "! " + close_raw
         else:
             close_str = "  " + close_raw
 
-        bid_col  = f"[{bid}]"
-        # REASON column: show bid_reason (short, actionable) not long rule engine text
-        if gate in ("SKIP", "CLOSED"):
-            reason_col = gate_reason
-        else:
-            reason_col = bid_reason
         conf_str = f"{bot_conf:.0f}%" if bot_conf > 0 else "-"
 
         _nw, _tw, _cw, _yw, _now2, _vw, _cfw, _bw, _rw = widths
@@ -394,47 +308,42 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
             str(display_num),
             _trunc(title, _tw),
             _trunc(close_str, _cw),
-            f"{yes_ask:.0f}c" if yes_ask else "-",
-            f"{no_ask:.0f}c"  if no_ask  else "-",
-            f"{volume:.0f}"   if volume   else "-",
+            _fmt_price(yes_ask),
+            _fmt_price(no_ask),
+            f"{volume:.0f}" if volume else "-",
             conf_str,
-            bid_col,
-            _trunc(reason_col, _rw),
+            f"[{bid}]",
+            _trunc(bid_reason, _rw),
         ]
         print(_drow(vals, widths))
 
-
     print(div)
-    summary = f"  Shown: {shown}  | [BID] {bid_count}  | [WATCH] {watch_count}  | [SKIP] {skip_count}"
-    if skip_count and not show_skip:
-        summary += "  (run --all-markets to see skip reasons)"
-    print(summary)
+    print(f"  Shown: {shown}  | [BID] {bid_count}  | [WATCH] {watch_count}"
+          f"  | [BOT SKIP] {bot_skip_count}  | [SKIP] {skip_count}")
 
-    if shown == 0 and skip_count == 0:
-        print(f"  ℹ  No markets returned from API — today's events may have all closed.")
-        print(f"     Run --days 2 to see tomorrow's markets.")
-
-    if skip_count > 20 and not show_skip:
-        print(f"  ℹ  {skip_count} markets filtered — sample of skip reasons:")
-        sample_shown = 0
+    if skip_count > 20 and not show_all:
         reason_counts: dict = {}
         for row in rows:
-            gate2, reason2 = _gate_check(row)
-            if gate2 in ("SKIP", "CLOSED"):
-                reason_counts[reason2] = reason_counts.get(reason2, 0) + 1
-                if sample_shown < 5:
-                    title2 = (row.get("title") or "")[:55]
-                    print(f"     [{gate2}:{reason2}] {title2}")
-                    sample_shown += 1
+            g2, r2 = _gate_check(row)
+            if g2 in ("SKIP", "CLOSED"):
+                reason_counts[r2] = reason_counts.get(r2, 0) + 1
         if reason_counts:
-            print(f"     Reasons: { {k: v for k, v in sorted(reason_counts.items(), key=lambda x: -x[1])} }")
+            top = sorted(reason_counts.items(), key=lambda x: -x[1])
+            print(f"  ℹ  Filtered: { {k: v for k, v in top} }"
+                  f"  — run --all-markets to inspect")
+
+    if shown == 0 and not show_all:
+        if bot_skip_count > 0:
+            print(f"  ℹ  {bot_skip_count} markets exist but bot won't trade them"
+                  f" — run --all-markets to see")
+        elif skip_count == 0:
+            print(f"  ℹ  No markets returned — try --days 3")
+
     print(bar)
     print()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DB helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# ── DB helpers ────────────────────────────────────────────────────────────────
 
 def _load_db(db_path: str) -> tuple:
     if not os.path.exists(db_path):
@@ -482,12 +391,17 @@ def _load_db(db_path: str) -> tuple:
     return db_markets, ai_map
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Live API fetchers
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Live API fetchers ─────────────────────────────────────────────────────────
 
-async def _fetch_kalshi_live(days: int = 3) -> tuple:
-    """Fetch Kalshi markets closing within the next `days` days."""
+async def _fetch_kalshi_live(days: int = 2) -> tuple:
+    """
+    Fetch Kalshi markets two ways and merge:
+      1. get_live_now_markets() — sports/events happening RIGHT NOW (soccer,
+         NBA, esports, etc.) via the /events endpoint + sport series tickers.
+         This is what the user sees on Kalshi's LIVE badge.
+      2. get_markets() pagination — regular markets (crypto, political, finance)
+         filtered to the close-date window.
+    """
     try:
         from src.clients.kalshi_client import KalshiClient
         client = KalshiClient()
@@ -495,9 +409,42 @@ async def _fetch_kalshi_live(days: int = 3) -> tuple:
         today    = _now_et().date()
         end_date = today + timedelta(days=days - 1)
 
+        def _cents(v):
+            try:
+                f = float(v)
+                return round(f * 100, 1) if 0 < f < 1.0 else round(f, 1)
+            except (TypeError, ValueError):
+                return 0.0
+
+        def _norm(m: dict) -> dict:
+            ct = m.get("close_time") or m.get("expiration_time") or ""
+            yes_ask = _cents(m.get("yes_ask") or m.get("last_price") or m.get("yes_bid") or 0)
+            no_ask  = _cents(m.get("no_ask") or m.get("no_bid") or 0) or round(100 - yes_ask, 1)
+            return {
+                "ticker":     m.get("ticker", ""),
+                "title":      m.get("title", ""),
+                "close_time": ct,
+                "yes_ask":    yes_ask,
+                "no_ask":     no_ask if yes_ask else 0.0,
+                "volume":     float(m.get("volume") or 0),
+                "status":     "open",
+                "platform":   "kalshi",
+            }
+
+        # ── Pass 1: live sports/events ────────────────────────────────────────
+        live_raw = await client.get_live_now_markets(max_markets=500)
+        live_result = []
+        for m in live_raw:
+            ct = m.get("close_time") or ""
+            dt = _parse_close(ct)
+            if dt is None:
+                continue
+            live_result.append(_norm(m))
+
+        # ── Pass 2: regular open markets filtered by close date ───────────────
         all_raw: list = []
         cursor = ""
-        for _ in range(20):                       # up to 20 pages × 200 = 4000 markets
+        for _ in range(20):
             data   = await client.get_markets(limit=200, cursor=cursor, status="open")
             batch  = data.get("markets") or []
             cursor = data.get("cursor") or ""
@@ -505,65 +452,40 @@ async def _fetch_kalshi_live(days: int = 3) -> tuple:
             if not cursor or not batch:
                 break
 
-        def _cents(v):
-            """Convert Kalshi price to cents (handles fractions 0-1 or integers 1-99)."""
-            try:
-                f = float(v)
-                return round(f * 100, 1) if 0 < f < 1.0 else round(f, 1)
-            except (TypeError, ValueError):
-                return 0.0
-
-        result = []
+        date_result = []
         for m in all_raw:
             ct = m.get("close_time") or m.get("expiration_time") or ""
             dt = _parse_close(ct)
-            if dt is None:
+            if dt is None or dt.date() < today or dt.date() > end_date:
                 continue
-            # Only markets closing today (all categories — politics, sports, crypto, finance)
-            if dt.date() < today or dt.date() > end_date:
-                continue
-            yes_ask = _cents(m.get("yes_ask") or m.get("last_price") or m.get("yes_bid") or 0)
-            no_ask  = _cents(m.get("no_ask")  or m.get("no_bid")  or 0) or round(100 - yes_ask, 1)
-            result.append({
-                "ticker":     m.get("ticker", ""),
-                "title":      m.get("title", ""),
-                "close_time": ct,
-                "yes_ask":    yes_ask,
-                "no_ask":     no_ask if yes_ask else 0.0,
-                "volume":     float(m.get("volume")  or 0),
-                "status":     m.get("status", "open"),
-                "platform":   "kalshi",
-            })
+            date_result.append(_norm(m))
 
-        # Dedup by ticker (open + finalized passes can return same market twice)
-        seen_tickers: set = set()
-        deduped = []
-        for r in result:
-            t = r.get("ticker", "")
-            if t and t not in seen_tickers:
-                seen_tickers.add(t)
-                deduped.append(r)
-        result = deduped
+        # ── Merge: live markets first, then date-filtered, dedup by ticker ────
+        merged: dict = {}
+        for r in live_result + date_result:
+            t = r.get("ticker") or r.get("title", "")
+            if t and t not in merged:
+                merged[t] = r
 
-        result.sort(key=lambda r: (r.get("close_time") or "", -float(r.get("volume") or 0)))
-        return result, f"LIVE API — {len(result)} markets (from {len(all_raw)} total)"
+        result = sorted(merged.values(),
+                        key=lambda r: (r.get("close_time") or "", -float(r.get("volume") or 0)))
+        return result, (f"LIVE API — {len(result)} markets"
+                        f" ({len(live_result)} live-now + {len(date_result)} date-filtered)")
     except Exception as e:
         return [], f"API error: {e}"
 
 
-async def _fetch_poly_live(days: int = 3) -> tuple:
+async def _fetch_poly_live(days: int = 2) -> tuple:
     """Fetch Polymarket markets closing within the next `days` days via Gamma API."""
     try:
         import httpx
-        _now_et_dt  = _now_et()
-        _today      = _now_et_dt.date()
-        _end_date   = _today + timedelta(days=days - 1)
-        _eod_et     = _now_et_dt.replace(hour=23, minute=59, second=59) + timedelta(days=days - 1)
-        # Use start-of-today as min so we see all of today's markets (including ones
-        # that already closed — gate_check will label them CLOSED and hide them)
-        _sod_et     = _now_et_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-        _sod_utc    = _sod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        _eod_utc    = _eod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _now_et_dt = _now_et()
+        _today     = _now_et_dt.date()
+        _end_date  = _today + timedelta(days=days - 1)
+        _sod_et    = _now_et_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        _eod_et    = _now_et_dt.replace(hour=23, minute=59, second=59) + timedelta(days=days - 1)
+        _sod_utc   = _sod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _eod_utc   = _eod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         GAMMA  = "https://gamma-api.polymarket.com"
         result = []
@@ -572,8 +494,6 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
 
         async with httpx.AsyncClient(timeout=30) as client:
             while True:
-                # end_date_min=start_of_today so we get ALL categories that closed
-                # or will close today. No active/closed filter — let gate_check decide.
                 r = await client.get(f"{GAMMA}/markets", params={
                     "limit":        500,
                     "offset":       offset,
@@ -598,12 +518,10 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
                     if not title:
                         continue
 
-                    # Only keep markets closing today (client-side date filter)
                     _dt = _parse_close(ct)
                     if _dt is None or not (_today <= _dt.date() <= _end_date):
                         continue
 
-                    # Deduplicate by title+close_time
                     key = (title.lower(), ct)
                     if key in seen:
                         continue
@@ -616,10 +534,8 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
                         except (TypeError, ValueError):
                             return 0.0
 
-                    # Parse yes/no prices from tokens list
                     yes_ask = no_ask = 0.0
-                    tokens  = m.get("tokens") or []
-                    for tok in tokens:
+                    for tok in (m.get("tokens") or []):
                         if not isinstance(tok, dict):
                             continue
                         name  = (tok.get("outcome") or tok.get("name") or "").lower()
@@ -629,7 +545,6 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
                         elif "no" in name:
                             no_ask  = price
 
-                    # Fallback: outcomePrices list ["0.65", "0.35"]
                     if yes_ask == 0:
                         op = m.get("outcomePrices") or []
                         if len(op) >= 2:
@@ -639,11 +554,9 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
                             except (ValueError, TypeError):
                                 pass
 
-                    # Final fallback: lastTradePrice
                     if yes_ask == 0:
                         yes_ask = _p(m.get("lastTradePrice") or m.get("last_trade_price") or 0)
 
-                    # Derive no_ask from yes_ask if still missing
                     if yes_ask > 0 and no_ask == 0:
                         no_ask = round(100 - yes_ask, 1)
 
@@ -668,7 +581,6 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
                         "platform":   "polymarket",
                     })
 
-                # Paginate if we got a full page
                 if len(items) < 500:
                     break
                 offset += 500
@@ -679,9 +591,7 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
         return [], f"API error: {e}"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 async def _run(args):
     db_path = args.db
@@ -700,10 +610,11 @@ async def _run(args):
     print(f"  Now: {_now_et().strftime('%A %B %d %Y %I:%M:%S %p ET')}")
 
     db_markets, ai_map = _load_db(db_path) if db_path else ({}, {})
-    if ai_map:
+    bot_active = bool(ai_map)
+    if bot_active:
         print(f"  Bot evaluations in DB today: {len(ai_map)} tickers")
     else:
-        print("  Bot evaluations in DB today: 0  (CONF will show '-' — bot hasn't evaluated these markets yet or is stopped)")
+        print("  Bot evaluations: 0  (bot stopped — CONF shows '-', run bot for AI scoring)")
 
     platforms = ["kalshi", "polymarket"]
     if args.platform:
@@ -724,9 +635,8 @@ async def _run(args):
             api_ok = "API error" not in source and "error" not in source.lower()
             print(f" {source}")
             if not api_ok:
-                print(f"  ⚠  {plat.upper()} live API failed — check .env has API keys and network is up")
+                print(f"  ⚠  {plat.upper()} live API failed — check .env + network")
 
-        # Fallback to DB cache (same logic for both Kalshi and Polymarket)
         if not markets:
             cache  = db_markets.get(plat, [])
             today  = _now_et().date()
@@ -739,36 +649,35 @@ async def _run(args):
             ]
             if filtered:
                 markets = filtered
-                source  = f"DB cache — {len(markets)} markets (bot stopped, API unavailable)"
+                source  = f"DB cache — {len(markets)} markets"
             else:
                 markets = []
-                source  = (
-                    "no today's markets in cache — "
-                    + ("live API also failed; check .env + network" if not api_ok and not args.db_only
-                       else "start the bot so it can fetch today's events")
+                source  = "no markets in cache — " + (
+                    "live API failed; check .env + network" if not api_ok and not args.db_only
+                    else "start the bot so it can fetch events"
                 )
 
-        _print_table(plat, markets, ai_map, args.min_conf, args.all_markets, source)
+        _print_table(plat, markets, ai_map, args.min_conf, args.all_markets, source, bot_active)
 
     print("  Tips:")
-    print("    --all-markets       show junk/skipped rows with reason")
+    print("    --all-markets       show BOT SKIP rows too")
     print("    --days 3            today + next 2 days  |  --days 7  full week")
-    print("    --platform kalshi | polymarket  one platform only")
-    print("    --db-only           skip live API, use DB cache only")
+    print("    --platform kalshi | polymarket")
     print("    --min-conf 80       change BID threshold (default 75)\n")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Show today's live events with bot confidence + BID/WATCH/SKIP"
+        description="Show live events with bot confidence + BID/WATCH/SKIP"
     )
     parser.add_argument("--platform",    choices=["kalshi", "polymarket"])
     parser.add_argument("--days",        type=int, default=2,
-                        help="Look-ahead window in days (default 2 = today + tomorrow)")
-    parser.add_argument("--all-markets", action="store_true", help="Show junk/skipped rows")
+                        help="Look-ahead window (default 2 = today + tomorrow)")
+    parser.add_argument("--all-markets", action="store_true",
+                        help="Show BOT SKIP and SKIP rows")
     parser.add_argument("--min-conf",    type=float, default=75.0)
-    parser.add_argument("--db",          default=None, help="Path to trading_system.db")
-    parser.add_argument("--db-only",     action="store_true", help="Skip live API, use DB only")
+    parser.add_argument("--db",          default=None)
+    parser.add_argument("--db-only",     action="store_true")
     args = parser.parse_args()
 
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
