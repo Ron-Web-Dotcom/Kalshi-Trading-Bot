@@ -449,14 +449,17 @@ async def _fetch_kalshi_live(days: int = 2) -> tuple:
 
         all_raw: list = []
         for status in ("open", "live"):
-            cursor = ""
-            for _ in range(20):
-                data   = await client.get_markets(limit=200, cursor=cursor, status=status)
-                batch  = data.get("markets") or []
-                cursor = data.get("cursor") or ""
-                all_raw.extend(batch)
-                if not cursor or not batch:
-                    break
+            try:
+                cursor = ""
+                for _ in range(20):
+                    data   = await client.get_markets(limit=200, cursor=cursor, status=status)
+                    batch  = data.get("markets") or []
+                    cursor = data.get("cursor") or ""
+                    all_raw.extend(batch)
+                    if not cursor or not batch:
+                        break
+            except Exception:
+                pass   # status=live may be invalid on this API version — skip silently
 
         date_result = []
         seen_date: set = set()
