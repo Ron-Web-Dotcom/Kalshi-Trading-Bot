@@ -408,23 +408,24 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         summary += "  (run --all-markets to see skip reasons)"
     print(summary)
 
-    if shown == 0:
-        if skip_count == 0:
-            print(f"  ℹ  No markets returned from API — today's events may have all closed.")
-            print(f"     Run --days 2 to see tomorrow's markets.")
-        else:
-            print(f"  ℹ  All {skip_count} markets were filtered. Sample of what's being skipped:")
-            sample_shown = 0
-            for row in rows:
-                if sample_shown >= 10:
-                    break
-                gate2, reason2 = _gate_check(row)
-                if gate2 in ("SKIP", "CLOSED"):
-                    title2 = (row.get("title") or "")[:60]
+    if shown == 0 and skip_count == 0:
+        print(f"  ℹ  No markets returned from API — today's events may have all closed.")
+        print(f"     Run --days 2 to see tomorrow's markets.")
+
+    if skip_count > 20 and not show_skip:
+        print(f"  ℹ  {skip_count} markets filtered — sample of skip reasons:")
+        sample_shown = 0
+        reason_counts: dict = {}
+        for row in rows:
+            gate2, reason2 = _gate_check(row)
+            if gate2 in ("SKIP", "CLOSED"):
+                reason_counts[reason2] = reason_counts.get(reason2, 0) + 1
+                if sample_shown < 5:
+                    title2 = (row.get("title") or "")[:55]
                     print(f"     [{gate2}:{reason2}] {title2}")
                     sample_shown += 1
-            if sample_shown == 0:
-                print(f"     (all filtered by bid_label — run --all-markets)")
+        if reason_counts:
+            print(f"     Reasons: { {k: v for k, v in sorted(reason_counts.items(), key=lambda x: -x[1])} }")
     print(bar)
     print()
 
