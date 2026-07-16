@@ -282,7 +282,7 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
     print(bar)
 
     if not rows:
-        print("  No markets found for today.\n")
+        print("  No markets available from API for today.\n")
         return
 
     # 1. Dedup by ticker (catches API returning same market twice)
@@ -382,12 +382,29 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
             print(f"     > {bot_rsn[:rsn_w]}")
 
     print(div)
+    # Find next open market close time to hint when to check back
+    _next_open = None
+    for r in rows:
+        _hl = _hours_left(r.get("close_time") or "")
+        if _hl > 0:
+            _dt = _parse_close(r.get("close_time") or "")
+            if _dt and (_next_open is None or _dt < _next_open):
+                _next_open = _dt
+
     summary = f"  Shown: {shown}  | [BID] {bid_count}  | [WATCH] {watch_count}  | [SKIP] {skip_count}"
     if skip_count and not show_skip:
         summary += "  (run --all-markets to see skip reasons)"
-    if shown == 0 and skip_count > 0:
-        summary += "\n  ⚠  All markets filtered out — likely sub-markets or resolving soon."
-        summary += " Run --all-markets to inspect, or check back later for new events."
+    if shown == 0:
+        now_h = _now_et().hour
+        if skip_count == 0:
+            summary += "\n  ℹ  No markets fetched — API may be unavailable or no events scheduled today."
+        elif _next_open:
+            summary += f"\n  ℹ  All open markets filtered (sub-markets/junk). Next event: {_next_open.strftime('%I:%M %p ET')} — check back then."
+        elif now_h >= 14:
+            summary += "\n  ℹ  Today's markets have all closed. New events typically load after 6 PM ET for the next day."
+            summary += " Run with --days 2 to see tomorrow's markets."
+        else:
+            summary += "\n  ℹ  All markets filtered (sub-markets/junk). Run --all-markets to inspect skip reasons."
     print(summary)
     print(bar)
     print()
