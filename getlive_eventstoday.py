@@ -259,9 +259,11 @@ def _bid_label(gate: str, bot_action: str, bot_conf: float, min_conf: float,
         return "BOT SKIP", "junk/unedgeable"
     if volume > 0 and volume < 50:
         return "BOT SKIP", f"vol={volume:.0f}<50"
-    if yes_ask > 0 and yes_ask < 15:
-        return "BOT SKIP", f"long-shot {yes_ask:.0f}c"
-    if yes_ask > 0 and yes_ask > 95:
+    # Long-shot only if BOTH price is tiny AND volume is thin — big-volume markets
+    # (e.g. "US x Iran" at YES=1c vol=939k) are legitimate and should show as WATCH
+    if yes_ask > 0 and yes_ask < 5 and volume < 500:
+        return "BOT SKIP", f"long-shot {yes_ask:.0f}c low-vol"
+    if yes_ask > 0 and yes_ask > 97:
         return "BOT SKIP", f"near-certain {yes_ask:.0f}c"
 
     if bot_action == "BUY" and bot_conf >= min_conf:
