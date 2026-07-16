@@ -86,36 +86,43 @@ def _title_tokens(title: str) -> set:
 
 def _dedup_by_event(rows: list) -> list:
     """
-    Group rows where title-token overlap >50% AND close within the same hour.
-    Keep the one with highest volume. Catches same event with slightly different
-    close times (e.g. 11:58 vs 11:59) or minor title variations.
+    Two-pass dedup within the same platform list:
+      Pass 1 — same close_time to the minute ([:16]) + >65% title overlap
+               catches identical event with 1-2 min close-time variation
+      Pass 2 — same date ([:10]) + >80% title overlap
+               catches same event titled slightly differently (same day, high confidence)
+    Keep the row with highest volume in each group.
     """
-    kept = []
-    used = [False] * len(rows)
-    for i, a in enumerate(rows):
-        if used[i]:
-            continue
-        group = [a]
-        tok_a = _title_tokens(a.get("title", ""))
-        # Match to the hour so ±59 min variants collapse (same-day safety via date)
-        ct_a  = (a.get("close_time") or "")[:13]   # "YYYY-MM-DDTHH"
-        for j, b in enumerate(rows):
-            if j <= i or used[j]:
+    def _collapse(rows: list, ct_slice: int, threshold: float) -> list:
+        kept = []
+        used = [False] * len(rows)
+        for i, a in enumerate(rows):
+            if used[i]:
                 continue
-            ct_b = (b.get("close_time") or "")[:13]
-            if ct_a != ct_b:
-                continue
-            tok_b = _title_tokens(b.get("title", ""))
-            if not tok_a or not tok_b:
-                continue
-            overlap = len(tok_a & tok_b) / max(len(tok_a | tok_b), 1)
-            if overlap > 0.50:
-                group.append(b)
-                used[j] = True
-        used[i] = True
-        best = max(group, key=lambda r: float(r.get("volume") or 0))
-        kept.append(best)
-    return kept
+            group = [a]
+            tok_a = _title_tokens(a.get("title", ""))
+            ct_a  = (a.get("close_time") or "")[:ct_slice]
+            for j, b in enumerate(rows):
+                if j <= i or used[j]:
+                    continue
+                ct_b = (b.get("close_time") or "")[:ct_slice]
+                if ct_a != ct_b:
+                    continue
+                tok_b = _title_tokens(b.get("title", ""))
+                if not tok_a or not tok_b:
+                    continue
+                overlap = len(tok_a & tok_b) / max(len(tok_a | tok_b), 1)
+                if overlap > threshold:
+                    group.append(b)
+                    used[j] = True
+            used[i] = True
+            best = max(group, key=lambda r: float(r.get("volume") or 0))
+            kept.append(best)
+        return kept
+
+    rows = _collapse(rows, 16, 0.65)   # pass 1: minute-level, 65% overlap
+    rows = _collapse(rows, 10, 0.80)   # pass 2: date-level,   80% overlap
+    return rows
 
 
 # ── Sub-market patterns to skip (keep only main outcomes) ─────────────────────
@@ -141,8 +148,6 @@ _SUBMARKET_SKIP = [
     # Polymarket soccer sub-markets (1st half result, draw, team score lines)
     ": draw", ": 1st >", ": both", ": fk m", ": univ",
     "to win on penalties", "extra time",
-    # Long-shot tournament winners
-    "to win the 2026", "win the championship",
 ]
 
 
