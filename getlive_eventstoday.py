@@ -24,6 +24,29 @@ import sys
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+# Load .env so API keys work when running standalone (bot not started)
+def _load_dotenv():
+    for candidate in [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"),
+        os.path.expanduser("~/trading-bot/.env"),
+        "/root/trading-bot/.env",
+    ]:
+        if not os.path.exists(candidate):
+            continue
+        with open(candidate) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+        break
+
+_load_dotenv()
+
 _ET = ZoneInfo("America/New_York")
 
 # ── Column widths — auto-scaled to terminal width at runtime ──────────────────
@@ -596,12 +619,9 @@ async def _run(args):
             if filtered:
                 markets = filtered
                 source  = f"DB cache — {len(markets)} markets (bot stopped)"
-            elif cache:
-                dated   = [r for r in cache if r.get("close_time")]
-                markets = sorted(dated, key=lambda r: r.get("close_time") or "")[:100]
-                source  = f"DB cache STALE — bot stopped, last {len(markets)} known markets"
             else:
-                source = "no data — restart bot to populate DB"
+                markets = []
+                source  = "no today's markets in cache — start the bot so it can fetch today's events"
 
         _print_table(plat, markets, ai_map, args.min_conf, args.all_markets, source)
 
