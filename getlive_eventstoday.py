@@ -62,6 +62,60 @@ def _col_widths(term_w: int = 0) -> tuple:
     reason_w = 20
     return (3, title_w, 21, 5, 5, 8, 7, 9, reason_w)
 
+# ── Rule engine — run live to score each PASS market ─────────────────────────
+
+def _rule_score(market: dict) -> dict:
+    """Run rule engine synchronously on a market. Returns action/confidence/reasoning."""
+    try:
+        from src.ai.rule_engine import score as _rs
+        rd = _rs(market, context="", manifold_text=None, metaculus_text=None)
+        return {"action": rd.action, "confidence": rd.confidence, "reasoning": rd.reasoning}
+    except Exception:
+        return {}
+
+
+# ── Title similarity dedup — same event, keep highest volume ──────────────────
+
+def _title_tokens(title: str) -> set:
+    import re
+    words = re.sub(r"[^a-z0-9 ]", " ", (title or "").lower()).split()
+    stop = {"will", "on", "the", "a", "in", "to", "at", "vs", "win", "for",
+            "of", "and", "or", "is", "be", "by", "2026", "2025", "2027"}
+    return {w for w in words if len(w) > 2 and w not in stop}
+
+
+def _dedup_by_event(rows: list) -> list:
+    """
+    Group rows with same close_time and >55% title-token overlap.
+    Keep the one with highest volume within each group.
+    """
+    kept = []
+    used = [False] * len(rows)
+    for i, a in enumerate(rows):
+        if used[i]:
+            continue
+        group = [a]
+        tok_a = _title_tokens(a.get("title", ""))
+        ct_a  = (a.get("close_time") or "")[:16]   # match to minute
+        for j, b in enumerate(rows):
+            if j <= i or used[j]:
+                continue
+            ct_b = (b.get("close_time") or "")[:16]
+            if ct_a != ct_b:
+                continue
+            tok_b = _title_tokens(b.get("title", ""))
+            if not tok_a or not tok_b:
+                continue
+            overlap = len(tok_a & tok_b) / max(len(tok_a | tok_b), 1)
+            if overlap > 0.55:
+                group.append(b)
+                used[j] = True
+        used[i] = True
+        best = max(group, key=lambda r: float(r.get("volume") or 0))
+        kept.append(best)
+    return kept
+
+
 # ── Sub-market patterns to skip (keep only main outcomes) ─────────────────────
 _SUBMARKET_SKIP = [
     # Financial options
@@ -231,7 +285,7 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         print("  No markets found for today.\n")
         return
 
-    # Dedup rows by ticker before rendering
+    # 1. Dedup by ticker (catches API returning same market twice)
     _seen: set = set()
     _deduped = []
     for r in rows:
@@ -239,7 +293,8 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         if key not in _seen:
             _seen.add(key)
             _deduped.append(r)
-    rows = _deduped
+    # 2. Dedup by event — same close time + similar title → keep highest volume
+    rows = _dedup_by_event(_deduped)
 
     cols = ["#", "TITLE", "CLOSES (ET)", "YES", "NO", "VOL", "CONF", "BID?", "REASON"]
     div  = _div(widths)
@@ -269,7 +324,10 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         hl      = _hours_left(ct)
         title   = (row.get("title") or ticker or "").strip()
 
-        ai       = ai_map.get(ticker) or {}
+        # Use DB evaluation if available, otherwise run rule engine live
+        ai = ai_map.get(ticker) or {}
+        if not ai and gate == "PASS":
+            ai = _rule_score(row)
         bot_act  = (ai.get("action") or "").upper()
         bot_conf = float(ai.get("confidence") or 0)
         bot_rsn  = (ai.get("reasoning") or "").strip()
@@ -296,7 +354,12 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
             close_str = "  " + close_raw
 
         bid_col    = f"[{bid}]"
-        reason_col = gate_reason if gate in ("SKIP", "CLOSED") else bid_reason
+        if gate in ("SKIP", "CLOSED"):
+            reason_col = gate_reason
+        elif bot_rsn:
+            reason_col = bot_rsn
+        else:
+            reason_col = bid_reason
         conf_str   = f"{bot_conf:.0f}%" if bot_conf > 0 else "-"
 
         _nw, _tw, _cw, _yw, _now2, _vw, _cfw, _bw, _rw = widths
