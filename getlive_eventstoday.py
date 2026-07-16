@@ -533,10 +533,7 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
     try:
         import httpx
         _now_et_dt  = _now_et()
-        # Start of today ET → UTC so we get ALL of today's markets, not just future ones
-        _sod_et     = _now_et_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-        _eod_et     = _now_et_dt.replace(hour=23, minute=59, second=59) + timedelta(days=days - 1)
-        _sod_utc    = _sod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _eod_et  = _now_et_dt.replace(hour=23, minute=59, second=59) + timedelta(days=days - 1)
         _eod_utc = _eod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         GAMMA  = "https://gamma-api.polymarket.com"
@@ -546,11 +543,12 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
 
         async with httpx.AsyncClient(timeout=30) as client:
             while True:
+                # Fetch ALL open markets — no end_date filter so we get crypto/politics/finance
+                # not just sports. Filter to today's window client-side.
                 r = await client.get(f"{GAMMA}/markets", params={
-                    "active":       "true",
                     "limit":        500,
                     "offset":       offset,
-                    "end_date_min": _sod_utc,
+                    "closed":       "false",
                     "end_date_max": _eod_utc,
                 })
                 if r.status_code != 200:
