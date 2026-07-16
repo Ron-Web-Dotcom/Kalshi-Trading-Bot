@@ -401,10 +401,6 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
         ]
         print(_drow(vals, widths))
 
-        # Bot reasoning on second line — only for WATCH/BID rows, not BOT SKIP
-        if bot_rsn and bid in ("WATCH", "BID YES"):
-            rsn_w = sum(widths) + len(widths) * 3 - 6
-            print(f"     > {bot_rsn[:rsn_w]}")
 
     print(div)
     summary = f"  Shown: {shown}  | [BID] {bid_count}  | [WATCH] {watch_count}  | [SKIP] {skip_count}"
