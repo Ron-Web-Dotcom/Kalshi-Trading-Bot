@@ -497,7 +497,8 @@ async def _fetch_kalshi_live(days: int = 3) -> tuple:
             dt = _parse_close(ct)
             if dt is None:
                 continue
-            if not (today <= dt.date() <= end_date):
+            # Only markets closing today (all categories — politics, sports, crypto, finance)
+            if dt.date() < today or dt.date() > end_date:
                 continue
             yes_ask = _cents(m.get("yes_ask") or m.get("last_price") or m.get("yes_bid") or 0)
             no_ask  = _cents(m.get("no_ask")  or m.get("no_bid")  or 0) or round(100 - yes_ask, 1)
@@ -533,6 +534,9 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
     try:
         import httpx
         _now_et_dt  = _now_et()
+        _today      = _now_et_dt.date()
+        _end_date   = _today + timedelta(days=days - 1)
+        # Fetch end_date_max = end of window so we don't pull all-time markets
         _eod_et  = _now_et_dt.replace(hour=23, minute=59, second=59) + timedelta(days=days - 1)
         _eod_utc = _eod_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -543,8 +547,8 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
 
         async with httpx.AsyncClient(timeout=30) as client:
             while True:
-                # Fetch ALL open markets — no end_date filter so we get crypto/politics/finance
-                # not just sports. Filter to today's window client-side.
+                # No end_date_min — fetch ALL categories (crypto, politics, finance, sports)
+                # closing within the window. Filter to today client-side.
                 r = await client.get(f"{GAMMA}/markets", params={
                     "limit":        500,
                     "offset":       offset,
@@ -567,6 +571,11 @@ async def _fetch_poly_live(days: int = 3) -> tuple:
                              m.get("close_time") or m.get("closeTime") or "")
                     title = (m.get("question") or m.get("title") or "").strip()
                     if not title:
+                        continue
+
+                    # Only keep markets closing today (client-side date filter)
+                    _dt = _parse_close(ct)
+                    if _dt is None or not (_today <= _dt.date() <= _end_date):
                         continue
 
                     # Deduplicate by title+close_time
