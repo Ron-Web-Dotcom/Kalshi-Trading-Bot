@@ -86,7 +86,19 @@ _SUBMARKET_SKIP = [
     # Baseball / same-game parlay combos (e.g. "yes Caleb Durbin: 1+,yes Jonathan Aranda: 1+")
     "1+,yes", "1+,no", "2+,yes", "2+,no", "3+,yes", "3+,no",
     "+,yes ", "+,no ",
+    # Multi-leg parlay separator (e.g. "yes Tampa Bay,no Over 7.5" or "yes Karmine Corp,yes Gen.G")
+    ",yes ", ",no ",
 ]
+
+
+def _is_parlay_title(title: str) -> bool:
+    """Detect titles that start with 'yes <team>,' or 'no <team>,' — parlay legs, not questions."""
+    t = title.lower().strip()
+    if (t.startswith("yes ") or t.startswith("no ")) and "," in t:
+        # Real questions start with "will", "who", "what", "which", etc.
+        # Parlay legs start with yes/no then a team/player name then comma
+        return True
+    return False
 
 
 # ── Time helpers ──────────────────────────────────────────────────────────────
@@ -143,6 +155,8 @@ def _gate_check(row: dict) -> tuple:
         return "SKIP", "no close_time"
 
     title_l = (row.get("title") or "").lower()
+    if _is_parlay_title(title_l):
+        return "SKIP", "parlay-combo"
     for pat in _SUBMARKET_SKIP:
         if pat in title_l:
             return "SKIP", "sub-market"
@@ -175,6 +189,9 @@ def _bid_label(gate: str, bot_action: str, bot_conf: float, min_conf: float,
         return "BOT SKIP", f"vol={volume:.0f}<20"
     if yes_ask > 0 and yes_ask > 97:
         return "BOT SKIP", f"near-certain {yes_ask:.0f}c"
+    # Long-shot: very cheap price + thin volume (e.g. NFL draft picks at 1-4c / 44-140 vol)
+    if yes_ask > 0 and yes_ask < 5 and volume < 500:
+        return "BOT SKIP", f"long-shot {yes_ask:.0f}c vol={volume:.0f}"
 
     if bot_action == "BUY" and bot_conf >= min_conf:
         return "BID YES", f"conf={bot_conf:.0f}%"
