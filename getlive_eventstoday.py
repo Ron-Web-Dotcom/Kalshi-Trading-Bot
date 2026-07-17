@@ -83,6 +83,9 @@ _SUBMARKET_SKIP = [
     # Polymarket soccer sub-market title patterns
     ": draw", ": 1st >", ": both", ": fk m", ": univ",
     "to win on penalties", "extra time",
+    # Baseball / same-game parlay combos (e.g. "yes Caleb Durbin: 1+,yes Jonathan Aranda: 1+")
+    "1+,yes", "1+,no", "2+,yes", "2+,no", "3+,yes", "3+,no",
+    "+,yes ", "+,no ",
 ]
 
 
@@ -165,7 +168,9 @@ def _bid_label(gate: str, bot_action: str, bot_conf: float, min_conf: float,
     no_ask  = float(row.get("no_ask")  or 0)
     volume  = float(row.get("volume")  or 0)
 
-    # Only hide markets the bot genuinely cannot trade
+    # No price and no volume = nothing to show or trade
+    if yes_ask == 0 and no_ask == 0 and volume == 0:
+        return "BOT SKIP", "no price/volume"
     if volume > 0 and volume < 20:
         return "BOT SKIP", f"vol={volume:.0f}<20"
     if yes_ask > 0 and yes_ask > 97:
