@@ -90,13 +90,14 @@ _SUBMARKET_SKIP = [
 
 
 def _is_parlay_title(title: str) -> bool:
-    """Detect titles that start with 'yes <team>,' or 'no <team>,' — parlay legs, not questions."""
+    """Detect multi-leg parlay combos like 'yes Tampa Bay,no Over 7.5' or 'yes Karmine,yes Gen.G'.
+    Kalshi regular markets start with 'Yes - Will X...' which also starts with 'yes '
+    but does NOT contain ',yes ' or ',no ' as a leg separator.
+    """
     t = title.lower().strip()
-    if (t.startswith("yes ") or t.startswith("no ")) and "," in t:
-        # Real questions start with "will", "who", "what", "which", etc.
-        # Parlay legs start with yes/no then a team/player name then comma
-        return True
-    return False
+    if not (t.startswith("yes ") or t.startswith("no ")):
+        return False
+    return ",yes " in t or ",no " in t
 
 
 # ── Time helpers ──────────────────────────────────────────────────────────────
