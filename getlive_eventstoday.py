@@ -86,8 +86,6 @@ _SUBMARKET_SKIP = [
     # Baseball / same-game parlay combos (e.g. "yes Caleb Durbin: 1+,yes Jonathan Aranda: 1+")
     "1+,yes", "1+,no", "2+,yes", "2+,no", "3+,yes", "3+,no",
     "+,yes ", "+,no ",
-    # Multi-leg parlay separator (e.g. "yes Tampa Bay,no Over 7.5" or "yes Karmine Corp,yes Gen.G")
-    ",yes ", ",no ",
 ]
 
 
@@ -489,7 +487,8 @@ async def _fetch_kalshi_live(days: int = 2) -> tuple:
         all_raw: list = []
         cursor = ""
         for _ in range(20):
-            data   = await client.get_markets(limit=200, cursor=cursor, status="open")
+            data   = await client.get_markets(limit=200, cursor=cursor, status="open",
+                                              sort_by="close_time", order="asc")
             batch  = data.get("markets") or []
             cursor = data.get("cursor") or ""
             all_raw.extend(batch)

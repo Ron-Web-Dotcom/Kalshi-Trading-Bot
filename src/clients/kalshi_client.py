@@ -148,10 +148,15 @@ class KalshiClient:
 
     # ── Market data ───────────────────────────────────────────────────────────
 
-    async def get_markets(self, limit: int = 200, cursor: str = "", status: str = "open") -> Dict:
+    async def get_markets(self, limit: int = 200, cursor: str = "", status: str = "open",
+                          sort_by: str = "", order: str = "") -> Dict:
         params: Dict[str, Any] = {"limit": limit, "status": status}
         if cursor:
             params["cursor"] = cursor
+        if sort_by:
+            params["sort_by"] = sort_by
+        if order:
+            params["order"] = order
         return await self._request("GET", "/markets", params=params)
 
     async def get_live_now_markets(self, max_markets: int = 200) -> List[Dict]:
