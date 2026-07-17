@@ -339,6 +339,24 @@ def _print_table(platform: str, rows: list, ai_map: dict, min_conf: float,
             print(f"  ℹ  Filtered: { {k: v for k, v in top} }"
                   f"  — run --all-markets to inspect")
 
+    if bot_skip_count > 20 and not show_all:
+        # Sample the BOT SKIP reasons so user can see what's being hidden
+        bot_reason_counts: dict = {}
+        bot_samples = []
+        for row in rows:
+            g2, _ = _gate_check(row)
+            if g2 not in ("CLOSED", "SKIP"):
+                b2, r2 = _bid_label(g2, "", 0, min_conf, row)
+                if b2 == "BOT SKIP":
+                    bot_reason_counts[r2] = bot_reason_counts.get(r2, 0) + 1
+                    if len(bot_samples) < 3:
+                        bot_samples.append(f"{(row.get('title') or '')[:45]} [{r2}]")
+        if bot_reason_counts:
+            top = sorted(bot_reason_counts.items(), key=lambda x: -x[1])
+            print(f"  ℹ  BOT SKIP breakdown: { {k: v for k, v in top} }")
+            for s in bot_samples:
+                print(f"       e.g. {s}")
+
     if shown == 0 and not show_all:
         if bot_skip_count > 0:
             print(f"  ℹ  {bot_skip_count} markets exist but bot won't trade them"
@@ -455,18 +473,14 @@ async def _fetch_kalshi_live(days: int = 2) -> tuple:
         kalshi_end = today + timedelta(days=max(days - 1, 6))
 
         all_raw: list = []
-        for status in ("open", "live"):
-            try:
-                cursor = ""
-                for _ in range(20):
-                    data   = await client.get_markets(limit=200, cursor=cursor, status=status)
-                    batch  = data.get("markets") or []
-                    cursor = data.get("cursor") or ""
-                    all_raw.extend(batch)
-                    if not cursor or not batch:
-                        break
-            except Exception:
-                pass   # status=live may be invalid on this API version — skip silently
+        cursor = ""
+        for _ in range(20):
+            data   = await client.get_markets(limit=200, cursor=cursor, status="open")
+            batch  = data.get("markets") or []
+            cursor = data.get("cursor") or ""
+            all_raw.extend(batch)
+            if not cursor or not batch:
+                break
 
         date_result = []
         seen_date: set = set()
