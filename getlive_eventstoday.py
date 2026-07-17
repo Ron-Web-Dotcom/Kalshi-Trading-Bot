@@ -164,6 +164,7 @@ def _bid_label(gate: str, bot_action: str, bot_conf: float, min_conf: float,
 
     title   = (row.get("title") or "").strip()
     yes_ask = float(row.get("yes_ask") or 0)
+    no_ask  = float(row.get("no_ask")  or 0)
     volume  = float(row.get("volume")  or 0)
 
     if is_junk(title):
