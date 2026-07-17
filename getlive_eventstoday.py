@@ -157,8 +157,6 @@ def _gate_check(row: dict) -> tuple:
 
 def _bid_label(gate: str, bot_action: str, bot_conf: float, min_conf: float,
                row: dict) -> tuple:
-    from src.utils.junk_filter import is_junk
-
     if gate in ("CLOSED", "SKIP"):
         return gate, ""
 
@@ -167,15 +165,9 @@ def _bid_label(gate: str, bot_action: str, bot_conf: float, min_conf: float,
     no_ask  = float(row.get("no_ask")  or 0)
     volume  = float(row.get("volume")  or 0)
 
-    if is_junk(title):
-        return "BOT SKIP", "junk/unedgeable"
-    if yes_ask == 0 and no_ask == 0 and volume == 0:
-        return "BOT SKIP", "no price/volume"
-    if volume > 0 and volume < 50:
-        return "BOT SKIP", f"vol={volume:.0f}<50"
-    # Long-shot only when BOTH price is tiny AND volume is thin
-    if yes_ask > 0 and yes_ask < 5 and volume < 500:
-        return "BOT SKIP", f"long-shot <5c low-vol"
+    # Only hide markets the bot genuinely cannot trade
+    if volume > 0 and volume < 20:
+        return "BOT SKIP", f"vol={volume:.0f}<20"
     if yes_ask > 0 and yes_ask > 97:
         return "BOT SKIP", f"near-certain {yes_ask:.0f}c"
 
